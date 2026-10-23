@@ -3,12 +3,12 @@
   "source": {
     "repository": "https://github.com/1lck/Lithe-IDEA",
     "directory": "shared/contracts/plugins/v1",
-    "revision": "ed4a4ffc5ea6ab4ea986b264ec8e51b63dff758b"
+    "revision": "d37e4bf15608d278d2771495575c264ce5e00532"
   },
   "files": [
     {
       "path": "README.md",
-      "sha256": "f7db9570371768caec901126fbf5d0dc204e19e23a0b549322aa79c5a61e3fdf"
+      "sha256": "2e2a80f1d3b2be4ecbd91257affff45c25397d85f7fe77d102669ba8ebd9ab0e"
     },
     {
       "path": "fixtures/build-command-output-file.plugin.json",
@@ -39,6 +39,10 @@
       "sha256": "0380748f151cf2b154133dac5447c8665801f16bf005314ab7ac1d4d11475c92"
     },
     {
+      "path": "fixtures/build-tool-path.plugin.json",
+      "sha256": "685144e417bbf01b013144dec109d51b56922f98811e9ea6eda34da26749165c"
+    },
+    {
       "path": "fixtures/command-plans.json",
       "sha256": "a188fd65f6cdb47f9e9ad4b0de3a7ddcd17e4e577b34f6e25b96d2c1f2bdca7c"
     },
@@ -52,7 +56,7 @@
     },
     {
       "path": "fixtures/invalid-manifests.json",
-      "sha256": "697f6da6342763a5696342d242c826670dfd7a7f81005413b2a2d12bff584ae9"
+      "sha256": "ae5e5021d1f62fbf4f5ca0a8529a27ca045810346e16751644f6651dff00bdd4"
     },
     {
       "path": "fixtures/language-host-integration.plugin.json",
@@ -108,7 +112,7 @@
     },
     {
       "path": "plugin-manifest.schema.json",
-      "sha256": "77385a5bed0e020a844297bb3cc25aa28f8e3271d858011590d50dd30f082640"
+      "sha256": "50af17e6b69e20d4691d6896ec2b9275fb567852760537c5a2914dad558b27b3"
     }
   ]
 }
