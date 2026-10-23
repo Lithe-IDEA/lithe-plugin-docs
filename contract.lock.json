@@ -3,12 +3,12 @@
   "source": {
     "repository": "https://github.com/1lck/Lithe-IDEA",
     "directory": "shared/contracts/plugins/v1",
-    "revision": "d37e4bf15608d278d2771495575c264ce5e00532"
+    "revision": "18345cc96a89e1af3b04b48aacd9af89350202cb"
   },
   "files": [
     {
       "path": "README.md",
-      "sha256": "2e2a80f1d3b2be4ecbd91257affff45c25397d85f7fe77d102669ba8ebd9ab0e"
+      "sha256": "21fc28bb9c7299959adbe0223c348ff0b1f0764f16fa87e21bbebf50256a49e2"
     },
     {
       "path": "fixtures/build-command-output-file.plugin.json",
@@ -103,6 +103,10 @@
       "sha256": "83d4c7faf7bfbb9c474639bfc0ef42dae8cd7d370d388f8527589f2afed12981"
     },
     {
+      "path": "fixtures/vcs-provider.plugin.json",
+      "sha256": "7d0c85b6e0531a28e877050c2da15470d0bfe5ccd4c98215e7824d4445d977a9"
+    },
+    {
       "path": "fixtures/web-panel.plugin.json",
       "sha256": "1ccaf5bb58e0296b8d244e6951d62c1f8e9e35e2e2bd467d4368fc31d7f42fd8"
     },
@@ -112,7 +116,7 @@
     },
     {
       "path": "plugin-manifest.schema.json",
-      "sha256": "50af17e6b69e20d4691d6896ec2b9275fb567852760537c5a2914dad558b27b3"
+      "sha256": "27b01d48b99377eeaf473b1b670c4c19dbf86df81c6623205401226d13d351c8"
     }
   ]
 }
