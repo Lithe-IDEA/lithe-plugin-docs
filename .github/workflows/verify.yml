@@ -3,7 +3,8 @@ name: Verify
 # contract/v1 is a byte-identical mirror of the Lithe plugin contract, pinned
 # by contract.lock.json, and the SDKs are tested against Rust Core at that same
 # commit. The weekly run also reports how the contract has moved on and runs
-# the SDK scenario against Lithe's latest default branch.
+# the SDK scenario against Lithe's preview branch, where changes merge; Lithe's
+# default branch, main, only moves at a release.
 on:
   pull_request:
   push:
@@ -42,7 +43,7 @@ jobs:
         if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
         env:
           GITHUB_TOKEN: ${{ github.token }}
-        run: node scripts/contract.mjs drift --ref HEAD
+        run: node scripts/contract.mjs drift --ref preview
 
   sdk-node:
     name: Node.js SDK
@@ -120,8 +121,8 @@ jobs:
           LITHE_PLUGIN_SDK_JAVA_RUNTIME: ${{ steps.java8.outputs.path }}/bin/java
         run: node scripts/sdk-e2e.mjs
 
-      - name: Run against Lithe's latest default branch
+      - name: Run against Lithe's preview branch
         if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
         env:
           LITHE_PLUGIN_SDK_JAVA_RUNTIME: ${{ steps.java8.outputs.path }}/bin/java
-        run: node scripts/sdk-e2e.mjs --ref HEAD
+        run: node scripts/sdk-e2e.mjs --ref preview

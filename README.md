@@ -158,7 +158,7 @@ node scripts/contract.mjs sync --revision <主仓库的完整 commit>
 | --- | --- |
 | `node scripts/contract.mjs verify` | 离线检查：锁文件格式、SHA-256、每份 Schema 的 `$id` 是否等于它在本仓库的地址、契约 Markdown 的相对链接是否都留在副本内、`contract/` 下有没有未锁定的文件 |
 | `node scripts/contract.mjs verify --upstream` | 联网检查：副本与主仓库锁定 commit 的契约目录完全一致，多出、缺少或内容不同的文件都会列出来 |
-| `node scripts/contract.mjs drift` | 联网检查：主仓库默认分支上的契约是否已经变化 |
+| `node scripts/contract.mjs drift` | 联网检查：主仓库 `preview` 分支（改动合入的分支；默认分支 `main` 只在发版时更新）上的契约是否已经变化 |
 | `node --test scripts/*.test.mjs` | 同步脚本自身的测试 |
 
 联网命令会调用 GitHub API；设置 `GITHUB_TOKEN` 可以避开匿名请求的频率限制。CI 在每次提交时运行前两项检查和测试，每周一运行一次 `drift`。主仓库的契约有变化时，每周检查会失败并提示重新同步。
@@ -170,9 +170,9 @@ node scripts/contract.mjs sync --revision <主仓库的完整 commit>
 | `node --test sdk/node/test/*.test.mjs` | Node.js SDK 的单元测试 |
 | `mvn -B -ntp -f sdk/java/pom.xml verify -Djvm=<java>` | Java SDK 的单元测试；`-Djvm` 指定运行测试的 Java（CI 用 Java 8） |
 | `node scripts/sdk-e2e.mjs` | 端到端测试：两个示例后端接入真实的 Lithe Rust Core，跑 `sdk/e2e` 里的同一套场景 |
-| `node scripts/sdk-e2e.mjs --ref HEAD` | 同上，但用主仓库默认分支的最新 Core |
+| `node scripts/sdk-e2e.mjs --ref preview` | 同上，但用主仓库 `preview` 分支的最新 Core |
 
-端到端测试需要 Rust、Node.js 20.3+、Java 和 Maven。Rust Core 在主仓库，脚本会把锁文件锁定的那个主仓库 commit 稀疏检出到 `.artifacts/lithe`（只取 `rust/` 和 `shared/`），把 `sdk/e2e` 复制进它的 `rust/lithe-core/tests/` 再运行，所以 SDK 测的是和契约副本同一个版本的 Core。`LITHE_PLUGIN_SDK_JAVA_RUNTIME` 指定运行 Java 示例的 Java；已有主仓库本地克隆时可以加 `--source <克隆目录>`。CI 每次提交跑锁定版本，每周一再跑一次主仓库最新版本，Core 改动影响 SDK 时会提前发现。
+端到端测试需要 Rust、Node.js 20.3+、Java 和 Maven。Rust Core 在主仓库，脚本会把锁文件锁定的那个主仓库 commit 稀疏检出到 `.artifacts/lithe`（只取 `rust/` 和 `shared/`），把 `sdk/e2e` 复制进它的 `rust/lithe-core/tests/` 再运行，所以 SDK 测的是和契约副本同一个版本的 Core。`LITHE_PLUGIN_SDK_JAVA_RUNTIME` 指定运行 Java 示例的 Java；已有主仓库本地克隆时可以加 `--source <克隆目录>`。CI 每次提交跑锁定版本，每周一再跑一次主仓库 `preview` 的最新版本，Core 改动影响 SDK 时会提前发现。
 
 发版：先改版本号（Node.js 改 `sdk/node/package.json`；Java 运行 `mvn -f sdk/java/pom.xml versions:set -DnewVersion=<版本> -DgenerateBackupPoms=false`，三个 pom 一起改），合并后推送对应标签 `sdk-node-v<版本>` 或 `sdk-java-v<版本>`。发版工作流会检查标签和版本一致，测试通过后把包和 `.sha256` 发到本仓库的 Releases。
 

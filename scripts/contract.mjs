@@ -4,7 +4,7 @@
 //
 //   node scripts/contract.mjs verify               offline: lock, hashes, $id, links, unpinned files
 //   node scripts/contract.mjs verify --upstream    also compare with the directory at the pinned commit
-//   node scripts/contract.mjs drift [--ref HEAD]   report what upstream has changed since the pin
+//   node scripts/contract.mjs drift [--ref <ref>]  report what upstream has changed since the pin (default: preview)
 //   node scripts/contract.mjs sync --revision <sha> [--checkout <Lithe clone>]
 //
 // GitHub API calls use GITHUB_TOKEN when it is set.
@@ -22,6 +22,11 @@ export const publishedBase = 'https://raw.githubusercontent.com/Lithe-IDEA/lithe
 export const mirror = 'contract/v1';
 const mirrorParent = posix.dirname(mirror);
 const lockName = 'contract.lock.json';
+/**
+ * The upstream branch contract changes merge into. Lithe's default branch is
+ * the stable `main`, which only catches up at a release.
+ */
+export const developmentBranch = 'preview';
 const fetchTimeoutMs = 30_000;
 
 const sha256 = bytes => createHash('sha256').update(bytes).digest('hex');
@@ -257,7 +262,7 @@ async function main(args) {
     console.log(`Verified ${lock.files.length} files pinned to ${lock.source.repository}@${lock.source.revision}`);
   } else if (command === 'drift') {
     const lock = await verify();
-    const ref = option(args, '--ref') ?? 'HEAD';
+    const ref = option(args, '--ref') ?? developmentBranch;
     const difference = describeDifference(await compareUpstream(repository, lock, githubSource(lock.source), ref));
     if (difference) {
       throw new Error(`Upstream ${ref} changed the contract (${difference}). Run: node scripts/contract.mjs sync --revision <commit>`);

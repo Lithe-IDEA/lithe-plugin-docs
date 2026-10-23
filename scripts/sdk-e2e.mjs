@@ -1,12 +1,13 @@
 // Runs the SDK end-to-end scenario in sdk/e2e against Lithe's Rust Core.
 //
-//   node scripts/sdk-e2e.mjs [--ref <commit|branch|HEAD>] [--source <Lithe git URL or path>]
+//   node scripts/sdk-e2e.mjs [--ref <commit|branch>] [--source <Lithe git URL or path>]
 //
 // Core lives in the Lithe repository, so the scenario is copied into
 // rust/lithe-core/tests/ of a disposable Lithe checkout in .artifacts/lithe
 // (only rust/ and shared/ are checked out) and run there with cargo. By default
 // that checkout is the commit contract.lock.json pins, the same Core the
-// contract mirror came from; `--ref HEAD` tests Lithe's latest default branch.
+// contract mirror came from; `--ref preview` tests the branch Lithe's changes
+// merge into (its default branch, main, only moves at a release).
 //
 // The Node.js sample runs on the node running this script. The Java sample
 // runs on LITHE_PLUGIN_SDK_JAVA_RUNTIME, or `java` on PATH, and is built with
