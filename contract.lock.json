@@ -1,0 +1,114 @@
+{
+  "schemaVersion": 1,
+  "source": {
+    "repository": "https://github.com/1lck/Lithe-IDEA",
+    "directory": "shared/contracts/plugins/v1",
+    "revision": "ed4a4ffc5ea6ab4ea986b264ec8e51b63dff758b"
+  },
+  "files": [
+    {
+      "path": "README.md",
+      "sha256": "f7db9570371768caec901126fbf5d0dc204e19e23a0b549322aa79c5a61e3fdf"
+    },
+    {
+      "path": "fixtures/build-command-output-file.plugin.json",
+      "sha256": "14cbcc03070fc9632a756d5afd025680e7ea77f7763c36d83a2bd86cae2b12d7"
+    },
+    {
+      "path": "fixtures/build-command-stdout.plugin.json",
+      "sha256": "cb24aedb59cdcec6b358dbeb95213143a4fc229aea8973ddd3f154f09335b9dc"
+    },
+    {
+      "path": "fixtures/build-host-integration.plugin.json",
+      "sha256": "36361a98a86de1c6c9c4f0694accab3adadefd53f344b4ac3a85b8906d749b13"
+    },
+    {
+      "path": "fixtures/build-plans.json",
+      "sha256": "b1ebdab5d1e7d0b6f5fc948335581c41814dac83937b8452722ad5da6836d6ab"
+    },
+    {
+      "path": "fixtures/build-provider-language-server.plugin.json",
+      "sha256": "fc6fae12c07715ad5017484cf9a17905d51ffa7ee40ccf4200613b720644f2ce"
+    },
+    {
+      "path": "fixtures/build-provider.plugin.json",
+      "sha256": "bbb19c3d201be64af5262be549fe92822c14e77efae616e64c4f32ddd56b2758"
+    },
+    {
+      "path": "fixtures/build-static-file.plugin.json",
+      "sha256": "0380748f151cf2b154133dac5447c8665801f16bf005314ab7ac1d4d11475c92"
+    },
+    {
+      "path": "fixtures/command-plans.json",
+      "sha256": "a188fd65f6cdb47f9e9ad4b0de3a7ddcd17e4e577b34f6e25b96d2c1f2bdca7c"
+    },
+    {
+      "path": "fixtures/function-protocol.json",
+      "sha256": "278a56b3705be4187ec8ed8fc1ed4b788f019f375c71e87f7f50701fb3cdbea0"
+    },
+    {
+      "path": "fixtures/hello-lithe.plugin.json",
+      "sha256": "e56a4c2df075c14f059eefd73e916215f6e1594f047617c76b518fa21cc2a065"
+    },
+    {
+      "path": "fixtures/invalid-manifests.json",
+      "sha256": "697f6da6342763a5696342d242c826670dfd7a7f81005413b2a2d12bff584ae9"
+    },
+    {
+      "path": "fixtures/language-host-integration.plugin.json",
+      "sha256": "507e8134a08ab665c0e9393b90e3b56e54c0d2b81af2e95de947a82e399f4c14"
+    },
+    {
+      "path": "fixtures/language-packaged-server.plugin.json",
+      "sha256": "fd0e27a4cb3642c2094c70e4124f95c55711e0228fd77bfddc869d02fac3d7d6"
+    },
+    {
+      "path": "fixtures/language-system-command.plugin.json",
+      "sha256": "4dbdd38bbe23003da61210296f986d94313b23a98be4d97b1a628570c4375501"
+    },
+    {
+      "path": "fixtures/marketplace/index-cases.json",
+      "sha256": "6caa528c78a89ee61b0f61607dd002798c5da5c780dc8f934e99fe5fc7a3b98a"
+    },
+    {
+      "path": "fixtures/marketplace/index.json",
+      "sha256": "128adfb5b17a1d4aa292dfc9dc53e74f2639547c7e5b6f22e50d9611ee350f05"
+    },
+    {
+      "path": "fixtures/marketplace/install-reviews.json",
+      "sha256": "d3a9078a656082dee580470d208e7c4bd7852598d88a7798f84c243919313ec0"
+    },
+    {
+      "path": "fixtures/marketplace/invalid-index-entries.json",
+      "sha256": "a9aef8b2048e509c84ea41d564d5faa16075b475c3e774ff2d2ba35eff12d225"
+    },
+    {
+      "path": "fixtures/marketplace/source-urls.json",
+      "sha256": "88a1b00fc443a65ca5faa8ac519e93de4e6abca8297abb9045613317747f41b5"
+    },
+    {
+      "path": "fixtures/node-runtime.plugin.json",
+      "sha256": "3cbc80303dca796302653982d3f55fdc2072aea69a2517286a06e73fbc3c4499"
+    },
+    {
+      "path": "fixtures/runtime-versions.json",
+      "sha256": "a19c1c057ab54a2b24a4a0e5a0d7764f0b9063bb6dd356baf19f5f6e37a76e19"
+    },
+    {
+      "path": "fixtures/settings-v2.plugin.json",
+      "sha256": "83d4c7faf7bfbb9c474639bfc0ef42dae8cd7d370d388f8527589f2afed12981"
+    },
+    {
+      "path": "fixtures/web-panel.plugin.json",
+      "sha256": "1ccaf5bb58e0296b8d244e6951d62c1f8e9e35e2e2bd467d4368fc31d7f42fd8"
+    },
+    {
+      "path": "plugin-index.schema.json",
+      "sha256": "6771cb0e8c1ba101e6fc90b436de1b74f057ff0d58cc90f92e669edc9a102fc6"
+    },
+    {
+      "path": "plugin-manifest.schema.json",
+      "sha256": "77385a5bed0e020a844297bb3cc25aa28f8e3271d858011590d50dd30f082640"
+    }
+  ]
+}
