@@ -1,6 +1,6 @@
 //! End-to-end scenario shared by the official plugin SDKs (`sdk/node`,
 //! `sdk/java`), run against Rust Core through the same JSON commands a host
-//! sends.
+//! sends. The plugin backend scenario of `sdk/rust` is in `backend.rs`.
 //!
 //! Each SDK's sample backend is launched exactly as a host launches a build
 //! provider: Core validates its manifest and expands the launch plan, the
@@ -18,6 +18,7 @@
 // Each test binary includes this module and uses only the helpers its SDK needs.
 #![allow(dead_code)]
 
+pub mod backend;
 pub mod vcs;
 
 use lithe_core::execute_json;
@@ -44,7 +45,9 @@ fn core(command: &str, payload: Value) -> Value {
 fn repository_root() -> PathBuf {
     let root = std::env::var_os("LITHE_PLUGIN_SDK_ROOT")
         .expect("set LITHE_PLUGIN_SDK_ROOT to the lithe-plugin-docs checkout");
-    PathBuf::from(root).canonicalize().expect("lithe-plugin-docs checkout")
+    PathBuf::from(root)
+        .canonicalize()
+        .expect("lithe-plugin-docs checkout")
 }
 
 /// Every file of a directory with its contents, to prove the package is unchanged.

@@ -12,6 +12,8 @@
 // The Node.js sample runs on the node running this script. The Java sample
 // runs on LITHE_PLUGIN_SDK_JAVA_RUNTIME, or `java` on PATH, and is built with
 // Maven unless LITHE_PLUGIN_SDK_JAVA_SAMPLE names a built sample-build.jar.
+// The Rust sample backend is built with Cargo unless
+// LITHE_PLUGIN_SDK_RUST_SAMPLE names a built sample-backend executable.
 import { spawn } from 'node:child_process';
 import { access, copyFile, mkdir, readdir } from 'node:fs/promises';
 import { join, resolve } from 'node:path';
@@ -20,7 +22,7 @@ import { readLock, repository } from './contract.mjs';
 
 const work = join(repository, '.artifacts', 'lithe');
 const scenario = join(repository, 'sdk', 'e2e');
-const tests = ['plugin_sdk_node', 'plugin_sdk_java'];
+const tests = ['plugin_sdk_node', 'plugin_sdk_java', 'plugin_sdk_rust'];
 
 function run(command, args, options = {}) {
   return new Promise((resolvePromise, reject) => {
@@ -87,6 +89,16 @@ async function javaSample() {
   return jar;
 }
 
+async function rustSample() {
+  if (process.env.LITHE_PLUGIN_SDK_RUST_SAMPLE) return resolve(process.env.LITHE_PLUGIN_SDK_RUST_SAMPLE);
+  const manifest = join(repository, 'sdk/rust/Cargo.toml');
+  await run('cargo', ['build', '--locked', '--quiet', '--manifest-path', manifest, '-p', 'sample-backend']);
+  const executable = join(repository, 'sdk/rust/target/debug',
+    process.platform === 'win32' ? 'sample-backend.exe' : 'sample-backend');
+  await access(executable);
+  return executable;
+}
+
 async function main() {
   const { values } = parseArgs({ options: { ref: { type: 'string' }, source: { type: 'string' } } });
   const lock = await readLock();
@@ -95,6 +107,7 @@ async function main() {
 
   const java = process.env.LITHE_PLUGIN_SDK_JAVA_RUNTIME || await which('java');
   const jar = await javaSample();
+  const rust = await rustSample();
   const revision = await checkoutCore(source, ref);
   console.log(`Running the SDK end-to-end scenario against Lithe ${revision}`);
   await copyScenario(join(work, 'rust/lithe-core/tests'));
@@ -107,6 +120,7 @@ async function main() {
       LITHE_PLUGIN_SDK_NODE: process.execPath,
       LITHE_PLUGIN_SDK_JAVA: java,
       LITHE_PLUGIN_SDK_JAVA_SAMPLE: jar,
+      LITHE_PLUGIN_SDK_RUST_SAMPLE: rust,
     },
   });
 }
