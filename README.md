@@ -94,16 +94,17 @@ Schema 只检查 JSON 结构。ID 引用、权限、激活事件、模板变量�
 
 ## 插件后端 SDK（可选）
 
-只用语言服务器、运行和测试的插件不需要后端。需要构建后端（`buildProviders`）或插件函数时，用官方 SDK 写：协议、取消、进程清理和错误处理由 SDK 负责，你只写处理函数。
+只用语言服务器、运行和测试的插件不需要后端。需要构建后端（`buildProviders`）、插件函数，或给插件自己的网页配一个后端进程（`backend`）时，用官方 SDK 写：协议、取消、进程清理和错误处理由 SDK 负责，你只写处理函数。
 
 | SDK | 运行时 | Release 标签 | 下载内容 | 怎么放进插件 |
 | --- | --- | --- | --- | --- |
 | [Node.js](sdk/node/README.md) | Node.js 20.3+ | `sdk-node-v<版本>` | `lithe-plugin-sdk-node-<版本>.tgz` 和 `.sha256` | 解压后把 `package/` 复制进插件包，用相对路径导入 |
 | [Java](sdk/java/README.md) | Java 8+ | `sdk-java-v<版本>` | `lithe-plugin-sdk-java-<版本>.jar` 和 `.sha256` | shade 进后端 JAR |
+| [Rust](sdk/rust/README.md) | Rust 1.87+ | `sdk-rust-v<版本>` | `lithe-plugin-sdk-rust-<版本>.crate` 和 `.sha256` | 用 Git 依赖锁定标签（`Cargo.lock` 记录 commit），或解压后作为 `path` 依赖；编译成每个平台各一份的插件后端可执行文件 |
 
-两个 SDK 的源码在本仓库的 `sdk/` 下，发布在[本仓库的 Releases](https://github.com/Lithe-IDEA/lithe-plugin-docs/releases) 里，不在 npm 或 Maven 仓库上。Java SDK 0.1.0 是搬到这里之前从 Lithe 主仓库发布的，[那个 Release](https://github.com/1lck/Lithe-IDEA/releases/tag/sdk-java-v0.1.0) 继续可用，已经锁定它的插件不用改。
+SDK 的源码都在本仓库的 `sdk/` 下，发布在[本仓库的 Releases](https://github.com/Lithe-IDEA/lithe-plugin-docs/releases) 里，不在 npm、Maven 或 crates.io 上。Rust SDK 目前只实现插件后端（`backend`）：插件函数和宿主凭据服务；构建后端和 VCS 后端请用 Node.js 或 Java SDK。Java SDK 0.1.0 是搬到这里之前从 Lithe 主仓库发布的，[那个 Release](https://github.com/1lck/Lithe-IDEA/releases/tag/sdk-java-v0.1.0) 继续可用，已经锁定它的插件不用改。
 
-规则只有一条：**在构建时下载，并按你锁定的 SHA-256 校验；运行时不下载任何东西。** 插件包安装后没有 `npm install` 步骤，也必须能离线运行。
+规则只有一条：**在构建时下载，并按你锁定的 SHA-256（或 Git commit）校验；运行时不下载任何东西。** 插件包安装后没有 `npm install` 步骤，也必须能离线运行。
 
 [Maven 插件](https://github.com/Lithe-IDEA/lithe-plugin-maven) 的 `sdk.lock.json` 是锁定 Java SDK 的现成例子。
 
@@ -169,12 +170,13 @@ node scripts/contract.mjs sync --revision <主仓库的完整 commit>
 | --- | --- |
 | `node --test sdk/node/test/*.test.mjs` | Node.js SDK 的单元测试 |
 | `mvn -B -ntp -f sdk/java/pom.xml verify -Djvm=<java>` | Java SDK 的单元测试；`-Djvm` 指定运行测试的 Java（CI 用 Java 8） |
-| `node scripts/sdk-e2e.mjs` | 端到端测试：两个示例后端接入真实的 Lithe Rust Core，跑 `sdk/e2e` 里的同一套场景 |
+| `cargo test --locked --manifest-path sdk/rust/Cargo.toml` | Rust SDK 的单元测试（CI 用 Rust 1.87，另用 stable 跑 `cargo fmt` 和 `cargo clippy`） |
+| `node scripts/sdk-e2e.mjs` | 端到端测试：各 SDK 的示例后端接入真实的 Lithe Rust Core。Node.js 和 Java 跑 `sdk/e2e` 里同一套构建后端场景，Rust 跑插件后端场景（`plugin_sdk/backend.rs`），测试代替宿主应答凭据请求 |
 | `node scripts/sdk-e2e.mjs --ref preview` | 同上，但用主仓库 `preview` 分支的最新 Core |
 
-端到端测试需要 Rust、Node.js 20.3+、Java 和 Maven。Rust Core 在主仓库，脚本会把锁文件锁定的那个主仓库 commit 稀疏检出到 `.artifacts/lithe`（只取 `rust/` 和 `shared/`），把 `sdk/e2e` 复制进它的 `rust/lithe-core/tests/` 再运行，所以 SDK 测的是和契约副本同一个版本的 Core。`LITHE_PLUGIN_SDK_JAVA_RUNTIME` 指定运行 Java 示例的 Java；已有主仓库本地克隆时可以加 `--source <克隆目录>`。CI 每次提交跑锁定版本，每周一再跑一次主仓库 `preview` 的最新版本，Core 改动影响 SDK 时会提前发现。
+端到端测试需要 Rust、Node.js 20.3+、Java 和 Maven。Rust Core 在主仓库，脚本会把锁文件锁定的那个主仓库 commit 稀疏检出到 `.artifacts/lithe`（只取 `rust/` 和 `shared/`），把 `sdk/e2e` 复制进它的 `rust/lithe-core/tests/` 再运行，所以 SDK 测的是和契约副本同一个版本的 Core。`LITHE_PLUGIN_SDK_JAVA_RUNTIME` 指定运行 Java 示例的 Java，`LITHE_PLUGIN_SDK_RUST_SAMPLE` 可以指定已编译好的 Rust 示例后端（否则脚本用 Cargo 编译）；已有主仓库本地克隆时可以加 `--source <克隆目录>`。CI 每次提交跑锁定版本，每周一再跑一次主仓库 `preview` 的最新版本，Core 改动影响 SDK 时会提前发现。
 
-发版：先改版本号（Node.js 改 `sdk/node/package.json`；Java 运行 `mvn -f sdk/java/pom.xml versions:set -DnewVersion=<版本> -DgenerateBackupPoms=false`，三个 pom 一起改），合并后推送对应标签 `sdk-node-v<版本>` 或 `sdk-java-v<版本>`。发版工作流会检查标签和版本一致，测试通过后把包和 `.sha256` 发到本仓库的 Releases。
+发版：先改版本号（Node.js 改 `sdk/node/package.json`；Java 运行 `mvn -f sdk/java/pom.xml versions:set -DnewVersion=<版本> -DgenerateBackupPoms=false`，三个 pom 一起改；Rust 改 `sdk/rust/Cargo.toml` 的 `workspace.package.version` 并更新 `Cargo.lock`），合并后推送对应标签 `sdk-node-v<版本>`、`sdk-java-v<版本>` 或 `sdk-rust-v<版本>`。发版工作流会检查标签和版本一致，测试通过后把包和 `.sha256` 发到本仓库的 Releases。
 
 ## 许可证
 
