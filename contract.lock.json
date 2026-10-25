@@ -3,12 +3,16 @@
   "source": {
     "repository": "https://github.com/1lck/Lithe-IDEA",
     "directory": "shared/contracts/plugins/v1",
-    "revision": "18345cc96a89e1af3b04b48aacd9af89350202cb"
+    "revision": "d046fd1768d00a52b1fc99d45067d06cf535bc23"
   },
   "files": [
     {
       "path": "README.md",
-      "sha256": "21fc28bb9c7299959adbe0223c348ff0b1f0764f16fa87e21bbebf50256a49e2"
+      "sha256": "87b6738fdd0d764b93f33556992d0586dfb97e68abb58e0bc3a5ac690ec97aab"
+    },
+    {
+      "path": "fixtures/backend.plugin.json",
+      "sha256": "c83d455cd1981407e903f28b6bfdb38309715856499feba5d76af85a097e1977"
     },
     {
       "path": "fixtures/build-command-output-file.plugin.json",
@@ -48,7 +52,7 @@
     },
     {
       "path": "fixtures/function-protocol.json",
-      "sha256": "278a56b3705be4187ec8ed8fc1ed4b788f019f375c71e87f7f50701fb3cdbea0"
+      "sha256": "980e8d39db2af9d7f922cdc01b0ec06e2cb8c33da2142ec8040befa975b7eae5"
     },
     {
       "path": "fixtures/hello-lithe.plugin.json",
@@ -56,7 +60,7 @@
     },
     {
       "path": "fixtures/invalid-manifests.json",
-      "sha256": "ae5e5021d1f62fbf4f5ca0a8529a27ca045810346e16751644f6651dff00bdd4"
+      "sha256": "107afd7d3f440a87aab3611a80aa5e92c067cd719019dafd94bda8cdbd6b842f"
     },
     {
       "path": "fixtures/language-host-integration.plugin.json",
@@ -91,8 +95,44 @@
       "sha256": "88a1b00fc443a65ca5faa8ac519e93de4e6abca8297abb9045613317747f41b5"
     },
     {
+      "path": "fixtures/native-controls.plugin.json",
+      "sha256": "fc160a33d801d44222d20d6c79b1726e8e9dceb929fa99695a7990b3f4cb57cb"
+    },
+    {
+      "path": "fixtures/native-form.plugin.json",
+      "sha256": "082dd621eadad410a0aadc08e35e213e6818853ae4c18a2d38ce7c6f5bd8946d"
+    },
+    {
+      "path": "fixtures/native-panel.plugin.json",
+      "sha256": "b35c69c85f4e53f4ccd31e320e2f91387dde1935e10bde5b13019fd6e925fe1d"
+    },
+    {
       "path": "fixtures/node-runtime.plugin.json",
       "sha256": "3cbc80303dca796302653982d3f55fdc2072aea69a2517286a06e73fbc3c4499"
+    },
+    {
+      "path": "fixtures/project-generator-templates/.gitattributes",
+      "sha256": "5ab88980b2cd4db0455bb2d5c3703db6668d28f254c41a92a6feff64604af9f7"
+    },
+    {
+      "path": "fixtures/project-generator-templates/app/README.md",
+      "sha256": "c02eaa65ce4ba3a06c92c8fc5825508347437a5f3a2b1870e11f6510947e4fb7"
+    },
+    {
+      "path": "fixtures/project-generator-templates/app/dot-gitignore",
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "path": "fixtures/project-generator-templates/main/Main.java",
+      "sha256": "5435c9be433e0a1cadbeccc701451b21d53d8519e1516c58960af944fe0bf616"
+    },
+    {
+      "path": "fixtures/project-generator.plugin.json",
+      "sha256": "1e5598cfe85e62711c8f5e4090dc229df732380b75d519a0e95f7a8345740c5b"
+    },
+    {
+      "path": "fixtures/project-plans.json",
+      "sha256": "14c6fa8b073732f93b85b30e4fa9e8384ce094f2fb6fe833e41476f12c8d2132"
     },
     {
       "path": "fixtures/runtime-versions.json",
@@ -111,12 +151,16 @@
       "sha256": "1ccaf5bb58e0296b8d244e6951d62c1f8e9e35e2e2bd467d4368fc31d7f42fd8"
     },
     {
+      "path": "native-ui.schema.json",
+      "sha256": "62c6e49ec274c52efb70cc3562f261e11d4dfb8cc59c8e13f7774321266f2837"
+    },
+    {
       "path": "plugin-index.schema.json",
       "sha256": "6771cb0e8c1ba101e6fc90b436de1b74f057ff0d58cc90f92e669edc9a102fc6"
     },
     {
       "path": "plugin-manifest.schema.json",
-      "sha256": "27b01d48b99377eeaf473b1b670c4c19dbf86df81c6623205401226d13d351c8"
+      "sha256": "a70921c16f1d45e342777fc6f8fe9fc91efa82427d377461d356b8f00054008f"
     }
   ]
 }

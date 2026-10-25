@@ -85,6 +85,25 @@ jobs:
           JAVA8: ${{ steps.java8.outputs.path }}/bin/java
         run: mvn -B -ntp -f sdk/java/pom.xml verify -Djvm="$JAVA8"
 
+  sdk-rust:
+    name: Rust SDK
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v7
+      # The SDK supports Rust 1.87 and newer: the tests run on that release,
+      # and formatting and lints on the current stable toolchain.
+      - uses: dtolnay/rust-toolchain@1.87
+      - name: Test on the oldest supported Rust
+        run: cargo +1.87 test --locked --manifest-path sdk/rust/Cargo.toml
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy, rustfmt
+      - name: Check formatting and lints
+        run: |
+          cargo fmt --manifest-path sdk/rust/Cargo.toml --all -- --check
+          cargo clippy --locked --manifest-path sdk/rust/Cargo.toml --all-targets -- -D warnings
+
   sdk-e2e:
     name: SDK end-to-end with Rust Core
     runs-on: ubuntu-latest
@@ -113,7 +132,8 @@ jobs:
             ~/.cargo/registry
             ~/.cargo/git
             .artifacts/lithe/rust/target
-          key: sdk-e2e-${{ runner.os }}-${{ hashFiles('contract.lock.json') }}
+            sdk/rust/target
+          key: sdk-e2e-${{ runner.os }}-${{ hashFiles('contract.lock.json', 'sdk/rust/Cargo.lock') }}
           restore-keys: sdk-e2e-${{ runner.os }}-
 
       - name: Run against the pinned Lithe commit
