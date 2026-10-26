@@ -54,11 +54,14 @@ Lithe 读取并校验 `plugin.json`，然后自己启动其中声明的外部进
 | --- | --- | --- |
 | `1` | 语言、语言服务器（随包附带或使用用户安装的命令）、运行和测试 | Lua、Go、PHP |
 | `2` | 增加：用 Node.js / Java 运行时启动、启动模板、插件设置、工具窗口和命令 | — |
-| `3` | 增加：按能力声明版本（`requires`）、声明式构建系统、构建后端 | Gradle、Maven、Cargo |
+| `3` | 增加：按能力声明版本（`requires`）、声明式构建系统、构建后端、VCS 提供者 | Gradle、Maven、Cargo |
+| `4` | 增加：调试适配器（`debugAdapters`，DAP 进程）、用选定的运行时启动适配器 | LLDB（预发布） |
 
 三个版本号不要混淆：`schemaVersion` 永远是 `2`，表示清单格式；`pluginAPIVersion` 是上表的等级；`version` 是你自己插件的版本。
 
-API 3 必须在 `requires` 里逐项列出实际用到的能力。例如只用声明式构建系统时写 `"requires": { "buildSystems": 1 }`，不要多写。
+API 3 及以上必须在 `requires` 里逐项列出实际用到的能力。例如只用声明式构建系统时写 `"requires": { "buildSystems": 1 }`，不要多写。
+
+API 4 需要 Lithe 明确支持 API 4：旧版 Lithe 在插件市场里会提示升级，而不是安装。目前只有 macOS 宿主实现了调试适配器。
 
 ## 在编辑器里校验 plugin.json
 
@@ -118,6 +121,7 @@ SDK 的源码都在本仓库的 `sdk/` 下，发布在[本仓库的 Releases](ht
 | [Gradle](https://github.com/Lithe-IDEA/lithe-plugin-gradle) | 3 | 纯声明式构建系统，不需要后端 |
 | [Maven](https://github.com/Lithe-IDEA/lithe-plugin-maven) | 3 | 用 Java SDK 写的构建后端 |
 | [Cargo](https://github.com/Lithe-IDEA/lithe-plugin-cargo) | 3 | 用 Node.js SDK 写的构建后端和插件设置 |
+| [LLDB](https://github.com/Lithe-IDEA/lithe-plugin-lldb) | 4 | 调试适配器的参考实现；用 Xcode 自带的 `lldb-dap` 调试 C、C++、Swift 和 Rust，含 `executable` 查找和调试控制台补全 |
 
 ## 教程
 
@@ -125,6 +129,7 @@ SDK 的源码都在本仓库的 `sdk/` 下，发布在[本仓库的 Releases](ht
 | --- | --- |
 | [LSP 插件完整生命周期](guides/lsp-plugin-lifecycle.md) | 从 Lua 模板开始：清单、服务器打包、激活、状态目录、停止、升级与卸载 |
 | [构建、运行与测试接入](guides/build-tool-integration.md) | 可用的执行提供者示例、工程后端边界，以及开发中的 API 3 状态 |
+| [编写调试适配器插件](guides/debug-adapter-plugin.md) | API 4：从最小清单到启动方式、先编译再调试的 `executable`、调试控制台补全，以及预发布与转正 |
 
 收录和上架的规则由 Lithe Store 维护：[发布社区插件](https://github.com/Lithe-IDEA/Lithe-store/blob/main/docs/publishing.md)讲怎么打包、提交收录和发布新版本，[版本追踪与更新](https://github.com/Lithe-IDEA/Lithe-store/blob/main/docs/versioning-and-updates.md)讲 Lithe 怎么选择可安装的版本。
 
