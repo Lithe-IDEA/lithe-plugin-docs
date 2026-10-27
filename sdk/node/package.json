@@ -19,6 +19,11 @@
     "README.md"
   ],
   "scripts": {
-    "test": "node --test test/*.test.mjs"
+    "test": "node --test test/*.test.mjs",
+    "test:types": "tsc --project test/types/tsconfig.json"
+  },
+  "devDependencies": {
+    "@types/node": "20.19.9",
+    "typescript": "5.9.3"
   }
 }

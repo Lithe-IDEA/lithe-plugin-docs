@@ -59,6 +59,10 @@ jobs:
 
       - name: Test
         run: node --test sdk/node/test/*.test.mjs
+      - name: Check TypeScript consumers
+        run: |
+          npm ci --prefix sdk/node --ignore-scripts --no-audit --no-fund
+          npm run --prefix sdk/node test:types
 
   sdk-java:
     name: Java SDK
@@ -145,4 +149,4 @@ jobs:
         if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
         env:
           LITHE_PLUGIN_SDK_JAVA_RUNTIME: ${{ steps.java8.outputs.path }}/bin/java
-        run: node scripts/sdk-e2e.mjs --ref preview
+        run: node scripts/sdk-e2e.mjs --ref preview --build-workflows

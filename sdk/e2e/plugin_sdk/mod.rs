@@ -19,6 +19,7 @@
 #![allow(dead_code)]
 
 pub mod backend;
+pub mod native_build;
 pub mod vcs;
 
 use lithe_core::execute_json;
@@ -210,7 +211,7 @@ impl Session {
         serde_json::from_value(latest["result"]["functions"].clone()).expect("function IDs")
     }
 
-    fn build_request(&mut self, operation: &str, plan: &Value) -> Value {
+    fn send_build_request(&mut self, operation: &str, plan: &Value) {
         core(
             "lsp.buildRequest",
             json!({
@@ -220,6 +221,10 @@ impl Session {
                 "params": plan["provider"]["params"],
             }),
         );
+    }
+
+    fn build_request(&mut self, operation: &str, plan: &Value) -> Value {
+        self.send_build_request(operation, plan);
         let completed = self.completion(operation);
         assert!(completed.get("error").is_none(), "{completed}");
         completed["result"]["value"].clone()

@@ -67,14 +67,14 @@ public final class Backend {
 
     /** Protocols the host agreed to in {@code initialize}. */
     public static final class Negotiated {
-        static final Negotiated NONE = new Negotiated(false, false);
+        static final Negotiated NONE = new Negotiated(false, 0);
 
         private final boolean functions;
-        private final boolean build;
+        private final int buildVersion;
 
-        Negotiated(boolean functions, boolean build) {
+        Negotiated(boolean functions, int buildVersion) {
             this.functions = functions;
-            this.build = build;
+            this.buildVersion = buildVersion;
         }
 
         /** Plugin functions, {@code litheFunctions} version 1. */
@@ -82,9 +82,14 @@ public final class Backend {
             return functions;
         }
 
-        /** Typed build requests, {@code litheBuild} version 1. */
+        /** Whether the host negotiated typed build requests. */
         public boolean build() {
-            return build;
+            return buildVersion > 0;
+        }
+
+        /** Selected build protocol version, or zero when unavailable. */
+        public int buildVersion() {
+            return buildVersion;
         }
     }
 
@@ -97,6 +102,7 @@ public final class Backend {
         Map<String, String> formats = new HashMap<>();
         formats.put(Protocol.BUILD_MODEL, "litheBuildModel");
         formats.put(Protocol.BUILD_DEPENDENCIES, "litheDependencies");
+        formats.put(Protocol.BUILD_DISCOVER_TESTS, "litheTestDiscovery");
         BUILD_FORMATS = Collections.unmodifiableMap(formats);
     }
 
@@ -185,6 +191,31 @@ public final class Backend {
     /** Answers {@code lithe/build/dependencies} with a {@code litheDependencies} document. */
     public Backend onDependencies(Handler handler) {
         return declareBuild(Protocol.BUILD_DEPENDENCIES, handler);
+    }
+
+    /** Executes a bounded provider task; requires build protocol 2 or newer. */
+    public Backend onExecute(Handler handler) {
+        return declareBuild(Protocol.BUILD_EXECUTE, handler);
+    }
+
+    /** Runs exact test selectors; requires build protocol 3 or newer. */
+    public Backend onTest(Handler handler) {
+        return declareBuild(Protocol.BUILD_TEST, handler);
+    }
+
+    /** Returns the upstream engine's runnable test selectors, with the format stamped. */
+    public Backend onDiscoverTests(Handler handler) {
+        return declareBuild(Protocol.BUILD_DISCOVER_TESTS, handler);
+    }
+
+    /** Prepares native executable target facts; requires build protocol 5. */
+    public Backend onPrepareDebug(Handler handler) {
+        return declareBuild(Protocol.BUILD_PREPARE_DEBUG, handler);
+    }
+
+    /** Prepares a portable application launch with build protocol 4 or newer. */
+    public Backend onPrepareRun(Handler handler) {
+        return declareBuild(Protocol.BUILD_PREPARE_RUN, handler);
     }
 
     /**
@@ -457,7 +488,7 @@ public final class Backend {
         Handler build;
         RequestHandler handler;
         synchronized (lock) {
-            build = negotiated.build() ? buildHandlers.get(method) : null;
+            build = negotiated.buildVersion() >= Protocol.buildMethodVersion(method) ? buildHandlers.get(method) : null;
             handler = requestHandlers.get(method);
         }
         if (build != null) {
@@ -466,7 +497,7 @@ public final class Backend {
                 return;
             }
             Map<String, Object> arguments = Json.object(params);
-            run(id, null, null, context -> build.handle(arguments, context), result -> buildResult(method, result), null);
+            invokeBuild(id, method, arguments, build);
             return;
         }
         if (handler != null) {
@@ -522,9 +553,17 @@ public final class Backend {
             phase = Phase.INITIALIZING;
             initializeParams = params;
             Map<String, Object> offered = experimental(params.get("capabilities"));
+            int buildVersion = 0;
+            if (!buildHandlers.isEmpty()) {
+                for (int version = Protocol.BUILD_VERSION; version > 0; version--) {
+                    if (offers(offered.get("litheBuild"), version)) {
+                        buildVersion = version;
+                        break;
+                    }
+                }
+            }
             agreed = new Negotiated(
-                    offers(offered.get("litheFunctions"), Protocol.FUNCTIONS_VERSION),
-                    !buildHandlers.isEmpty() && offers(offered.get("litheBuild"), Protocol.BUILD_VERSION));
+                    offers(offered.get("litheFunctions"), Protocol.FUNCTIONS_VERSION), buildVersion);
             negotiated = agreed;
             hooks = new ArrayList<>(initializeHooks);
         }
@@ -555,7 +594,7 @@ public final class Backend {
                 }
                 Map<String, Object> experimental = new LinkedHashMap<>(experimental(capabilities));
                 if (agreed.build()) {
-                    experimental.put("litheBuild", singleton("version", Protocol.BUILD_VERSION));
+                    experimental.put("litheBuild", singleton("version", agreed.buildVersion()));
                 }
                 if (agreed.functions()) {
                     List<Object> offered = new ArrayList<>();
@@ -643,6 +682,42 @@ public final class Backend {
         };
         run(id, function, operation, context -> handler.handle(arguments, context), Backend::functionResult,
                 () -> reporting.set(false), progress);
+    }
+
+    private void invokeBuild(Object id, String method, Map<String, Object> arguments, Handler handler) {
+        if (arguments.containsKey("modelInputs") && negotiated.buildVersion() < 6) {
+            respond(id, null, error(Protocol.INVALID_PARAMS, "Model inputs require build protocol 6."));
+            return;
+        }
+        if (!Protocol.buildProgress(method)) {
+            run(id, null, null, context -> handler.handle(arguments, context), result -> buildResult(method, result), null);
+            return;
+        }
+        Object wireId = arguments.get("operationID");
+        if (!(wireId instanceof String)) {
+            respond(id, null, error(Protocol.INVALID_PARAMS, "A build request needs its wire operationID."));
+            return;
+        }
+        AtomicBoolean reporting = new AtomicBoolean(true);
+        CallContext.ProgressSink progress = new CallContext.ProgressSink() {
+            @Override
+            public void report(String message, Double percentage) { report(message, percentage, null); }
+            @Override
+            public void report(String text, Double percentage, String output) {
+                if (!reporting.get()) return;
+                Map<String, Object> report = singleton("operationID", wireId);
+                if (text != null) report.put("message", Protocol.boundedText(text, Protocol.MAX_BUILD_MESSAGE_BYTES));
+                if (output != null) report.put("output", Protocol.boundedText(output, Protocol.MAX_BUILD_OUTPUT_BYTES));
+                if (percentage != null && !percentage.isNaN() && !percentage.isInfinite()) {
+                    report.put("percentage", Math.min(100L, Math.max(0L, Math.round(percentage))));
+                }
+                Map<String, Object> notification = message(null, Protocol.BUILD_PROGRESS);
+                notification.put("params", report);
+                write(notification);
+            }
+        };
+        run(id, null, (String) wireId, context -> handler.handle(arguments, context),
+                result -> buildResult(method, result), () -> reporting.set(false), progress);
     }
 
     private interface Invocation {
@@ -920,21 +995,66 @@ public final class Backend {
     static Object buildResult(String method, Object result) {
         String expected = BUILD_FORMATS.get(method);
         if (!(result instanceof Map)) {
-            throw new PluginSdkError("sdk.build.invalidResult", method + " must return a " + expected + " object.");
+            throw new PluginSdkError("sdk.build.invalidResult", method + " must return a reply object.");
         }
         Map<String, Object> document = new LinkedHashMap<>(Json.object(result));
-        Object format = document.get("format");
-        if (format != null && !expected.equals(format)) {
-            throw new PluginSdkError("sdk.build.invalidResult",
-                    method + " returned format " + format + ", not " + expected + ".");
+        if (expected != null) {
+            Object format = document.get("format");
+            if (format != null && !expected.equals(format)) {
+                throw new PluginSdkError("sdk.build.invalidResult", method + " returned another format.");
+            }
+            Object version = document.get("version");
+            if (version != null && !(version instanceof Number && ((Number) version).doubleValue() == 1)) {
+                throw new PluginSdkError("sdk.build.invalidResult", method + " returned a version other than 1.");
+            }
+            document.put("format", expected);
+            document.put("version", 1);
         }
-        Object version = document.get("version");
-        if (version != null && !(version instanceof Number && ((Number) version).doubleValue() == 1)) {
-            throw new PluginSdkError("sdk.build.invalidResult", method + " returned version " + version + ", not 1.");
+        if (Protocol.BUILD_EXECUTE.equals(method) || Protocol.BUILD_TEST.equals(method)) {
+            Object exit = document.get("exitCode");
+            Object output = document.get("output");
+            if (!(exit instanceof Number) || ((Number) exit).doubleValue() < Integer.MIN_VALUE
+                    || ((Number) exit).doubleValue() > Integer.MAX_VALUE
+                    || ((Number) exit).doubleValue() != ((Number) exit).longValue()
+                    || !(output instanceof String) || Protocol.utf8Length((String) output) > Protocol.MAX_BUILD_RESULT_BYTES) {
+                throw new PluginSdkError("sdk.build.invalidResult", method + " needs an int32 exitCode and bounded output.");
+            }
+            document.put("exitCode", ((Number) exit).longValue());
         }
-        document.put("format", expected);
-        document.put("version", 1);
+        if (Protocol.BUILD_PREPARE_DEBUG.equals(method)) {
+            if (!(document.get("program") instanceof String) || !(document.get("workingDirectory") instanceof String)
+                    || !stringList(document.get("arguments")) || !stringMap(document.get("environment"))
+                    || document.size() != 4) {
+                throw new PluginSdkError("sdk.build.invalidResult", "Native debug preparation needs program, arguments, workingDirectory and environment only.");
+            }
+        }
+        if (Protocol.BUILD_PREPARE_RUN.equals(method)) {
+            Map<String, Object> executable = Json.object(document.get("executable"));
+            if (!("toolchain".equals(executable.get("kind")) || "command".equals(executable.get("kind")))
+                    || !(executable.get("value") instanceof String) || !(document.get("workingDirectory") instanceof String)
+                    || !stringList(document.get("arguments")) || !stringMap(document.get("environment"))) {
+                throw new PluginSdkError("sdk.build.invalidResult", method + " needs a portable launch plan.");
+            }
+        }
+        // Workspace containment and domain facts remain Core/provider responsibilities.
+        if (Protocol.utf8Length(Json.stringify(document)) > Protocol.MAX_BUILD_RESULT_BYTES) {
+            throw new PluginSdkError("sdk.build.invalidResult", method + " exceeds the build-result size limit.");
+        }
         return document;
+    }
+
+    private static boolean stringList(Object value) {
+        if (!(value instanceof List)) return false;
+        for (Object item : (List<?>) value) if (!(item instanceof String)) return false;
+        return true;
+    }
+
+    private static boolean stringMap(Object value) {
+        if (!(value instanceof Map)) return false;
+        for (Map.Entry<?, ?> item : ((Map<?, ?>) value).entrySet()) {
+            if (!(item.getKey() instanceof String) || !(item.getValue() instanceof String)) return false;
+        }
+        return true;
     }
 
     /**

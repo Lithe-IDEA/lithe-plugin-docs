@@ -58,6 +58,8 @@ export type BuildHandler = (params: BuildRequestParams, context: RequestContext)
 
 /** Params of `lithe/build/model` and `lithe/build/dependencies`. */
 export interface BuildRequestParams {
+  /** Read-only host snapshot; missing producers remain unavailable. Requires protocol 6. */
+  modelInputs?: BuildModelInputs;
   buildSystemID: string;
   root: string;
   options: JsonObject;
@@ -71,6 +73,91 @@ export interface BuildRequestParams {
   tool?: { executable: string };
   [key: string]: unknown;
 }
+
+/** Public normalized facts. Tasks, run plans, settings and optionValues never cross this boundary. */
+export interface BuildSharedModel {
+  projects: { id: string; name: string; path: string; displayName?: string; parentID?: string; properties: Record<string, string> }[];
+  targets: { id: string; projectID: string; name: string; path: string; tags: string[]; properties: Record<string, string> }[];
+  contentRoots: { projectID: string; path: string; kind: string }[];
+}
+export type BuildModelInputInstance =
+  | { root: string; state: 'ready'; model: BuildSharedModel; configurationFingerprint: string; options: JsonObject }
+  | { root: string; state: 'loading' | 'stale' | 'failed' };
+export interface BuildModelInputs {
+  version: 1;
+  /** Opaque workspace-activation revision; discard cached work after it changes. */
+  revision: number;
+  inputs: { pluginID: string; buildSystemID: string; state: 'available' | 'unavailable'; instances: BuildModelInputInstance[] }[];
+}
+
+/** Current upstream model selection, preserved as data rather than shell text. */
+export interface BuildSelection {
+  name: string;
+  path: string;
+  tags?: string[];
+  properties?: JsonObject;
+}
+
+export interface BuildExecutionParams extends BuildRequestParams {
+  task: string;
+  project?: BuildSelection | null;
+  target?: BuildSelection | null;
+  userArguments: string[];
+  operationID: string;
+}
+
+export interface BuildTestParams extends BuildRequestParams {
+  project?: BuildSelection | null;
+  target?: BuildSelection | null;
+  suite?: string;
+  case?: string;
+  userArguments: string[];
+  operationID: string;
+}
+
+export interface BuildRunParams extends BuildRequestParams {
+  run: string;
+  project: BuildSelection;
+  target: BuildSelection;
+  userArguments: string[];
+  operationID: string;
+}
+
+export interface BuildProgressReport extends ProgressReport {
+  /** Cut to 64 KiB of UTF-8 per notification. Build messages are cut to 4096 bytes. */
+  output?: string;
+}
+
+export interface BuildContext extends RequestContext {
+  /** The Core-assigned wire identity, never a plugin-selected value. */
+  operationID: string;
+  /** Dropped after cancellation or completion. */
+  progress(report: BuildProgressReport): void;
+}
+
+export interface BuildExecutionResult { exitCode: number; output: string; }
+export interface BuildTestDiscovery {
+  format?: 'litheTestDiscovery';
+  version?: 1;
+  tests: { suite: string; case: string; project?: BuildSelection; target?: BuildSelection }[];
+}
+export interface BuildRunPreparation {
+  executable: { kind: 'toolchain' | 'command'; value: string };
+  arguments: string[];
+  workingDirectory: string;
+  environment: Record<string, string>;
+}
+export type BuildExecutionHandler = (params: BuildExecutionParams, context: BuildContext) => BuildExecutionResult | Promise<BuildExecutionResult>;
+export type BuildTestHandler = (params: BuildTestParams, context: BuildContext) => BuildExecutionResult | Promise<BuildExecutionResult>;
+export type BuildDiscoveryHandler = (params: BuildRequestParams, context: RequestContext) => BuildTestDiscovery | Promise<BuildTestDiscovery>;
+export interface BuildDebugPreparation {
+  program: string;
+  arguments: string[];
+  workingDirectory: string;
+  environment: Record<string, string>;
+}
+export type BuildDebugHandler = (params: BuildRunParams, context: BuildContext) => BuildDebugPreparation | Promise<BuildDebugPreparation>;
+export type BuildRunHandler = (params: BuildRunParams, context: BuildContext) => BuildRunPreparation | Promise<BuildRunPreparation>;
 
 /** Params every VCS handler receives, on top of its operation's arguments. */
 export interface VcsRequestParams {
@@ -138,10 +225,17 @@ export interface ListenOptions {
 export interface Backend {
   readonly negotiated: Negotiated;
   readonly initializeParams: JsonObject | null;
+  /** Highest common version (1-4), or null before/without negotiation. */
+  readonly buildVersion: number | null;
   readonly functionIDs: string[];
   readonly build: {
     model(handler: BuildHandler): Backend;
     dependencies(handler: BuildHandler): Backend;
+    execute(handler: BuildExecutionHandler): Backend;
+    test(handler: BuildTestHandler): Backend;
+    discoverTests(handler: BuildDiscoveryHandler): Backend;
+    prepareRun(handler: BuildRunHandler): Backend;
+    prepareDebug(handler: BuildDebugHandler): Backend;
   };
   vcs(id: string, handlers: VcsHandlers, traits?: VcsTraits): Backend;
   function(id: string, handler: FunctionHandler): Backend;
@@ -199,6 +293,9 @@ export const LIMITS: Readonly<{
   maxPluginErrorCodeBytes: number;
   maxMessageBytes: number;
   maxResultBytes: number;
+  maxBuildResultBytes: number;
+  maxBuildMessageBytes: number;
+  maxBuildOutputBytes: number;
   maxVcsIdBytes: number;
   maxExecutionErrorOutputBytes: number;
 }>;
