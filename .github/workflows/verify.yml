@@ -12,6 +12,11 @@ on:
   schedule:
     - cron: "41 3 * * 1"
   workflow_dispatch:
+    inputs:
+      host-ref:
+        description: 'Optional explicit Lithe host commit to validate native workflows before merge'
+        required: false
+        type: string
 
 permissions:
   contents: read
@@ -146,7 +151,14 @@ jobs:
         run: node scripts/sdk-e2e.mjs
 
       - name: Run against Lithe's preview branch
-        if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+        if: github.event_name == 'schedule' || (github.event_name == 'workflow_dispatch' && inputs.host-ref == '')
         env:
           LITHE_PLUGIN_SDK_JAVA_RUNTIME: ${{ steps.java8.outputs.path }}/bin/java
         run: node scripts/sdk-e2e.mjs --ref preview --build-workflows
+
+      - name: Run native workflows against the explicitly selected host revision
+        if: github.event_name == 'workflow_dispatch' && inputs.host-ref != ''
+        env:
+          LITHE_PLUGIN_SDK_JAVA_RUNTIME: ${{ steps.java8.outputs.path }}/bin/java
+          HOST_REF: ${{ inputs.host-ref }}
+        run: node scripts/sdk-e2e.mjs --ref "$HOST_REF" --build-workflows

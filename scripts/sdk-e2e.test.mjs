@@ -6,12 +6,13 @@ import { join } from 'node:path';
 import { test } from 'node:test';
 import { copyWorkingTree, includesNativeWorkflows } from './sdk-e2e.mjs';
 
-test('the pinned contract turns native workflow coverage on after protocol 5 is published', () => {
+test('the pinned contract turns native workflow coverage on after protocol 6 is published', () => {
   const schema = versions => ({ properties: { requires: { properties: { buildProviders: { enum: versions } } } } });
   assert.equal(includesNativeWorkflows(schema([1])), false);
   assert.equal(includesNativeWorkflows(schema([1]), true), true);
   assert.equal(includesNativeWorkflows(schema([1, 2, 3, 4])), false);
-  assert.equal(includesNativeWorkflows(schema([1, 2, 3, 4, 5])), true);
+  assert.equal(includesNativeWorkflows(schema([1, 2, 3, 4, 5])), false);
+  assert.equal(includesNativeWorkflows(schema([1, 2, 3, 4, 5, 6])), true);
   assert.throws(() => includesNativeWorkflows({}), /enumerate/);
   assert.throws(() => includesNativeWorkflows(schema(['4'])), /enumerate/);
 });

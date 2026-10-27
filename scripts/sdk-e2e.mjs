@@ -26,13 +26,13 @@ const work = join(repository, '.artifacts', 'lithe');
 const scenario = join(repository, 'sdk', 'e2e');
 const tests = ['plugin_sdk_node', 'plugin_sdk_java', 'plugin_sdk_rust'];
 
-/** Once the contract mirror includes protocol 5, the current native workflows are mandatory. */
+/** Once the contract mirror includes protocol 6, the current native workflows are mandatory. */
 export function includesNativeWorkflows(schema, requested = false) {
   const versions = schema?.properties?.requires?.properties?.buildProviders?.enum;
   if (!Array.isArray(versions) || versions.some(version => !Number.isInteger(version) || version < 1)) {
     throw new Error('The pinned contract must enumerate buildProviders versions.');
   }
-  return requested || versions.includes(5);
+  return requested || versions.includes(6);
 }
 
 function run(command, args, options = {}) {
