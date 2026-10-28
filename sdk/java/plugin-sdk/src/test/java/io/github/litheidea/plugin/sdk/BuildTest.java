@@ -37,7 +37,7 @@ class BuildTest {
         List<Map<String, Object>> replies = Arrays.asList(map("exitCode", 0, "output", "built\n"),
                 map("exitCode", 2, "output", "test failed\n"),
                 map("tests", Arrays.asList(map("suite", "Suite", "case", "exact # [case]"))), LAUNCH, map("program", "app/bin/main", "arguments", Arrays.asList("a b"), "workingDirectory", "app", "environment", map()), map("sources", Collections.emptyList()));
-        for (int version = 1; version <= 7; version++) {
+        for (int version = 1; version <= 8; version++) {
             Backend backend = Backend.create(null, null)
                     .onExecute((params, context) -> replies.get(0))
                     .onTest((params, context) -> replies.get(1))
@@ -67,10 +67,30 @@ class BuildTest {
     }
 
     @Test
+    void inlineReportsNeedVersionEightAndRemainBoundToTheCompletingTest() {
+        for (int version : new int[] {7, 8}) {
+            java.util.concurrent.atomic.AtomicInteger calls = new java.util.concurrent.atomic.AtomicInteger();
+            Map<String, Object> report = map("format", "litheTestResults", "version", 1L, "tests", Arrays.asList(
+                    map("project", "a", "suite", "Same", "case", "checks", "status", "failed"),
+                    map("project", "b", "suite", "Same", "case", "checks", "status", "passed")));
+            Backend backend = Backend.create(null, null).onTest((params, context) -> {
+                calls.incrementAndGet(); return map("exitCode", 1, "output", "failed", "testResults", report);
+            });
+            TestHost host = new TestHost(backend);
+            try {
+                host.initialize(offered(version));
+                Map<String, Object> response = host.request("lithe/build/test", map("operationID", "wire-reports", "testResults", true));
+                if (version == 7) { assertEquals(-32602L, errorCode(response)); assertEquals(0, calls.get()); }
+                else { assertEquals(report, Json.object(response.get("result")).get("testResults")); assertEquals(1, calls.get()); }
+            } finally { host.close(); }
+        }
+    }
+
+    @Test
     void readOnlyModelInputsRequireVersionSixAndPreserveHostIdentity() {
         Map<String, Object> inputs = map("version", 1L, "revision", 17L, "inputs", Arrays.asList(
                 map("pluginID", "dev.source", "buildSystemID", "source", "state", "unavailable", "instances", Collections.emptyList())));
-        for (int version : new int[] {5, 6, 7}) {
+        for (int version : new int[] {5, 6, 7, 8}) {
             AtomicReference<Object> seen = new AtomicReference<>();
             Backend backend = Backend.create(null, null).onModel((params, context) -> {
                 seen.set(params.get("modelInputs"));

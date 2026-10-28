@@ -16,7 +16,7 @@ const methods = [
   ['configuration', 7, { sources: [] }],
 ];
 
-for (const version of [1, 2, 3, 4, 5, 6, 7]) {
+for (const version of [1, 2, 3, 4, 5, 6, 7, 8]) {
   test(`build protocol ${version} admits only its typed methods`, { timeout: 15000 }, async (t) => {
     const backend = createBackend();
     const invoked = [];
@@ -194,7 +194,7 @@ test('read-only model inputs require protocol 6 and preserve host identity', { t
   const modelInputs = { version: 1, revision: 17, inputs: [
     { pluginID: 'dev.source', buildSystemID: 'source', state: 'unavailable', instances: [] },
   ] };
-  for (const version of [5, 6, 7]) {
+  for (const version of [5, 6, 7, 8]) {
     const seen = [];
     const backend = createBackend();
     backend.build.model((params) => { seen.push(params.modelInputs); return { projects: [], targets: [], tasks: [] }; });
@@ -206,4 +206,31 @@ test('read-only model inputs require protocol 6 and preserve host identity', { t
     else { assert.deepEqual(seen, [modelInputs]); assert.ok(response.result); }
     await host.close();
   }
+});
+
+for (const version of [7, 8]) {
+  test(`inline test reports require protocol 8 (peer ${version})`, { timeout: 15000 }, async t => {
+    let calls = 0;
+    const report = { format: 'litheTestResults', version: 1, tests: [
+      { project: 'a', suite: 'Same', case: 'checks', status: 'failed' },
+      { project: 'b', suite: 'Same', case: 'checks', status: 'passed' },
+    ] };
+    const backend = createBackend();
+    backend.build.test(() => { calls++; return { exitCode: 1, output: 'failed', testResults: report }; });
+    const host = new TestHost(backend);
+    t.after(() => host.close());
+    await host.initialize({ litheBuild: { versions: [version] } });
+    const response = await host.request('lithe/build/test', { operationID: 'wire-reports', testResults: true });
+    if (version === 7) { assert.equal(response.error.code, -32602); assert.equal(calls, 0); }
+    else { assert.deepEqual(response.result.testResults, report); assert.equal(response.result.exitCode, 1); }
+  });
+}
+
+test('malformed inline report cannot become an empty successful outcome', { timeout: 15000 }, async t => {
+  const backend = createBackend();
+  backend.build.test(() => ({ exitCode: 0, output: '', testResults: { format: 'wrong', version: 1, tests: [] } }));
+  const host = new TestHost(backend); t.after(() => host.close());
+  await host.initialize({ litheBuild: { versions: [8] } });
+  const response = await host.request('lithe/build/test', { operationID: 'wire-invalid', testResults: true });
+  assert.ok(response.error); assert.equal(response.result, undefined);
 });

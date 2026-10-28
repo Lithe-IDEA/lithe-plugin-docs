@@ -107,6 +107,8 @@ export interface BuildExecutionParams extends BuildRequestParams {
 }
 
 export interface BuildTestParams extends BuildRequestParams {
+  /** Requires build protocol 8 and an inline report in the reply. */
+  testResults?: true;
   project?: BuildSelection | null;
   target?: BuildSelection | null;
   suite?: string;
@@ -135,7 +137,13 @@ export interface BuildContext extends RequestContext {
   progress(report: BuildProgressReport): void;
 }
 
-export interface BuildExecutionResult { exitCode: number; output: string; }
+/** Results belong to this operation; the host does not discover report files. */
+export interface BuildTestResultsDocument {
+  format: 'litheTestResults'; version: 1;
+  tests: { project?: string; suite: string; case: string; status: 'passed' | 'failed' | 'error' | 'skipped';
+    message?: string; durationMillis?: number; path?: string; line?: number; invocations?: number }[];
+}
+export interface BuildExecutionResult { exitCode: number; output: string; testResults?: BuildTestResultsDocument; }
 export interface BuildTestDiscovery {
   format?: 'litheTestDiscovery';
   version?: 1;
@@ -225,7 +233,7 @@ export interface ListenOptions {
 export interface Backend {
   readonly negotiated: Negotiated;
   readonly initializeParams: JsonObject | null;
-  /** Highest common version (1-7), or null before/without negotiation. */
+  /** Highest common version (1-8), or null before/without negotiation. */
   readonly buildVersion: number | null;
   readonly functionIDs: string[];
   readonly build: {

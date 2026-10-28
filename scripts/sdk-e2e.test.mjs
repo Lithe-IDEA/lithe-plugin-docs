@@ -32,7 +32,8 @@ test('explicit working-tree snapshots include staged, unstaged and untracked inp
   await writeFile(join(source, '.gitignore'), '/rust/target/\n');
   await writeFile(join(source, 'rust/input.rs'), 'original\n');
   await writeFile(join(source, 'rust/deleted.rs'), 'removed\n');
-  await writeFile(join(source, 'shared/fixture.json'), '{}\n');
+  const originalUnicode = JSON.stringify({ text: '构建配置验证与迁移'.repeat(20000) }) + '\n';
+  await writeFile(join(source, 'shared/fixture.json'), originalUnicode);
   await writeFile(join(source, 'outside.txt'), 'original\n');
   git(source, 'init', '-q');
   git(source, 'config', 'core.autocrlf', 'false');
@@ -48,10 +49,13 @@ test('explicit working-tree snapshots include staged, unstaged and untracked inp
   await writeFile(join(source, 'outside.txt'), 'unrelated\n');
   await mkdir(join(source, 'rust/target'));
   await writeFile(join(source, 'rust/target/cache'), 'not source\n');
+  const changedUnicode = JSON.stringify({ text: '报告路径和失败结果'.repeat(20000) }) + '\n';
+  await writeFile(join(source, 'shared/fixture.json'), changedUnicode);
   const indexBefore = await readFile(join(source, '.git/index'));
   const before = git(source, 'status', '--porcelain');
   await copyWorkingTree(source, destination);
   assert.equal(await readFile(join(destination, 'rust/input.rs'), 'utf8'), 'unstaged final\n');
+  assert.equal(await readFile(join(destination, 'shared/fixture.json'), 'utf8'), changedUnicode);
   assert.equal(await readFile(join(destination, 'shared/new fixture.json'), 'utf8'), '{"new":true}\n');
   await assert.rejects(readFile(join(destination, 'rust/deleted.rs')), { code: 'ENOENT' });
   await assert.rejects(readFile(join(destination, 'rust/target/cache')), { code: 'ENOENT' });

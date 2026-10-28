@@ -42,12 +42,15 @@ backend.build.test(async (params, context) => {
     throw new PluginError('sample.test', 'The selected test no longer exists.');
   }
   let output = '';
+  const tests = [];
+  const finish = exitCode => ({ exitCode, output, ...(params.testResults ? { testResults: { format: 'litheTestResults', version: 1, tests } } : {}) });
   for (const { project, test } of selected) {
     const result = await run(test.command, project, params.userArguments, context);
     output += result.stdout + result.stderr;
-    if (result.exitCode !== 0) return { exitCode: result.exitCode, output };
+    tests.push({ project: project.path, suite: test.suite, case: test.case, status: result.exitCode === 0 ? 'passed' : 'failed' });
+    if (result.exitCode !== 0) return finish(result.exitCode);
   }
-  return { exitCode: 0, output };
+  return finish(0);
 });
 
 backend.build.prepareRun((params, context) => prepare(params, context, false));

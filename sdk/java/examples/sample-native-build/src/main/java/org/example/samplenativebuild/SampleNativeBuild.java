@@ -113,6 +113,7 @@ public final class SampleNativeBuild {
 
     private Object test(Map<String, Object> params, CallContext context) throws IOException {
         int matched = 0;
+        List<Object> results = new ArrayList<>();
         StringBuilder output = new StringBuilder();
         for (Map<String, Object> project : select(params)) {
             for (Map<String, Object> test : tests(project)) {
@@ -121,11 +122,18 @@ public final class SampleNativeBuild {
                 matched++;
                 Processes.Result result = run(test.get("command"), project, strings(params.get("userArguments")), context);
                 output.append(result.stdout()).append(result.stderr());
-                if (result.exitCode() != 0) return object("exitCode", result.exitCode(), "output", output.toString());
+                results.add(object("project", project.get("path"), "suite", test.get("suite"), "case", test.get("case"), "status", result.exitCode() == 0 ? "passed" : "failed"));
+                if (result.exitCode() != 0) return testReply(params, result.exitCode(), output.toString(), results);
             }
         }
         if (matched == 0 && (params.containsKey("suite") || params.containsKey("case"))) throw new PluginError("sample.test", "The selected test no longer exists.");
-        return object("exitCode", 0, "output", output.toString());
+        return testReply(params, 0, output.toString(), results);
+    }
+
+    private Object testReply(Map<String, Object> params, int exit, String output, List<Object> tests) {
+        Map<String, Object> reply = object("exitCode", exit, "output", output);
+        if (Boolean.TRUE.equals(params.get("testResults"))) reply.put("testResults", object("format", "litheTestResults", "version", 1, "tests", tests));
+        return reply;
     }
 
     private Processes.Result run(Object declared, Map<String, Object> project, List<String> arguments, CallContext context) throws IOException {

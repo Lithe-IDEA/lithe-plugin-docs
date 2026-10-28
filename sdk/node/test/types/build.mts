@@ -13,7 +13,10 @@ backend.build.execute((params, context) => {
 backend.build.test(async (params, context) => {
   const suite: string | undefined = params.suite;
   context.progress({ output: suite });
-  return { exitCode: 2, output: 'test failure' };
+  const wantsReport: true | undefined = params.testResults;
+  return { exitCode: 2, output: 'test failure', ...(wantsReport ? { testResults: {
+    format: 'litheTestResults' as const, version: 1 as const, tests: [{ project: 'app', suite: 'Suite', case: 'checks', status: 'failed' as const }],
+  } } : {}) };
 });
 backend.build.discoverTests(async (params: BuildRequestParams) => ({
   tests: [{ suite: 'Suite', case: 'exact # [case]', project: { name: 'app', path: params.root } }],

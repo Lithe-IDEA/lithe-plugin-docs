@@ -6,7 +6,7 @@
 
 /** Protocol versions this SDK can answer. */
 export const FUNCTIONS_VERSION = 1;
-export const BUILD_VERSION = 7;
+export const BUILD_VERSION = 8;
 export const VCS_VERSION = 1;
 
 export const METHODS = Object.freeze({

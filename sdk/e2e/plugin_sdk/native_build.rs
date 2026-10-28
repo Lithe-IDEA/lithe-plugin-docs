@@ -7,8 +7,13 @@ use std::fs;
 use std::time::Instant;
 
 pub fn run(sample: &Sample) {
-    let manifest: Value =
+    let mut manifest: Value =
         serde_json::from_slice(&fs::read(sample.package.join("plugin.json")).unwrap()).unwrap();
+    let reports = std::env::var("LITHE_PLUGIN_SDK_REPORT_WORKFLOWS").as_deref() == Ok("1");
+    if reports {
+        manifest["requires"]["buildProviders"] = json!(8);
+        manifest["buildSystems"][0]["test"]["results"] = json!({"decoder":"provider"});
+    }
     let before = listing(&sample.package);
     assert_eq!(
         core("plugins.declarative.validate", json!({"manifest":manifest}))["status"],
@@ -73,7 +78,7 @@ pub fn run(sample: &Sample) {
     let app = json!({"name":"app","path":"nested/app"});
     if std::env::var("LITHE_PLUGIN_SDK_CONFIGURATION_WORKFLOWS").as_deref() == Ok("1") {
         let mut native = manifest.clone();
-        native["requires"]["buildProviders"] = json!(7);
+        native["requires"]["buildProviders"] = json!(if reports {8} else {7});
         native["buildSystems"][0]["configuration"] = json!({"source":"provider"});
         let request = |command: &str, payload: Value| core(command,
             json!({"manifest":native,"buildSystemID":BUILD_SYSTEM,"request":payload}));
@@ -123,7 +128,7 @@ pub fn run(sample: &Sample) {
         "request":{"workspaceRoot":workspace,"root":root,"result":source_reply}}));
     assert_eq!(source_model["status"], "ok", "{source_model}");
     let mut consumer = manifest.clone();
-    consumer["requires"]["buildProviders"] = json!(6);
+    consumer["requires"]["buildProviders"] = json!(if reports {8} else {6});
     consumer["requires"]["buildModelInputs"] = json!(1);
     consumer["buildSystems"][0]["modelInputs"] = json!([{"pluginID":producer["id"],"buildSystemID":"shared-source"}]);
     let resolved = core("build.resolveModelInputs", json!({"manifest":consumer,"buildSystemID":BUILD_SYSTEM,"request":{
@@ -179,6 +184,19 @@ pub fn run(sample: &Sample) {
     let tested = session.build_request("test-exact", &test_plan);
     assert_eq!(tested["exitCode"], 0, "{tested}");
     assert_eq!(tested["output"], "[\"a b\",\"x#y\"]\n");
+
+    if reports {
+        let decoded = build("build.decodeTestResults", json!({"workspaceRoot":workspace,"root":root,"result":tested["testResults"]}));
+        assert_eq!(decoded["status"], "ok", "{decoded}");
+        assert_eq!(decoded["results"]["summary"]["passed"], 1);
+        assert_eq!(decoded["results"]["tests"][0]["project"], "nested/app");
+        let plan = build("build.testPlan", json!({"root":root,"project":app,"suite":"Suite","case":"other","userArguments":[]}))["plan"].clone();
+        let failed = session.build_request("test-failure-with-report", &plan);
+        assert_eq!(failed["exitCode"], 7);
+        let decoded = build("build.decodeTestResults", json!({"workspaceRoot":workspace,"root":root,"result":failed["testResults"]}));
+        assert_eq!(decoded["results"]["summary"]["failed"], 1);
+        assert_eq!(decoded["results"]["tests"][0]["case"], "other");
+    }
 
     // An externally removed selector cannot silently widen to all tests.
     let mut changed = config.clone();

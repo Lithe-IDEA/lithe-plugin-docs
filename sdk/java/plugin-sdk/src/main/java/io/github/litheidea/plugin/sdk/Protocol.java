@@ -13,7 +13,7 @@ import java.util.regex.Pattern;
 public final class Protocol {
     /** Protocol versions this SDK can answer. */
     public static final int FUNCTIONS_VERSION = 1;
-    public static final int BUILD_VERSION = 7;
+    public static final int BUILD_VERSION = 8;
 
     public static final String INITIALIZE = "initialize";
     public static final String INITIALIZED = "initialized";

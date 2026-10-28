@@ -494,6 +494,11 @@ class Backend {
       this.#respond(id, undefined, { code: ERROR_CODES.invalidParams, message: 'Model inputs require build protocol 6.' });
       return;
     }
+    if (Object.hasOwn(params ?? {}, 'testResults')
+        && (this.#buildVersion < 8 || method !== METHODS.buildTest || params.testResults !== true)) {
+      this.#respond(id, undefined, { code: ERROR_CODES.invalidParams, message: 'Inline test reports require build protocol 8 and a test request.' });
+      return;
+    }
     const progressing = [METHODS.buildExecute, METHODS.buildTest, METHODS.buildPrepareRun, METHODS.buildPrepareDebug].includes(method);
     if (!params || typeof params !== 'object' || Array.isArray(params)
         || (progressing && typeof params.operationID !== 'string')) {
@@ -513,7 +518,7 @@ class Backend {
         if (Number.isFinite(percentage)) report.percentage = Math.min(100, Math.max(0, Math.round(percentage)));
         this.#write({ jsonrpc: '2.0', method: METHODS.buildProgress, params: report });
       },
-    } : context), (result) => buildResult(method, result), () => { reporting = false; });
+    } : context), (result) => buildResult(method, result, this.#buildVersion), () => { reporting = false; });
   }
 
   #invokeFunction(id, { functionID, operationID, params }) {
@@ -753,7 +758,7 @@ function requestKey(id) {
  * plain document. A result in another format is a backend bug: Core would
  * refuse it as `plugin.build.invalidOutput`, so it fails here with a clear log.
  */
-function buildResult(method, result) {
+function buildResult(method, result, version) {
   const expected = BUILD_FORMATS[method];
   if (!isObject(result)) {
     throw new PluginSdkError('sdk.build.invalidResult', `${method} must return a reply object.`);
@@ -772,6 +777,14 @@ function buildResult(method, result) {
       && (!Number.isInteger(result.exitCode) || result.exitCode < -2147483648 || result.exitCode > 2147483647
         || typeof result.output !== 'string' || Buffer.byteLength(result.output) > LIMITS.maxBuildResultBytes)) {
     throw new PluginSdkError('sdk.build.invalidResult', `${method} needs an int32 exitCode and bounded output.`);
+  }
+  if (Object.hasOwn(result, 'testResults')) {
+    const report = result.testResults;
+    if (version < 8 || ![METHODS.buildExecute, METHODS.buildTest].includes(method) || !isObject(report)
+        || report.format !== 'litheTestResults' || report.version !== 1 || !Array.isArray(report.tests)
+        || report.tests.length > 10000 || Buffer.byteLength(JSON.stringify(report)) > 8 * 1024 * 1024) {
+      throw new PluginSdkError('sdk.build.invalidResult', 'Inline test reports need protocol 8 and a bounded litheTestResults document.');
+    }
   }
   if (method === METHODS.buildPrepareRun
       && (!isObject(result.executable) || !['toolchain', 'command'].includes(result.executable.kind)

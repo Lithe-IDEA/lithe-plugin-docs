@@ -191,3 +191,16 @@ The two native workflow samples demonstrate independent producer and consumer
 backends in the Core end-to-end tests. Their engine is fictional; this does not
 migrate Maven, JDT, LLDB or existing plugin business logic. The contract mirror
 must be synced from the merged Lithe revision before these changes are released.
+
+## Inline test reports (development protocol 8)
+
+A test declared with `results: { "decoder": "provider" }` requires buildProviders 8.
+Core sends `testResults: true`; answer with `testResults: { format: "litheTestResults",
+version: 1, tests: [...] }` beside `exitCode` and `output`. Cases carry suite/case/status
+and optional project/source paths, message, durationMillis and invocations. A failed
+test still returns its nonzero exit code and current reports. Report discovery and
+freshness belong to the provider's upstream engine; never return old files or silently
+empty results after a read failure. Core validates 10,000 cases/8 MiB and keeps equal
+suite/case names in distinct projects separate. Earlier negotiation refuses the new
+request field. Ordinary execute replies may include reports for build phases that run
+tests. These SDK sources are development inputs pending a coordinated host/SDK release.
