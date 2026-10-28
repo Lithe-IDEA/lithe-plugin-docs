@@ -15,6 +15,13 @@ backend.build.model(async ({ root, modelInputs }) => {
     targets: all.filter(({ run }) => run).map(({ modelPath: path }) => ({ name: 'Main', path, project: path, tags: ['application'] })) };
 });
 backend.build.dependencies(() => ({ dependencies: [] }));
+// The fictional engine supplies its non-sensitive native projection. Real
+// plugins read these facts from their selected upstream configuration API.
+backend.build.configuration(async ({ root }) => {
+  const base = await inside(root);
+  const configuration = JSON.parse(await readFile(join(base, 'lithe-sample.json'), 'utf8')).configuration;
+  return configuration ?? { sources: [] };
+});
 
 backend.build.execute(async (params, context) => {
   if (params.task !== 'build') throw new PluginError('sample.task', 'Unknown build task.');

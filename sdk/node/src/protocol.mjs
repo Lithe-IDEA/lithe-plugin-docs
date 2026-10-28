@@ -6,7 +6,7 @@
 
 /** Protocol versions this SDK can answer. */
 export const FUNCTIONS_VERSION = 1;
-export const BUILD_VERSION = 6;
+export const BUILD_VERSION = 7;
 export const VCS_VERSION = 1;
 
 export const METHODS = Object.freeze({
@@ -20,6 +20,7 @@ export const METHODS = Object.freeze({
   functionUnregister: 'lithe/function/unregister',
   functionProgress: 'lithe/function/progress',
   buildModel: 'lithe/build/model',
+  buildConfiguration: 'lithe/build/configuration',
   buildDependencies: 'lithe/build/dependencies',
   buildExecute: 'lithe/build/execute',
   buildTest: 'lithe/build/test',
@@ -32,6 +33,7 @@ export const METHODS = Object.freeze({
 
 /** Minimum negotiated version of each typed build operation. */
 export const BUILD_METHOD_VERSIONS = Object.freeze({
+  [METHODS.buildConfiguration]: 7,
   [METHODS.buildModel]: 1,
   [METHODS.buildDependencies]: 1,
   [METHODS.buildExecute]: 2,

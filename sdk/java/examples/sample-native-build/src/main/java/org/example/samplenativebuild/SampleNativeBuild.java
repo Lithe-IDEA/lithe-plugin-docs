@@ -49,6 +49,15 @@ public final class SampleNativeBuild {
             return object("projects", model, "targets", targets);
         });
         backend.onDependencies((params, context) -> object("dependencies", Collections.emptyList()));
+        // The fictional engine supplies only the non-sensitive projection;
+        // complete native documents are never sent through the SDK.
+        backend.onConfiguration((params, context) -> {
+            Path base = inside(Json.string(params, "root"));
+            Map<String, Object> engine = Json.object(Json.parse(new String(
+                    Files.readAllBytes(base.resolve("lithe-sample.json")), StandardCharsets.UTF_8)));
+            return engine.get("configuration") instanceof Map ? Json.object(engine.get("configuration"))
+                    : object("sources", Collections.emptyList());
+        });
         backend.onExecute((params, context) -> {
             if (!"build".equals(params.get("task"))) throw new PluginError("sample.task", "Unknown build task.");
             return build(select(params), strings(params.get("userArguments")), context);

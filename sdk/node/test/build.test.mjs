@@ -13,9 +13,10 @@ const methods = [
   ['discoverTests', 3, { tests: [{ suite: 'Suite', case: 'exact # [case]' }] }],
   ['prepareRun', 4, launch],
   ['prepareDebug', 5, { program: 'app/bin/main', arguments: [], workingDirectory: 'app', environment: {} }],
+  ['configuration', 7, { sources: [] }],
 ];
 
-for (const version of [1, 2, 3, 4, 5, 6]) {
+for (const version of [1, 2, 3, 4, 5, 6, 7]) {
   test(`build protocol ${version} admits only its typed methods`, { timeout: 15000 }, async (t) => {
     const backend = createBackend();
     const invoked = [];
@@ -32,7 +33,8 @@ for (const version of [1, 2, 3, 4, 5, 6]) {
         assert.ok(!invoked.includes(method));
       } else {
         assert.deepEqual(response.result, method === 'discoverTests'
-          ? { ...reply, format: 'litheTestDiscovery', version: 1 } : reply);
+          ? { ...reply, format: 'litheTestDiscovery', version: 1 } : method === 'configuration'
+            ? { ...reply, format: 'litheBuildConfiguration', version: 1 } : reply);
       }
     }
   });
@@ -96,7 +98,7 @@ test('native debug progress preserves wire identity, UTF-8 limits and call owner
     context.progress({ message: '😀'.repeat(2000), output: '界'.repeat(30000), percentage: 120 });
     entered.open();
     await release.opened;
-    return methods.at(-1)[2];
+    return methods.find(([name]) => name === 'prepareDebug')[2];
   });
   const host = new TestHost(backend);
   t.after(async () => { release.open(); await host.close(); });
@@ -109,7 +111,7 @@ test('native debug progress preserves wire identity, UTF-8 limits and call owner
   assert.equal(Buffer.byteLength(report.output), 65535);
   assert.equal(report.percentage, 100);
   release.open();
-  assert.deepEqual((await pending).result, methods.at(-1)[2]);
+  assert.deepEqual((await pending).result, methods.find(([name]) => name === 'prepareDebug')[2]);
   late({ message: 'late output', output: 'late' });
   assert.equal(host.messages.filter((message) => message.method === 'lithe/build/progress').length, 1);
 });
@@ -180,7 +182,7 @@ test('build parameters need a wire operation ID and backend errors keep their ca
 test('native debug refuses adapter, process and arbitrary DAP result fields', { timeout: 15000 }, async (t) => {
   for (const field of ['adapter', 'launch', 'dapArguments']) {
     const backend = createBackend();
-    backend.build.prepareDebug(() => ({ ...methods.at(-1)[2], [field]: 'untrusted' }));
+    backend.build.prepareDebug(() => ({ ...methods.find(([name]) => name === 'prepareDebug')[2], [field]: 'untrusted' }));
     const host = new TestHost(backend);
     t.after(() => host.close());
     await host.initialize({ litheBuild: { versions: [5] } });
@@ -192,7 +194,7 @@ test('read-only model inputs require protocol 6 and preserve host identity', { t
   const modelInputs = { version: 1, revision: 17, inputs: [
     { pluginID: 'dev.source', buildSystemID: 'source', state: 'unavailable', instances: [] },
   ] };
-  for (const version of [5, 6]) {
+  for (const version of [5, 6, 7]) {
     const seen = [];
     const backend = createBackend();
     backend.build.model((params) => { seen.push(params.modelInputs); return { projects: [], targets: [], tasks: [] }; });

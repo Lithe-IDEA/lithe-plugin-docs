@@ -103,6 +103,7 @@ public final class Backend {
         formats.put(Protocol.BUILD_MODEL, "litheBuildModel");
         formats.put(Protocol.BUILD_DEPENDENCIES, "litheDependencies");
         formats.put(Protocol.BUILD_DISCOVER_TESTS, "litheTestDiscovery");
+        formats.put(Protocol.BUILD_CONFIGURATION, "litheBuildConfiguration");
         BUILD_FORMATS = Collections.unmodifiableMap(formats);
     }
 
@@ -181,6 +182,11 @@ public final class Backend {
             Collections.sort(ids);
             return ids;
         }
+    }
+
+    /** Returns non-sensitive native source facts and generic XML edit bindings; protocol 7. */
+    public Backend onConfiguration(Handler handler) {
+        return declareBuild(Protocol.BUILD_CONFIGURATION, handler);
     }
 
     /** Answers {@code lithe/build/model} with a {@code litheBuildModel} document. */

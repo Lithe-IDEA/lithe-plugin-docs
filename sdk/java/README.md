@@ -76,8 +76,9 @@ JAR it starts must hold everything it loads.
 | `onModel(handler)`, `onDependencies(handler)` | Implement the typed build requests. The SDK stamps `format` and `version`. Core validates the document. `litheBuild` is answered only when a handler exists. |
 | `onExecute(handler)` | Protocol 2+: a bounded provider-owned task, returning `{ exitCode, output }`. |
 | `onTest(handler)`, `onDiscoverTests(handler)` | Protocol 3+: exact execution and runnable selectors; discovery format/version are stamped. |
+| `onConfiguration(handler)` | Protocol 7+: read-only non-sensitive raw/effective native configuration; stamps `litheBuildConfiguration`, version 1. The host owns explicit native-file saves. |
 | `onPrepareRun(handler)` | Protocol 4: prepare a portable plan; the host owns the application. |
-| `negotiated().buildVersion()` | Highest common build version (1–6), or zero; newer methods are refused before their handler runs. |
+| `negotiated().buildVersion()` | Highest common build version (1–7), or zero; newer methods are refused before their handler runs. |
 | `function(id, handler)` | Declares a function offered in `initialize`. |
 | `registerFunction(id, handler)`, `unregisterFunction(id)` | Add or withdraw a function. Called before the `initialize` answer (for example from `onInitialize`), they change the initial list. Later calls send `lithe/function/register` or `lithe/function/unregister`, in order. Both return a `CompletableFuture`. Withdrawing a function revokes its running calls. |
 | `onInitialize(hook)`, `onShutdown(hook)` | Lifecycle hooks. `onInitialize` receives the `initialize` params and what was negotiated. |

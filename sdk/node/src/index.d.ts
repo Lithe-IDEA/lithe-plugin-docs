@@ -225,10 +225,12 @@ export interface ListenOptions {
 export interface Backend {
   readonly negotiated: Negotiated;
   readonly initializeParams: JsonObject | null;
-  /** Highest common version (1-4), or null before/without negotiation. */
+  /** Highest common version (1-7), or null before/without negotiation. */
   readonly buildVersion: number | null;
   readonly functionIDs: string[];
   readonly build: {
+    /** Non-sensitive source-backed settings; requires build protocol 7. */
+    configuration(handler: BuildHandler): Backend;
     model(handler: BuildHandler): Backend;
     dependencies(handler: BuildHandler): Backend;
     execute(handler: BuildExecutionHandler): Backend;
