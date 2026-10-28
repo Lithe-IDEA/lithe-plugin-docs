@@ -119,6 +119,10 @@ package. The SDK has no dependencies.
 | --- | --- |
 | `createBackend({ name?, version?, capabilities? })` | Creates the backend. `capabilities` are standard LSP server capabilities; `experimental.litheBuild`, `experimental.litheFunctions`, and `experimental.litheVcs` are reserved for the SDK. |
 | `backend.build.model(handler)`, `backend.build.dependencies(handler)` | Implements the typed build requests. The SDK stamps `format` and `version`; a handler returning another format or a version other than 1 fails. Core validates the document. `litheBuild` is answered only when a handler exists. |
+| `backend.build.execute(handler)` | Protocol 2+: provider-owned bounded task, returning `{ exitCode, output }`. |
+| `backend.build.test(handler)`, `backend.build.discoverTests(handler)` | Protocol 3+: exact test execution and runnable selectors; discovery gets `format: "litheTestDiscovery"`, `version: 1`. |
+| `backend.build.prepareRun(handler)` | Protocol 4: returns a portable launch plan after upstream synchronization/build; the host owns the application process. |
+| `backend.buildVersion` | Highest common negotiated build version (1–6), or `null`; methods newer than that version are refused before their handler runs. |
 | `backend.vcs(id, handlers, traits?)` | Implements the typed VCS requests; see [A VCS provider](#a-vcs-provider). `litheVcs` is answered only when the host offers it. |
 | `backend.function(id, handler)` | Declares a function offered in `initialize`. |
 | `backend.registerFunction(id, handler)`, `backend.unregisterFunction(id)` | Adds or withdraws a function. Called before the `initialize` answer (for example from `onInitialize`), they change the initial list; later they send `lithe/function/register` / `unregister`. Withdrawing revokes running calls. |
@@ -139,10 +143,27 @@ Every handler receives a context:
 | `throwIfCancelled()` | Throws the cancellation if `signal` is aborted. |
 | `run(command, args, options)` | `runProcess` bound to the call: cancelling or ending the call ends the whole process tree. In VCS handlers it also reports the finished command unless `options.report` is `false`. |
 | `log(...)` | Same as `backend.log`. |
-| `functionID`, `operationID` | Functions only. `operationID` is opaque; never derive anything from it. |
-| `progress({ message?, percentage? })` | Functions only. The message is cut to 1024 bytes and the percentage clamped to 0–100; reports after the call ends are dropped. |
+| `functionID` | Functions only. |
+| `operationID` | Functions and bounded build/test/run-preparation calls. Opaque wire identity chosen by Core; never derive anything from it. |
+| `progress({ message?, percentage?, output? })` | Functions use messages up to 1024 UTF-8 bytes. Build/test/run preparation use messages up to 4096 bytes and output up to 64 KiB per report. Percentages are clamped to 0–100; cancelled or settled build calls cannot report. Model/dependency/discovery contexts have no progress. |
+
+## Native build workflows (development)
+
+The new typed handlers are source changes, not a published SDK release. They
+require the corresponding host capability (`buildProviders` 2/3/4); the manifest
+requirement and runtime negotiation are both checked. A version 1 agreement
+never permits execute/test/prepareRun, even when those handlers are registered.
+
+See [the native workflow guide](../../guides/native-build-workflows.md) and the
+[no-page sample](examples/sample-native-build/backend/main.mjs). Core validates
+workspace containment and upstream selections; the SDK does not implement a
+second build engine. Build tool failures return their exit code, while a thrown
+error fails preparation and cannot start an application.
 
 ## Results and errors
+
+The following mapping describes private functions. Typed build operations use
+their domain result/error contract; see the native workflow guide above.
 
 | Handler outcome | What Lithe sees |
 | --- | --- |
@@ -200,7 +221,34 @@ lifecycle unified. The SDK enforces the ones it can.
 
 ```bash
 npm test --prefix sdk/node
+
+# Development-only TypeScript compiler; no production dependencies are added.
+npm ci --prefix sdk/node --ignore-scripts
+npm run --prefix sdk/node test:types
 ```
 
 The tests use a bounded in-memory host (`test/harness.mjs`), which plugin
 authors can copy to test their own backends without starting Lithe.
+
+
+### Read-only build model inputs
+
+Build protocol 6 accepts the host's optional `params.modelInputs` snapshot.
+A consumer declares exact `modelInputs` producer slots and requires
+`buildProviders: 6` plus `buildModelInputs: 1`. A producer opts into
+`modelSharing` and selects any ordinary build option values it wants to share.
+The host supplies normalized projects, targets and content roots; tasks, run
+plans, settings and unselected option values are excluded.
+
+Treat `revision` as an opaque workspace snapshot identity. Recompute cached
+work when it changes. A slot can be unavailable, and an instance can be loading,
+stale or failed; only ready instances carry facts. Do not invoke another plugin
+or install/activate a missing producer. Input sharing grants no process or
+private-function authority. Version 1 producers cannot consume and re-export
+inputs. Core validates the shape and the host revokes in-flight work when its
+producer changes. Protocol 1–5 handlers reject requests containing model inputs.
+
+The two native workflow samples demonstrate independent producer and consumer
+backends in the Core end-to-end tests. Their engine is fictional; this does not
+migrate Maven, JDT, LLDB or existing plugin business logic. The contract mirror
+must be synced from the merged Lithe revision before these changes are released.

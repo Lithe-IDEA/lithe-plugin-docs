@@ -17,6 +17,7 @@
   <modules>
     <module>plugin-sdk</module>
     <module>examples/sample-build</module>
+    <module>examples/sample-native-build</module>
   </modules>
 
   <properties>

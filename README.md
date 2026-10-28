@@ -128,6 +128,7 @@ SDK 的源码都在本仓库的 `sdk/` 下，发布在[本仓库的 Releases](ht
 | 教程 | 内容 |
 | --- | --- |
 | [LSP 插件完整生命周期](guides/lsp-plugin-lifecycle.md) | 从 Lua 模板开始：清单、服务器打包、激活、状态目录、停止、升级与卸载 |
+| [原生构建工作流（开发中）](guides/native-build-workflows.md) | Node/Java SDK 的构建执行、精确测试、运行准备，以及未提交源码的真实 Core 验证 |
 | [构建、运行与测试接入](guides/build-tool-integration.md) | 可用的执行提供者示例、工程后端边界，以及开发中的 API 3 状态 |
 | [编写调试适配器插件](guides/debug-adapter-plugin.md) | API 4：从最小清单到启动方式、先编译再调试的 `executable`、调试控制台补全，以及预发布与转正 |
 

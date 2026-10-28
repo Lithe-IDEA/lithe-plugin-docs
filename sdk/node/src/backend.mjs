@@ -13,6 +13,7 @@ import { PluginSdkError, toResponseError } from './errors.mjs';
 import { killAllProcesses, runProcess } from './process.mjs';
 import {
   BUILD_VERSION,
+  BUILD_METHOD_VERSIONS,
   boundedText,
   ERROR_CODES,
   FUNCTIONS_VERSION,
@@ -30,6 +31,7 @@ import {
 const BUILD_FORMATS = Object.freeze({
   [METHODS.buildModel]: 'litheBuildModel',
   [METHODS.buildDependencies]: 'litheDependencies',
+  [METHODS.buildDiscoverTests]: 'litheTestDiscovery',
 });
 
 /** VCS capabilities that describe the VCS rather than a request it answers. */
@@ -56,6 +58,7 @@ class Backend {
   #capabilities;
   #functions = new Map();
   #buildHandlers = new Map();
+  #buildVersion = null;
   /** The declared VCS provider: `{ id, handlers: Map<method, handler>, capabilities }`. */
   #vcs = null;
   #requestHandlers = new Map();
@@ -96,6 +99,13 @@ class Backend {
       model: (handler) => this.#declareBuild(METHODS.buildModel, handler),
       /** Answers `lithe/build/dependencies` with a `litheDependencies` document. */
       dependencies: (handler) => this.#declareBuild(METHODS.buildDependencies, handler),
+      /** Runs a bounded task in the provider; the host owns its operation. */
+      execute: (handler) => this.#declareBuild(METHODS.buildExecute, handler),
+      test: (handler) => this.#declareBuild(METHODS.buildTest, handler),
+      discoverTests: (handler) => this.#declareBuild(METHODS.buildDiscoverTests, handler),
+      /** Prepares a plan; the application itself belongs to the host. */
+      prepareRun: (handler) => this.#declareBuild(METHODS.buildPrepareRun, handler),
+      prepareDebug: (handler) => this.#declareBuild(METHODS.buildPrepareDebug, handler),
     });
   }
 
@@ -103,6 +113,9 @@ class Backend {
   get negotiated() {
     return this.#negotiated;
   }
+
+  /** Selected build protocol version, or null when unavailable. */
+  get buildVersion() { return this.#buildVersion; }
 
   /** The host's `initialize` params, or null before it arrives. */
   get initializeParams() {
@@ -364,8 +377,8 @@ class Backend {
       return;
     }
     const build = this.#buildHandlers.get(method);
-    if (build && this.#negotiated.build) {
-      this.#run(id, null, (context) => build(params ?? {}, context), (result) => buildResult(method, result));
+    if (build && this.#buildVersion >= BUILD_METHOD_VERSIONS[method]) {
+      this.#invokeBuild(id, method, params ?? {}, build);
       return;
     }
     const vcs = this.#negotiated.vcs ? this.#vcs.methods.get(method) : undefined;
@@ -407,9 +420,13 @@ class Backend {
     this.#initializeParams = params;
     const offered = params.capabilities?.experimental ?? {};
     const offers = (entry, version) => Array.isArray(entry?.versions) && entry.versions.includes(version);
+    this.#buildVersion = this.#buildHandlers.size > 0
+      ? Array.from({ length: BUILD_VERSION }, (_, index) => BUILD_VERSION - index)
+        .find((version) => offers(offered.litheBuild, version)) ?? null
+      : null;
     this.#negotiated = Object.freeze({
       functions: offers(offered.litheFunctions, FUNCTIONS_VERSION),
-      build: this.#buildHandlers.size > 0 && offers(offered.litheBuild, BUILD_VERSION),
+      build: this.#buildVersion !== null,
       vcs: this.#vcs !== null && offers(offered.litheVcs, VCS_VERSION),
     });
     try {
@@ -432,7 +449,7 @@ class Backend {
       this.log('The host did not offer litheFunctions version 1; functions stay unavailable.');
     }
     const experimental = { ...(this.#capabilities.experimental ?? {}) };
-    if (this.#negotiated.build) experimental.litheBuild = { version: BUILD_VERSION };
+    if (this.#negotiated.build) experimental.litheBuild = { version: this.#buildVersion };
     if (this.#negotiated.vcs) {
       experimental.litheVcs = { version: VCS_VERSION, vcs: this.#vcs.id, capabilities: this.#vcs.capabilities };
     } else if (this.#vcs) {
@@ -467,6 +484,33 @@ class Backend {
     }
     killAllProcesses();
     this.#respond(id, null);
+  }
+
+  #invokeBuild(id, method, params, handler) {
+    if (Object.hasOwn(params ?? {}, 'modelInputs') && this.#buildVersion < 6) {
+      this.#respond(id, undefined, { code: ERROR_CODES.invalidParams, message: 'Model inputs require build protocol 6.' });
+      return;
+    }
+    const progressing = [METHODS.buildExecute, METHODS.buildTest, METHODS.buildPrepareRun, METHODS.buildPrepareDebug].includes(method);
+    if (!params || typeof params !== 'object' || Array.isArray(params)
+        || (progressing && typeof params.operationID !== 'string')) {
+      this.#respond(id, undefined, { code: ERROR_CODES.invalidParams, message: 'A build request needs object params and its wire operationID.' });
+      return;
+    }
+    const operationID = params.operationID;
+    let reporting = true;
+    this.#run(id, null, (context) => handler(params, progressing ? {
+      ...context,
+      operationID,
+      progress: ({ message, percentage, output } = {}) => {
+        if (!reporting || context.signal.aborted) return;
+        const report = { operationID };
+        if (message !== undefined) report.message = boundedText(message, LIMITS.maxBuildMessageBytes);
+        if (output !== undefined) report.output = boundedText(output, LIMITS.maxBuildOutputBytes);
+        if (Number.isFinite(percentage)) report.percentage = Math.min(100, Math.max(0, Math.round(percentage)));
+        this.#write({ jsonrpc: '2.0', method: METHODS.buildProgress, params: report });
+      },
+    } : context), (result) => buildResult(method, result), () => { reporting = false; });
   }
 
   #invokeFunction(id, { functionID, operationID, params }) {
@@ -708,16 +752,47 @@ function requestKey(id) {
  */
 function buildResult(method, result) {
   const expected = BUILD_FORMATS[method];
-  if (result === null || typeof result !== 'object' || Array.isArray(result)) {
-    throw new PluginSdkError('sdk.build.invalidResult', `${method} must return a ${expected} object.`);
+  if (!isObject(result)) {
+    throw new PluginSdkError('sdk.build.invalidResult', `${method} must return a reply object.`);
   }
-  if (result.format !== undefined && result.format !== expected) {
-    throw new PluginSdkError('sdk.build.invalidResult', `${method} returned format ${result.format}, not ${expected}.`);
+  let document = result;
+  if (expected) {
+    if (result.format !== undefined && result.format !== expected) {
+      throw new PluginSdkError('sdk.build.invalidResult', `${method} returned format ${result.format}, not ${expected}.`);
+    }
+    if (result.version !== undefined && result.version !== 1) {
+      throw new PluginSdkError('sdk.build.invalidResult', `${method} returned version ${result.version}, not 1.`);
+    }
+    document = { ...result, format: expected, version: 1 };
   }
-  if (result.version !== undefined && result.version !== 1) {
-    throw new PluginSdkError('sdk.build.invalidResult', `${method} returned version ${result.version}, not 1.`);
+  if ([METHODS.buildExecute, METHODS.buildTest].includes(method)
+      && (!Number.isInteger(result.exitCode) || result.exitCode < -2147483648 || result.exitCode > 2147483647
+        || typeof result.output !== 'string' || Buffer.byteLength(result.output) > LIMITS.maxBuildResultBytes)) {
+    throw new PluginSdkError('sdk.build.invalidResult', `${method} needs an int32 exitCode and bounded output.`);
   }
-  return { ...result, format: expected, version: 1 };
+  if (method === METHODS.buildPrepareRun
+      && (!isObject(result.executable) || !['toolchain', 'command'].includes(result.executable.kind)
+        || typeof result.executable.value !== 'string' || typeof result.workingDirectory !== 'string'
+        || !Array.isArray(result.arguments) || !result.arguments.every((value) => typeof value === 'string')
+        || !isObject(result.environment) || !Object.values(result.environment).every((value) => typeof value === 'string'))) {
+    throw new PluginSdkError('sdk.build.invalidResult', `${method} needs a portable launch plan.`);
+  }
+  if (method === METHODS.buildPrepareDebug
+      && (typeof result.program !== 'string' || typeof result.workingDirectory !== 'string'
+        || !Array.isArray(result.arguments) || !result.arguments.every((value) => typeof value === 'string')
+        || !isObject(result.environment) || !Object.values(result.environment).every((value) => typeof value === 'string')
+        || Object.keys(result).some((key) => !['program', 'arguments', 'workingDirectory', 'environment'].includes(key)))) {
+    throw new PluginSdkError('sdk.build.invalidResult', `${method} needs native debug target facts, without an adapter or DAP arguments.`);
+  }
+  // Workspace containment and domain facts remain Core/provider responsibilities.
+  if (Buffer.byteLength(JSON.stringify(document)) > LIMITS.maxBuildResultBytes) {
+    throw new PluginSdkError('sdk.build.invalidResult', `${method} exceeds the build-result size limit.`);
+  }
+  return document;
+}
+
+function isObject(value) {
+  return value !== null && typeof value === 'object' && !Array.isArray(value);
 }
 
 /**

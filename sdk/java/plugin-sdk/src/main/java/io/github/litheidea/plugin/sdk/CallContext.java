@@ -5,12 +5,13 @@ import java.util.List;
 
 /**
  * What a handler gets besides its params: the call's cancellation, tools that
- * end with the call, the backend's log, and progress for plugin functions.
+ * end with the call, the backend's log, and progress for plugin functions or bounded build operations.
  */
 public final class CallContext {
-    /** Sends one progress report; absent outside plugin functions. */
+    /** Sends one progress report; absent for model, dependency and discovery requests. */
     interface ProgressSink {
         void report(String message, Double percentage);
+        default void report(String message, Double percentage, String output) { report(message, percentage); }
     }
 
     private final Cancellation cancellation;
@@ -66,14 +67,15 @@ public final class CallContext {
     }
 
     /**
-     * Reports progress of a plugin function. {@code message} is cut to 1024
-     * bytes and {@code percentage} rounded into 0-100; either may be null.
-     * Reports after the call ended, and from build requests, are dropped.
+     * Reports progress of a function or bounded build call. Function messages
+     * are cut to 1024 bytes, build messages to 4096; percentages are rounded to
+     * 0-100. Reports after cancellation or completion are dropped.
      */
-    public void progress(String message, Double percentage) {
-        if (progress != null) {
-            progress.report(message, percentage);
-        }
+    public void progress(String message, Double percentage) { progress(message, percentage, null); }
+
+    /** Build calls may additionally stream up to 64 KiB of output per report. */
+    public void progress(String message, Double percentage, String output) {
+        if (progress != null && !cancellation.isCancelled()) progress.report(message, percentage, output);
     }
 
     /** The function this call runs, or null for a build or LSP request. */
@@ -81,7 +83,7 @@ public final class CallContext {
         return functionId;
     }
 
-    /** The host's operation ID of a function call, or null. */
+    /** The wire operation ID of a function or bounded build call, otherwise null. */
     public String operationId() {
         return operationId;
     }

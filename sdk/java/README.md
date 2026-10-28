@@ -74,6 +74,10 @@ JAR it starts must hold everything it loads.
 | --- | --- |
 | `Backend.create(name, version[, capabilities])` | Creates the backend. `capabilities` are standard LSP server capabilities. `experimental.litheBuild` and `experimental.litheFunctions` are reserved for the SDK. |
 | `onModel(handler)`, `onDependencies(handler)` | Implement the typed build requests. The SDK stamps `format` and `version`. Core validates the document. `litheBuild` is answered only when a handler exists. |
+| `onExecute(handler)` | Protocol 2+: a bounded provider-owned task, returning `{ exitCode, output }`. |
+| `onTest(handler)`, `onDiscoverTests(handler)` | Protocol 3+: exact execution and runnable selectors; discovery format/version are stamped. |
+| `onPrepareRun(handler)` | Protocol 4: prepare a portable plan; the host owns the application. |
+| `negotiated().buildVersion()` | Highest common build version (1–6), or zero; newer methods are refused before their handler runs. |
 | `function(id, handler)` | Declares a function offered in `initialize`. |
 | `registerFunction(id, handler)`, `unregisterFunction(id)` | Add or withdraw a function. Called before the `initialize` answer (for example from `onInitialize`), they change the initial list. Later calls send `lithe/function/register` or `lithe/function/unregister`, in order. Both return a `CompletableFuture`. Withdrawing a function revokes its running calls. |
 | `onInitialize(hook)`, `onShutdown(hook)` | Lifecycle hooks. `onInitialize` receives the `initialize` params and what was negotiated. |
@@ -93,10 +97,19 @@ Handlers run on their own threads. Every handler receives a `CallContext`:
 | `throwIfCancelled()` | Throws `CancelledException` once the call is cancelled. |
 | `run(command[, options])` | `Processes.run` bound to the call: cancelling or ending the call stops the process. |
 | `log(message)` | Same as `Backend.log`. |
-| `functionId()`, `operationId()` | Functions only. `operationId` is opaque; never derive anything from it. |
-| `progress(message, percentage)` | Functions only. Either argument may be `null`. The message is cut to 1024 bytes and the percentage is clamped to 0–100. Reports sent after the call ends are dropped. |
+| `functionId()` | Functions only. |
+| `operationId()` | Opaque wire identity for functions and bounded build/test/run-preparation calls; null for other requests. |
+| `progress(message, percentage[, output])` | Functions use 1024-byte messages. Build/test/run preparation use 4096-byte messages and optional output up to 64 KiB. Percentages are clamped to 0–100. Cancelled or settled calls cannot report. Model/dependency/discovery reports are ignored. |
 
-Results and errors map exactly as in the Node.js SDK:
+The new build handlers are under development and are not in a published SDK
+release. See [native build workflows](../../guides/native-build-workflows.md)
+and the [no-page Java sample](examples/sample-native-build/src/main/java/org/example/samplenativebuild/SampleNativeBuild.java).
+Manifest `buildProviders` requirements and the negotiated protocol both apply;
+registering a handler never bypasses either boundary. Build tool failure is an
+exit-code result; throwing an error aborts preparation.
+
+Private function results and errors map exactly as in the Node.js SDK; typed
+build operations follow their domain contract:
 
 - A returned value becomes `result.value`.
 - `PluginError` becomes `plugin.function.failed` with your message and
@@ -154,3 +167,26 @@ mvn -B -f sdk/java/pom.xml verify
 This builds the SDK and the sample for Java 8 with any newer JDK, then runs
 the JUnit tests. Add `-Djvm=/path/to/java8/bin/java` to run the tests on a
 Java 8 runtime, as CI does.
+
+
+### Read-only build model inputs
+
+Build protocol 6 accepts the host's optional `params.modelInputs` snapshot.
+A consumer declares exact `modelInputs` producer slots and requires
+`buildProviders: 6` plus `buildModelInputs: 1`. A producer opts into
+`modelSharing` and selects any ordinary build option values it wants to share.
+The host supplies normalized projects, targets and content roots; tasks, run
+plans, settings and unselected option values are excluded.
+
+Treat `revision` as an opaque workspace snapshot identity. Recompute cached
+work when it changes. A slot can be unavailable, and an instance can be loading,
+stale or failed; only ready instances carry facts. Do not invoke another plugin
+or install/activate a missing producer. Input sharing grants no process or
+private-function authority. Version 1 producers cannot consume and re-export
+inputs. Core validates the shape and the host revokes in-flight work when its
+producer changes. Protocol 1–5 handlers reject requests containing model inputs.
+
+The two native workflow samples demonstrate independent producer and consumer
+backends in the Core end-to-end tests. Their engine is fictional; this does not
+migrate Maven, JDT, LLDB or existing plugin business logic. The contract mirror
+must be synced from the merged Lithe revision before these changes are released.

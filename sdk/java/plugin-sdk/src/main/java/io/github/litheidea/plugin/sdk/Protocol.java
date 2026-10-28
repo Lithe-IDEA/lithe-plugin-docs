@@ -13,7 +13,7 @@ import java.util.regex.Pattern;
 public final class Protocol {
     /** Protocol versions this SDK can answer. */
     public static final int FUNCTIONS_VERSION = 1;
-    public static final int BUILD_VERSION = 1;
+    public static final int BUILD_VERSION = 6;
 
     public static final String INITIALIZE = "initialize";
     public static final String INITIALIZED = "initialized";
@@ -26,6 +26,12 @@ public final class Protocol {
     public static final String FUNCTION_PROGRESS = "lithe/function/progress";
     public static final String BUILD_MODEL = "lithe/build/model";
     public static final String BUILD_DEPENDENCIES = "lithe/build/dependencies";
+    public static final String BUILD_EXECUTE = "lithe/build/execute";
+    public static final String BUILD_TEST = "lithe/build/test";
+    public static final String BUILD_DISCOVER_TESTS = "lithe/build/discoverTests";
+    public static final String BUILD_PREPARE_DEBUG = "lithe/build/prepareDebug";
+    public static final String BUILD_PREPARE_RUN = "lithe/build/prepareRun";
+    public static final String BUILD_PROGRESS = "lithe/build/progress";
 
     /** JSON-RPC and LSP error codes the SDK answers with. */
     public static final int PARSE_ERROR = -32700;
@@ -42,6 +48,23 @@ public final class Protocol {
     public static final int MAX_PLUGIN_ERROR_CODE_BYTES = 64;
     public static final int MAX_MESSAGE_BYTES = 1024;
     public static final int MAX_RESULT_BYTES = 1 << 20;
+    public static final int MAX_BUILD_RESULT_BYTES = 32 * 1024 * 1024;
+    public static final int MAX_BUILD_MESSAGE_BYTES = 4096;
+    public static final int MAX_BUILD_OUTPUT_BYTES = 65536;
+
+    /** Minimum negotiated version; unknown methods can never pass admission. */
+    static int buildMethodVersion(String method) {
+        if (BUILD_MODEL.equals(method) || BUILD_DEPENDENCIES.equals(method)) return 1;
+        if (BUILD_EXECUTE.equals(method)) return 2;
+        if (BUILD_TEST.equals(method) || BUILD_DISCOVER_TESTS.equals(method)) return 3;
+        if (BUILD_PREPARE_DEBUG.equals(method)) return 5;
+        if (BUILD_PREPARE_RUN.equals(method)) return 4;
+        return Integer.MAX_VALUE;
+    }
+
+    static boolean buildProgress(String method) {
+        return BUILD_EXECUTE.equals(method) || BUILD_TEST.equals(method) || BUILD_PREPARE_RUN.equals(method) || BUILD_PREPARE_DEBUG.equals(method);
+    }
 
     private static final Pattern FUNCTION_SEGMENT = Pattern.compile("[a-z][A-Za-z0-9]*");
     private static final Pattern PLUGIN_ERROR_CODE = Pattern.compile("[A-Za-z][A-Za-z0-9._-]*");

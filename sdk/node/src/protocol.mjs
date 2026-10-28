@@ -6,7 +6,7 @@
 
 /** Protocol versions this SDK can answer. */
 export const FUNCTIONS_VERSION = 1;
-export const BUILD_VERSION = 1;
+export const BUILD_VERSION = 6;
 export const VCS_VERSION = 1;
 
 export const METHODS = Object.freeze({
@@ -21,7 +21,24 @@ export const METHODS = Object.freeze({
   functionProgress: 'lithe/function/progress',
   buildModel: 'lithe/build/model',
   buildDependencies: 'lithe/build/dependencies',
+  buildExecute: 'lithe/build/execute',
+  buildTest: 'lithe/build/test',
+  buildDiscoverTests: 'lithe/build/discoverTests',
+  buildPrepareRun: 'lithe/build/prepareRun',
+  buildPrepareDebug: 'lithe/build/prepareDebug',
+  buildProgress: 'lithe/build/progress',
   vcsExecution: 'lithe/vcs/execution',
+});
+
+/** Minimum negotiated version of each typed build operation. */
+export const BUILD_METHOD_VERSIONS = Object.freeze({
+  [METHODS.buildModel]: 1,
+  [METHODS.buildDependencies]: 1,
+  [METHODS.buildExecute]: 2,
+  [METHODS.buildTest]: 3,
+  [METHODS.buildDiscoverTests]: 3,
+  [METHODS.buildPrepareRun]: 4,
+  [METHODS.buildPrepareDebug]: 5,
 });
 
 /**
@@ -78,6 +95,9 @@ export const LIMITS = Object.freeze({
   maxPluginErrorCodeBytes: 64,
   maxMessageBytes: 1024,
   maxResultBytes: 1 << 20,
+  maxBuildResultBytes: 32 * 1024 * 1024,
+  maxBuildMessageBytes: 4096,
+  maxBuildOutputBytes: 65536,
   maxVcsIdBytes: 32,
   maxExecutionErrorOutputBytes: 16 * 1024,
 });
