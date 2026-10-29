@@ -204,3 +204,12 @@ empty results after a read failure. Core validates 10,000 cases/8 MiB and keeps 
 suite/case names in distinct projects separate. Earlier negotiation refuses the new
 request field. Ordinary execute replies may include reports for build phases that run
 tests. These SDK sources are development inputs pending a coordinated host/SDK release.
+
+## Opaque test selectors (development protocol 9)
+
+`onTest` can receive `selectorKind` and `selectors` for a namespace declared by
+`test.selectorKinds`. The SDK admits them only after protocol 9 negotiation and
+rejects conflicts with suite/case, more than 64 values, empty/control-containing
+values and values exceeding 4096 UTF-8 bytes. An empty list selects the normal
+workspace/project scope. Preserve language-engine identities until mapping them
+to the upstream runner, and reject selections that cannot be represented exactly.

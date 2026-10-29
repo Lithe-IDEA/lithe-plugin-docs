@@ -700,6 +700,22 @@ public final class Backend {
             respond(id, null, error(Protocol.INVALID_PARAMS, "Inline test reports require build protocol 8 and a test request."));
             return;
         }
+        if (arguments.containsKey("selectorKind") || arguments.containsKey("selectors")) {
+            Object kind = arguments.get("selectorKind"), selectors = arguments.get("selectors");
+            boolean valid = negotiated.buildVersion() >= 9 && Protocol.BUILD_TEST.equals(method)
+                    && kind instanceof String && ((String) kind).matches("[a-zA-Z0-9][a-zA-Z0-9._-]{0,119}")
+                    && selectors instanceof List && ((List<?>) selectors).size() <= 64
+                    && !arguments.containsKey("suite") && !arguments.containsKey("case");
+            if (valid) for (Object selector : (List<?>) selectors) {
+                if (!(selector instanceof String) || ((String) selector).isEmpty()
+                        || ((String) selector).getBytes(StandardCharsets.UTF_8).length > 4096
+                        || ((String) selector).chars().anyMatch(Character::isISOControl)) { valid = false; break; }
+            }
+            if (!valid) {
+                respond(id, null, error(Protocol.INVALID_PARAMS, "Opaque selectors require build protocol 9 and a valid test selection."));
+                return;
+            }
+        }
         if (!Protocol.buildProgress(method)) {
             run(id, null, null, context -> handler.handle(arguments, context), result -> buildResult(method, result, negotiated.buildVersion()), null);
             return;

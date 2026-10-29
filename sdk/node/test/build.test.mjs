@@ -16,7 +16,7 @@ const methods = [
   ['configuration', 7, { sources: [] }],
 ];
 
-for (const version of [1, 2, 3, 4, 5, 6, 7, 8]) {
+for (const version of [1, 2, 3, 4, 5, 6, 7, 8, 9]) {
   test(`build protocol ${version} admits only its typed methods`, { timeout: 15000 }, async (t) => {
     const backend = createBackend();
     const invoked = [];
@@ -234,3 +234,23 @@ test('malformed inline report cannot become an empty successful outcome', { time
   const response = await host.request('lithe/build/test', { operationID: 'wire-invalid', testResults: true });
   assert.ok(response.error); assert.equal(response.result, undefined);
 });
+
+for (const version of [8, 9]) {
+  test(`opaque selectors are forwarded only after protocol 9 agreement (peer ${version})`, { timeout: 15000 }, async t => {
+    const seen = [];
+    const backend = createBackend();
+    backend.build.test(params => { seen.push(params); return { exitCode: 0, output: '' }; });
+    const host = new TestHost(backend); t.after(() => host.close());
+    await host.initialize({ litheBuild: { versions: [version] } });
+    const params = { operationID: 'wire-selectors', selectorKind: 'org.example.semantic', selectors: ['opaque # [case] () 中文'] };
+    const response = await host.request('lithe/build/test', params);
+    if (version < 9) { assert.equal(response.error.code, -32602); assert.deepEqual(seen, []); }
+    else {
+      assert.ok(response.result); assert.deepEqual(seen, [params]);
+      for (const edits of [{ suite: 'Suite' }, { case: 'method' }, { selectors: [''] }, { selectors: ['bad\nvalue'] }, { selectors: Array(65).fill('test') }, { selectorKind: '' }]) {
+        assert.equal((await host.request('lithe/build/test', { ...params, ...edits })).error.code, -32602);
+      }
+      assert.equal(seen.length, 1);
+    }
+  });
+}

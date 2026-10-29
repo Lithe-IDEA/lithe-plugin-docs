@@ -499,6 +499,15 @@ class Backend {
       this.#respond(id, undefined, { code: ERROR_CODES.invalidParams, message: 'Inline test reports require build protocol 8 and a test request.' });
       return;
     }
+    if ((Object.hasOwn(params ?? {}, 'selectorKind') || Object.hasOwn(params ?? {}, 'selectors'))
+        && (this.#buildVersion < 9 || method !== METHODS.buildTest
+          || typeof params.selectorKind !== 'string' || !/^[a-zA-Z0-9][a-zA-Z0-9._-]{0,119}$/.test(params.selectorKind)
+          || !Array.isArray(params.selectors) || params.selectors.length > 64
+          || params.selectors.some(value => typeof value !== 'string' || !value || Buffer.byteLength(value) > 4096 || /[\x00-\x1f\x7f-\x9f]/.test(value))
+          || Object.hasOwn(params, 'suite') || Object.hasOwn(params, 'case'))) {
+      this.#respond(id, undefined, { code: ERROR_CODES.invalidParams, message: 'Opaque selectors require build protocol 9 and a valid test selection.' });
+      return;
+    }
     const progressing = [METHODS.buildExecute, METHODS.buildTest, METHODS.buildPrepareRun, METHODS.buildPrepareDebug].includes(method);
     if (!params || typeof params !== 'object' || Array.isArray(params)
         || (progressing && typeof params.operationID !== 'string')) {

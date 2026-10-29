@@ -31,13 +31,37 @@ class BuildTest {
     }
 
     @Test
+    void opaqueSelectorsCannotBeIgnoredByAnOlderBackend() {
+        for (int version : new int[] {8, 9}) {
+            AtomicReference<Object> seen = new AtomicReference<>();
+            Backend backend = Backend.create(null, null).onTest((params, context) -> {
+                seen.set(params.get("selectors")); return map("exitCode", 0, "output", "");
+            });
+            TestHost host = new TestHost(backend);
+            try {
+                host.initialize(offered(version));
+                Map<String, Object> params = map("operationID", "wire-selectors", "selectorKind", "org.example.semantic",
+                        "selectors", Arrays.asList("opaque # [case] () 中文"));
+                Map<String, Object> result = host.request(Protocol.BUILD_TEST, params);
+                if (version == 8) { assertEquals(-32602L, errorCode(result)); assertEquals(null, seen.get()); }
+                else {
+                    assertTrue(result.containsKey("result")); assertEquals(params.get("selectors"), seen.get());
+                    params.put("suite", "Suite"); assertEquals(-32602L, errorCode(host.request(Protocol.BUILD_TEST, params)));
+                    params.remove("suite"); params.put("selectors", Arrays.asList("bad\nvalue"));
+                    assertEquals(-32602L, errorCode(host.request(Protocol.BUILD_TEST, params)));
+                }
+            } finally { host.close(); }
+        }
+    }
+
+    @Test
     void eachVersionAdmitsOnlyItsTypedMethods() {
         List<String> methods = Arrays.asList("execute", "test", "discoverTests", "prepareRun", "prepareDebug", "configuration");
         int[] minimum = {2, 3, 3, 4, 5, 7};
         List<Map<String, Object>> replies = Arrays.asList(map("exitCode", 0, "output", "built\n"),
                 map("exitCode", 2, "output", "test failed\n"),
                 map("tests", Arrays.asList(map("suite", "Suite", "case", "exact # [case]"))), LAUNCH, map("program", "app/bin/main", "arguments", Arrays.asList("a b"), "workingDirectory", "app", "environment", map()), map("sources", Collections.emptyList()));
-        for (int version = 1; version <= 8; version++) {
+        for (int version = 1; version <= 9; version++) {
             Backend backend = Backend.create(null, null)
                     .onExecute((params, context) -> replies.get(0))
                     .onTest((params, context) -> replies.get(1))

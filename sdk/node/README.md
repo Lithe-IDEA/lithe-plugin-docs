@@ -123,7 +123,7 @@ package. The SDK has no dependencies.
 | `backend.build.test(handler)`, `backend.build.discoverTests(handler)` | Protocol 3+: exact test execution and runnable selectors; discovery gets `format: "litheTestDiscovery"`, `version: 1`. |
 | `backend.build.configuration(handler)` | Protocol 7+: read-only non-sensitive raw/effective native configuration; stamps `litheBuildConfiguration`, version 1. The host owns explicit native-file saves. |
 | `backend.build.prepareRun(handler)` | Protocol 4: returns a portable launch plan after upstream synchronization/build; the host owns the application process. |
-| `backend.buildVersion` | Highest common negotiated build version (1–7), or `null`; methods newer than that version are refused before their handler runs. |
+| `backend.buildVersion` | Highest common negotiated build version (1–9), or `null`; methods newer than that version are refused before their handler runs. |
 | `backend.vcs(id, handlers, traits?)` | Implements the typed VCS requests; see [A VCS provider](#a-vcs-provider). `litheVcs` is answered only when the host offers it. |
 | `backend.function(id, handler)` | Declares a function offered in `initialize`. |
 | `backend.registerFunction(id, handler)`, `backend.unregisterFunction(id)` | Adds or withdraws a function. Called before the `initialize` answer (for example from `onInitialize`), they change the initial list; later they send `lithe/function/register` / `unregister`. Withdrawing revokes running calls. |
@@ -266,3 +266,13 @@ empty results after a read failure. Core validates 10,000 cases/8 MiB and keeps 
 suite/case names in distinct projects separate. Earlier negotiation refuses the new
 request field. Ordinary execute replies may include reports for build phases that run
 tests. These SDK sources are development inputs pending a coordinated host/SDK release.
+
+## Opaque test selectors (development protocol 9)
+
+A provider test may declare public `selectorKinds` in its manifest. Protocol 9
+passes `selectorKind` and `selectors` unchanged from the owning language engine;
+they are mutually exclusive with `suite` and `case`. An empty list selects the
+normal workspace/project scope. The SDK rejects these fields before the handler
+on older negotiated versions, invalid identifiers, more than 64 selectors,
+empty/control-containing values, or values larger than 4096 UTF-8 bytes. The
+backend must reject identities its upstream runner cannot represent exactly.

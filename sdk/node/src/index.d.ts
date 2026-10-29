@@ -107,6 +107,9 @@ export interface BuildExecutionParams extends BuildRequestParams {
 }
 
 export interface BuildTestParams extends BuildRequestParams {
+  /** Protocol 9: public semantic namespace and upstream-owned opaque identities. */
+  selectorKind?: string;
+  selectors?: string[];
   /** Requires build protocol 8 and an inline report in the reply. */
   testResults?: true;
   project?: BuildSelection | null;
@@ -140,6 +143,8 @@ export interface BuildContext extends RequestContext {
 /** Results belong to this operation; the host does not discover report files. */
 export interface BuildTestResultsDocument {
   format: 'litheTestResults'; version: 1;
+  /** Completed project/suite/case scopes; omitted means only returned cases are replaced. */
+  coverage?: { project: string; suite?: string; case?: string }[];
   tests: { project?: string; suite: string; case: string; status: 'passed' | 'failed' | 'error' | 'skipped';
     message?: string; durationMillis?: number; path?: string; line?: number; invocations?: number }[];
 }
