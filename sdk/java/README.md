@@ -213,3 +213,14 @@ rejects conflicts with suite/case, more than 64 values, empty/control-containing
 values and values exceeding 4096 UTF-8 bytes. An empty list selects the normal
 workspace/project scope. Preserve language-engine identities until mapping them
 to the upstream runner, and reject selections that cannot be represented exactly.
+
+## Java build preparation tasks (development convention)
+
+A build provider can declare project tasks `java-prepare-run-main` and
+`java-prepare-run-test` and handle them with `onExecute`. The first prepares
+main resources, and the second main plus test resources. The language workflow
+uses current model source roles, awaits successful completion, then asks JDT for
+runtime paths. The backend owns upstream filtering and reactor semantics.
+These are ordinary public task IDs; no Java source parsing, private function or
+new backend method is involved. Per-run options/tools are ephemeral plan inputs;
+never overwrite saved build defaults while preparing an application.
