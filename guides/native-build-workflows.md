@@ -110,3 +110,17 @@ node scripts/sdk-e2e.mjs --source /path/to/Lithe-IDEA --working-tree --build-wor
 Maven 的真实集成场景覆盖损坏 POM 前读取、用户/安装来源、自定义路径、命令行覆盖、敏感内容保留、Core 编辑后回读、旧版本拒绝、清理与包清单不变。SDK 单元测试分别验证 1–7 协商与配置格式；宿主合并前用 `node scripts/sdk-e2e.mjs --source <Lithe工作树> --working-tree --build-workflows --native-configuration` 验证 Node/Java 的端到端示例及协议 7 配置投影、Core 内部纯 XML 编辑、敏感内容保留与读取无写入。源码通过不表示已发版；Java SDK/JAR 的正式版本与哈希仍需发布流程固定。
 
 `--native-configuration` 在宿主合并前显式启用协议 7 场景；契约镜像同步到包含 7 的 preview 提交后默认启用。Node/Java 的无页面样例仍以其虚构引擎 JSON 供应非敏感配置投影，不增加 XML 解析或凭据传输。
+
+## Maven framework model properties
+
+Maven's backend publishes `run.modelVersion: "1"` on each canonical model
+project. For non-aggregator projects it may also publish `run.provider` with
+`spring-boot.maven`, `quarkus.maven`, or `micronaut.maven`. The selection comes
+from Maven's effective applied build plugins, including active Profiles and
+inheritance; plugin management alone is not application. These are scalar model
+properties, not a new SDK RPC or launch recipe. The host forwards the current
+project name, reactor and selection to Run generation; Core validates and
+projects existing service identities. A host requiring this model rejects an
+older Maven plugin without the version property and asks for an update rather
+than parsing POMs itself. Existing framework launch options remain in their
+current Run configuration layer until launch planning is migrated.
