@@ -42,6 +42,8 @@
 
 - `backend` 2 至少要有一种启动方式：网页工具窗口（首次页面调用，同 `backend` 1）、`ui.commands[]` 里的命令
   （`onCommand:<id>` 也会启动后端），或 `onWorkspaceOpen`。一种都没有是 `plugin.manifest.invalid`。
+- 只想要命令、不要工具窗口时，声明 `requires.ui: 4`：命令可以不写 `toolWindowID`，`toolWindows` 可以为空或省略，
+  见第 7 节。`ui` 1～3 的命令仍必须挂在工具窗口上。
 - `workspace.metadata` 只让后端知道打开的工作区名字、根目录、ID、来源（本地或远程）和每个工作区的私有状态目录，
   不读任何文件内容。不需要这些信息就不要声明，安装审查会把它列给用户。
 - 仍然拒绝 `${workspaceStateDir}`：一个插件只有一个后端进程，被所有窗口共享，工作区不是进程状态。
@@ -87,6 +89,8 @@
   "limits": {
     "pendingHostRequests": 16,
     "functionResultBytes": 1048576,
+    "hostRequestBytes": 1048576,
+    "hostResultBytes": 1048576,
     "errorMessageBytes": 1024,
     "errorDetailsBytes": 4096,
     "notificationBytes": 1048576
@@ -95,7 +99,7 @@
 ```
 
 上例是声明了 `workspace.metadata` 的会话。`host`、`subscriptions`、`commands` 每个插件会话都有；`services` 只列本次会话可用的方法，
-没声明的权限、宿主没有实现的服务都不会出现。数值以实际返回为准。**按 `services` 判断能不能调用，不要按协议版本号推断**，见第 8 节。
+没声明的权限、宿主没有实现的服务都不会出现。数值以实际返回为准。**按 `services` 判断能不能调用，不要按协议版本号推断**，见第 10 节。
 
 ## 6. 工作区上下文
 
@@ -143,7 +147,56 @@
 
 后端晚启动时不会补发之前的 `didChangeContexts`，启动后自己调一次 `listContexts`。
 
-## 8. 宿主失败与错误码
+`didRun` 只是事件，不代表命令要做的事已经成功；宿主也不会为了送达它而打开一个空工具窗口。
+
+### 纯后端命令（`ui` 4）
+
+```json
+"requires": { "backend": 2, "serverProcess": 1, "ui": 4 },
+"permissions": ["backend.launch", "ui.contribute"],
+"activationEvents": ["onCommand:io.github.<你的用户名>.orders.refresh"],
+"ui": {
+  "commands": [
+    { "id": "io.github.<你的用户名>.orders.refresh", "title": "Refresh Orders", "placements": ["commandPalette"] }
+  ]
+}
+```
+
+这样的命令要求 `backend` 2、`ui.contribute` 与 `backend.launch` 权限，以及对应的 `onCommand:<id>`。
+不认识 `ui` 4 的旧宿主会在安装时拒绝插件，不会装上一个执行不了的命令。完整示例见
+[`fixtures/command-backend.plugin.json`](../contract/v1/fixtures/command-backend.plugin.json)。
+
+## 8. 文档、文件与窗口方法
+
+协议 3 还开放了一组公共宿主方法，每组对应一个新权限。目前只有 macOS 宿主实现；Windows 宿主不提供 `backend`。
+`getCapabilities.services` 只列出“清单权限推出的授权”与“本宿主已实现的方法”的交集，所以照第 10 节第 1 条先查再调。
+
+| 方法（前缀 `lithe/host/`） | 权限 | 用途 |
+| --- | --- | --- |
+| `documents/list`、`documents/getSnapshot`、`editor/getActive`、`editor/getSelections` | `documents.read` | 列出打开的文档，读编辑器里未保存的内容、当前标签页和选区 |
+| `editor/applyEdits`、`editor/replaceSelections`、`editor/insertText` | `editor.edit` | 带 `expectedVersion` 的编辑；一批编辑是一次原子操作、一步撤销 |
+| `workspace/readDirectory`、`workspace/stat`、`workspace/readFile` | `workspace.files.read` | 读磁盘上的目录和文件 |
+| `workspace/watch` | `workspace.files.watch` | 订阅文件变化，事件经 `subscriptions/notify` 送达 |
+| `workspace/findFiles`、`workspace/findText` | `workspace.search` | 按文件名或内容搜索，分页返回 |
+| `editor/open`、`editor/reveal` | `editor.open` | 打开文件并定位到某处 |
+| `preview/openHTML` | `preview.open` | 用内置预览打开 HTML 文件 |
+| `browser/openExternal` | `browser.open` | 用系统浏览器打开 HTTP(S) 链接或 HTML 文件 |
+| `window/showInformation`、`window/showWarning`、`window/showError` | `window.messages` | 显示消息，可带最多 3 个按钮，返回用户选了哪个 |
+
+参数、结果和上限的权威定义在[契约](../contract/v1/README.md#public-document-file-and-window-methods-protocol-version-3)。写后端时要注意：
+
+- 每个方法都要带 `context: { contextID, generation }`。文件用 `{ rootID, path }` 指明，`path` 用 `/`、相对于
+  `getFolders` 返回的根目录。这组方法明确拒绝远程工作区（`authorityUnsupported`）。
+- `workspace.metadata` 只给工作区信息，**不授权读文件**；读文件要另外声明 `workspace.files.read`。
+- 位置 `{ line, column }` 从 1 开始、按 UTF-16 计；范围是半开区间。
+- 单次读取最多返回 128 KiB：快照超出时得到 `limitExceeded`，读文件则用 `isTruncated` 标明截断。一批编辑或选区最多 1,000 项。
+- 取消或超时**不代表已回滚**：编辑或打开可能已经生效，不要自动重放修改。遇到 `versionConflict` 先重新读取再计算；
+  遇到 `contextExpired` 要重新找到原来的目标，不要改用当前聚焦的窗口；`busy`、`rateLimited` 可以有限次重试；
+  `permissionDenied`、`readOnly` 需要用户处理。
+- 后台没有挂载编辑器的文档可以列出和读取，但编辑与选区可能返回 `busy`。
+- 消息有频率和排队上限（每插件 10 秒 5 条、最多 3 条待答），用户回答前请求一直挂起。
+
+## 9. 宿主失败与错误码
 
 协议 3 的宿主失败带类型：JSON-RPC 号码与 `error.data.code` 一一对应，号码永不改义，部分失败还带 `error.data.details`。
 
@@ -168,7 +221,7 @@
 
 `-32000` 到 `-32009` 留给后端自己的失败，宿主号码从 `-32010` 起。
 
-## 9. 协议 3 只增不改：后端要遵守的四条
+## 10. 协议 3 只增不改：后端要遵守的四条
 
 从协议 3 起，宿主再开放新能力（新服务及其方法和通知、可选参数、结果字段、错误码）都在协议 3 内新增，
 不再升协议版本；只有会让已有后端读错的改动（删除或改名、改字段含义或类型、把可选参数改成必填、改错误码号码）
@@ -184,10 +237,11 @@
 新服务总是配一个新的清单权限。旧宿主不认识这个权限时，会在安装时以 `plugin.permission.unknown` 拒绝整个插件包，
 权限不会被悄悄授予或忽略。
 
-## 10. 验证
+## 11. 验证
 
 - 用契约里的 [`fixtures/function-protocol.json`](../contract/v1/fixtures/function-protocol.json) 核对你的实现：
   `hostRequests` 有不认识的选项等请求用例，`invocationContexts` 有调用上下文，`hostFailures` 有失败码映射，
   `hostNotifications` 有通知用例。
 - 清单示例是 [`fixtures/backend-workspace.plugin.json`](../contract/v1/fixtures/backend-workspace.plugin.json)；
+  纯后端命令的示例是 [`fixtures/command-backend.plugin.json`](../contract/v1/fixtures/command-backend.plugin.json)；
   `fixtures/invalid-manifests.json` 里的 backend 用例是会被拒绝的写法。
