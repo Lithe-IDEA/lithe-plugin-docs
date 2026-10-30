@@ -124,3 +124,12 @@ projects existing service identities. A host requiring this model rejects an
 older Maven plugin without the version property and asks for an update rather
 than parsing POMs itself. Existing framework launch options remain in their
 current Run configuration layer until launch planning is migrated.
+
+The optional scalar project property `java.minimumVersion` contains a normalized
+Java feature version from the configured compiler execution model. Maven's
+backend calculates its own lifecycle plan without executing goals, evaluates
+compiler parameters with Maven's evaluator, and accounts for main/test and
+custom executions. Missing means unknown (including an unavailable descriptor
+or unresolved expression). Hosts must not fill the gap by parsing POM text.
+The highest known floor applies to project toolchain selection; platform Java
+version preferences must not lower it.
