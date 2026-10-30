@@ -3,12 +3,16 @@
   "source": {
     "repository": "https://github.com/1lck/Lithe-IDEA",
     "directory": "shared/contracts/plugins/v1",
-    "revision": "32021a86f0c6c4ad2964dbbe3c2bb7854d84ad67"
+    "revision": "f20601ee6194f32d597031556ea628de586ac2e2"
   },
   "files": [
     {
       "path": "README.md",
-      "sha256": "75cf6add5c473eb333caca793dc9add6394476c7f4c5196b2bf5f1aea7873d59"
+      "sha256": "1ac89012a6e620ddeec63b0fc82460c56f05623a1d2a29dcf45e87fa123a4806"
+    },
+    {
+      "path": "fixtures/backend-workspace.plugin.json",
+      "sha256": "6eef7a0735e4cd0c66b32a1075ad8f689554e26f929d3a1f436249026e06037b"
     },
     {
       "path": "fixtures/backend.plugin.json",
@@ -23,24 +27,68 @@
       "sha256": "cb24aedb59cdcec6b358dbeb95213143a4fc229aea8973ddd3f154f09335b9dc"
     },
     {
+      "path": "fixtures/build-debug-preparation.json",
+      "sha256": "73d3362fac7302c5698b440536821784350fbf6eb267b94d144994d403f0efed"
+    },
+    {
+      "path": "fixtures/build-execution-protocol.json",
+      "sha256": "556779c92b7b43970ff882cce6fd278dbe0d16476403778a9240d61c4a15b3da"
+    },
+    {
       "path": "fixtures/build-host-integration.plugin.json",
       "sha256": "36361a98a86de1c6c9c4f0694accab3adadefd53f344b4ac3a85b8906d749b13"
+    },
+    {
+      "path": "fixtures/build-model-consumer.plugin.json",
+      "sha256": "c41ac0f6fa6600f5bc0ee29d7d89f8257d9f9fec9add8d4c5ac448ad753177f5"
+    },
+    {
+      "path": "fixtures/build-model-producer.plugin.json",
+      "sha256": "2bed5e883cd21d37599cdaf69f2663b903e1149b58a7f33f7c01658ec081a455"
     },
     {
       "path": "fixtures/build-plans.json",
       "sha256": "b1ebdab5d1e7d0b6f5fc948335581c41814dac83937b8452722ad5da6836d6ab"
     },
     {
+      "path": "fixtures/build-provider-debug-preparation.plugin.json",
+      "sha256": "07db3ced65ab5f73318de59c8857b48f7b68d731bae928bc2954e3e47f585170"
+    },
+    {
+      "path": "fixtures/build-provider-execution.plugin.json",
+      "sha256": "6978c19d7f4353c5dadc833ac723dad76c001aae2c92286d4dd4a9ff2bd67101"
+    },
+    {
       "path": "fixtures/build-provider-language-server.plugin.json",
       "sha256": "fc6fae12c07715ad5017484cf9a17905d51ffa7ee40ccf4200613b720644f2ce"
+    },
+    {
+      "path": "fixtures/build-provider-run-preparation.plugin.json",
+      "sha256": "14fca4d8fba7a2bb66f3d6fb7ae81c745bc323d44d9958d8fdfc5c1adbcc7ac1"
+    },
+    {
+      "path": "fixtures/build-provider-tests.plugin.json",
+      "sha256": "071cef77007fbde34e1ff971c10bbe693e9275f10de1c070801baf880c4e19f8"
     },
     {
       "path": "fixtures/build-provider.plugin.json",
       "sha256": "bbb19c3d201be64af5262be549fe92822c14e77efae616e64c4f32ddd56b2758"
     },
     {
+      "path": "fixtures/build-run-preparation.json",
+      "sha256": "3609997b65e0322ae16756f1af376c041c55aa1a20187cad0c5a9bf1444a10cd"
+    },
+    {
       "path": "fixtures/build-static-file.plugin.json",
       "sha256": "0380748f151cf2b154133dac5447c8665801f16bf005314ab7ac1d4d11475c92"
+    },
+    {
+      "path": "fixtures/build-test-discovery.json",
+      "sha256": "62384b0d2c31cd2fed877a421dd90eb1fff1e7d991e1622567004bc2eace5dd6"
+    },
+    {
+      "path": "fixtures/build-test-protocol.json",
+      "sha256": "a67b9b6448aff53792cb791b0fa6994fcb0e94729a5c5a85a524398ebe6e58fd"
     },
     {
       "path": "fixtures/build-tool-path.plugin.json",
@@ -51,8 +99,16 @@
       "sha256": "a188fd65f6cdb47f9e9ad4b0de3a7ddcd17e4e577b34f6e25b96d2c1f2bdca7c"
     },
     {
+      "path": "fixtures/debug-adapter-language-server.plugin.json",
+      "sha256": "c29d1e94a69840a63317e5d4b15a0a9cd8267a980fa2b21c37528bc08bb3ee96"
+    },
+    {
       "path": "fixtures/debug-adapter-rejections.json",
-      "sha256": "0aaa586c19884025eb9bee36dc213fbebacc4d0503c3f5ed10a196c922cfaeaf"
+      "sha256": "ec6023c48236ec3f59f8c8c7bfd4cefea0180f14e11fd4823fb2e48ac36567a6"
+    },
+    {
+      "path": "fixtures/debug-adapter-remote-attach.plugin.json",
+      "sha256": "66b4e0326f3b99027865869742ec98afd7da0df6133bc0a23115749edde13e3b"
     },
     {
       "path": "fixtures/debug-adapter.plugin.json",
@@ -60,7 +116,7 @@
     },
     {
       "path": "fixtures/function-protocol.json",
-      "sha256": "980e8d39db2af9d7f922cdc01b0ec06e2cb8c33da2142ec8040befa975b7eae5"
+      "sha256": "d8f11ab3287d24210e9369ec6b5fcdb65316d6afe82c60583455c84065ae583b"
     },
     {
       "path": "fixtures/hello-lithe.plugin.json",
@@ -68,7 +124,7 @@
     },
     {
       "path": "fixtures/invalid-manifests.json",
-      "sha256": "107afd7d3f440a87aab3611a80aa5e92c067cd719019dafd94bda8cdbd6b842f"
+      "sha256": "3bbd1ed851b916d1e006d0403bb9eb2d5cd122e65070da91890aa6b7154b0454"
     },
     {
       "path": "fixtures/language-host-integration.plugin.json",
@@ -143,6 +199,10 @@
       "sha256": "14c6fa8b073732f93b85b30e4fa9e8384ce094f2fb6fe833e41476f12c8d2132"
     },
     {
+      "path": "fixtures/publisher-bundled.plugin.json",
+      "sha256": "195c3f7c9712f44711602c059e32af88b3e7b7285b600cffd38f116e5b1150eb"
+    },
+    {
       "path": "fixtures/runtime-versions.json",
       "sha256": "a19c1c057ab54a2b24a4a0e5a0d7764f0b9063bb6dd356baf19f5f6e37a76e19"
     },
@@ -168,7 +228,7 @@
     },
     {
       "path": "plugin-manifest.schema.json",
-      "sha256": "f35d510bf76feeff2978289bebbeba19453cd60b1e101b7677c6106934a27f95"
+      "sha256": "789a340f03a598f9e1505ff887a90ee5a0b8a004071ef331d6382a97ea1b9f11"
     }
   ]
 }
