@@ -121,8 +121,9 @@ package. The SDK has no dependencies.
 | `backend.build.model(handler)`, `backend.build.dependencies(handler)` | Implements the typed build requests. The SDK stamps `format` and `version`; a handler returning another format or a version other than 1 fails. Core validates the document. `litheBuild` is answered only when a handler exists. |
 | `backend.build.execute(handler)` | Protocol 2+: provider-owned bounded task, returning `{ exitCode, output }`. |
 | `backend.build.test(handler)`, `backend.build.discoverTests(handler)` | Protocol 3+: exact test execution and runnable selectors; discovery gets `format: "litheTestDiscovery"`, `version: 1`. |
+| `backend.build.configuration(handler)` | Protocol 7+: read-only non-sensitive raw/effective native configuration; stamps `litheBuildConfiguration`, version 1. The host owns explicit native-file saves. |
 | `backend.build.prepareRun(handler)` | Protocol 4: returns a portable launch plan after upstream synchronization/build; the host owns the application process. |
-| `backend.buildVersion` | Highest common negotiated build version (1–6), or `null`; methods newer than that version are refused before their handler runs. |
+| `backend.buildVersion` | Highest common negotiated build version (1–10), or `null`; methods newer than that version are refused before their handler runs. |
 | `backend.vcs(id, handlers, traits?)` | Implements the typed VCS requests; see [A VCS provider](#a-vcs-provider). `litheVcs` is answered only when the host offers it. |
 | `backend.function(id, handler)` | Declares a function offered in `initialize`. |
 | `backend.registerFunction(id, handler)`, `backend.unregisterFunction(id)` | Adds or withdraws a function. Called before the `initialize` answer (for example from `onInitialize`), they change the initial list; later they send `lithe/function/register` / `unregister`. Withdrawing revokes running calls. |
@@ -252,3 +253,57 @@ The two native workflow samples demonstrate independent producer and consumer
 backends in the Core end-to-end tests. Their engine is fictional; this does not
 migrate Maven, JDT, LLDB or existing plugin business logic. The contract mirror
 must be synced from the merged Lithe revision before these changes are released.
+
+## Inline test reports (development protocol 8)
+
+A test declared with `results: { "decoder": "provider" }` requires buildProviders 8.
+Core sends `testResults: true`; answer with `testResults: { format: "litheTestResults",
+version: 1, tests: [...] }` beside `exitCode` and `output`. Cases carry suite/case/status
+and optional project/source paths, message, durationMillis and invocations. A failed
+test still returns its nonzero exit code and current reports. Report discovery and
+freshness belong to the provider's upstream engine; never return old files or silently
+empty results after a read failure. Core validates 10,000 cases/8 MiB and keeps equal
+suite/case names in distinct projects separate. Earlier negotiation refuses the new
+request field. Ordinary execute replies may include reports for build phases that run
+tests. These SDK sources are development inputs pending a coordinated host/SDK release.
+
+## Opaque test selectors (development protocol 9)
+
+A provider test may declare public `selectorKinds` in its manifest. Protocol 9
+passes `selectorKind` and `selectors` unchanged from the owning language engine;
+they are mutually exclusive with `suite` and `case`. An empty list selects the
+normal workspace/project scope. The SDK rejects these fields before the handler
+on older negotiated versions, invalid identifiers, more than 64 selectors,
+empty/control-containing values, or values larger than 4096 UTF-8 bytes. The
+backend must reject identities its upstream runner cannot represent exactly.
+
+
+## Typed run choices (development protocol 10)
+
+`backend.build.prepareRun` receives optional `params.launchOptions` only with
+protocol 10: an execution kind, separate runtime/program argv arrays, environment,
+and optional workspace-relative working directory and opaque entrypoint. Service
+and task declarations require version 10 and these options; preparation still
+finishes before the host starts and owns the process. Both SDK and Core refuse
+old sessions or malformed fields before calling the handler. Empty argv values,
+spaces, Unicode and literal backslashes remain separate values. Reject choices
+your engine cannot implement; do not silently drop runtime or entrypoint choices.
+The native sample demonstrates that refusal and consumes supported arguments,
+environment and cwd without parsing a shell string.
+
+Validate the development host combination with
+`node scripts/sdk-e2e.mjs --source <Lithe checkout> --working-tree --build-workflows --provider-run-options`.
+This flag explicitly tests unmerged Core work. The contract mirror and released
+SDK stay pinned until the corresponding preview commit is merged and synchronized.
+
+
+## JVM service debug choices (development protocol 11)
+
+A service preparation may receive `launchOptions.debug = { runtime: 'jvm', port: 51235 }`.
+This is a host-selected loopback port, with a suspended JVM and exactly one agent;
+it is not permission to choose an endpoint, adapter or DAP arguments. Reject the
+choice if your engine cannot honor it. SDKs refuse it on protocol 10 or older.
+The portable process result is unchanged, and the host owns process lifetime,
+readiness, attachment and cleanup. The native-build examples explicitly reject
+this JVM choice rather than silently ignoring it. No release version or lock is
+changed by this development protocol increment.

@@ -18,6 +18,7 @@ import {
   ERROR_CODES,
   FUNCTIONS_VERSION,
   isFunctionId,
+  isBuildLaunchOptions,
   isReservedMethod,
   isVcsId,
   LIMITS,
@@ -30,6 +31,7 @@ import {
 /** Canonical result format of each typed build request. */
 const BUILD_FORMATS = Object.freeze({
   [METHODS.buildModel]: 'litheBuildModel',
+  [METHODS.buildConfiguration]: 'litheBuildConfiguration',
   [METHODS.buildDependencies]: 'litheDependencies',
   [METHODS.buildDiscoverTests]: 'litheTestDiscovery',
 });
@@ -95,6 +97,8 @@ class Backend {
     this.#version = version === undefined ? undefined : String(version);
     this.#capabilities = capabilities;
     this.build = Object.freeze({
+      /** Returns non-sensitive native settings; no native document bytes cross RPC. */
+      configuration: (handler) => this.#declareBuild(METHODS.buildConfiguration, handler),
       /** Answers `lithe/build/model` with a `litheBuildModel` document. */
       model: (handler) => this.#declareBuild(METHODS.buildModel, handler),
       /** Answers `lithe/build/dependencies` with a `litheDependencies` document. */
@@ -487,8 +491,31 @@ class Backend {
   }
 
   #invokeBuild(id, method, params, handler) {
+    if (Object.hasOwn(params?.launchOptions ?? {}, 'debug') && this.#buildVersion < 11) {
+      this.#respond(id, undefined, { code: ERROR_CODES.invalidParams, message: 'Runtime debug options require build protocol 11.' });
+      return;
+    }
+    if (Object.hasOwn(params ?? {}, 'launchOptions')
+        && (this.#buildVersion < 10 || method !== METHODS.buildPrepareRun || !isBuildLaunchOptions(params.launchOptions))) {
+      this.#respond(id, undefined, { code: ERROR_CODES.invalidParams, message: 'Typed launch options require build protocol 10 and valid run preparation options.' });
+      return;
+    }
     if (Object.hasOwn(params ?? {}, 'modelInputs') && this.#buildVersion < 6) {
       this.#respond(id, undefined, { code: ERROR_CODES.invalidParams, message: 'Model inputs require build protocol 6.' });
+      return;
+    }
+    if (Object.hasOwn(params ?? {}, 'testResults')
+        && (this.#buildVersion < 8 || method !== METHODS.buildTest || params.testResults !== true)) {
+      this.#respond(id, undefined, { code: ERROR_CODES.invalidParams, message: 'Inline test reports require build protocol 8 and a test request.' });
+      return;
+    }
+    if ((Object.hasOwn(params ?? {}, 'selectorKind') || Object.hasOwn(params ?? {}, 'selectors'))
+        && (this.#buildVersion < 9 || method !== METHODS.buildTest
+          || typeof params.selectorKind !== 'string' || !/^[a-zA-Z0-9][a-zA-Z0-9._-]{0,119}$/.test(params.selectorKind)
+          || !Array.isArray(params.selectors) || params.selectors.length > 64
+          || params.selectors.some(value => typeof value !== 'string' || !value || Buffer.byteLength(value) > 4096 || /[\x00-\x1f\x7f-\x9f]/.test(value))
+          || Object.hasOwn(params, 'suite') || Object.hasOwn(params, 'case'))) {
+      this.#respond(id, undefined, { code: ERROR_CODES.invalidParams, message: 'Opaque selectors require build protocol 9 and a valid test selection.' });
       return;
     }
     const progressing = [METHODS.buildExecute, METHODS.buildTest, METHODS.buildPrepareRun, METHODS.buildPrepareDebug].includes(method);
@@ -510,7 +537,7 @@ class Backend {
         if (Number.isFinite(percentage)) report.percentage = Math.min(100, Math.max(0, Math.round(percentage)));
         this.#write({ jsonrpc: '2.0', method: METHODS.buildProgress, params: report });
       },
-    } : context), (result) => buildResult(method, result), () => { reporting = false; });
+    } : context), (result) => buildResult(method, result, this.#buildVersion), () => { reporting = false; });
   }
 
   #invokeFunction(id, { functionID, operationID, params }) {
@@ -750,7 +777,7 @@ function requestKey(id) {
  * plain document. A result in another format is a backend bug: Core would
  * refuse it as `plugin.build.invalidOutput`, so it fails here with a clear log.
  */
-function buildResult(method, result) {
+function buildResult(method, result, version) {
   const expected = BUILD_FORMATS[method];
   if (!isObject(result)) {
     throw new PluginSdkError('sdk.build.invalidResult', `${method} must return a reply object.`);
@@ -769,6 +796,14 @@ function buildResult(method, result) {
       && (!Number.isInteger(result.exitCode) || result.exitCode < -2147483648 || result.exitCode > 2147483647
         || typeof result.output !== 'string' || Buffer.byteLength(result.output) > LIMITS.maxBuildResultBytes)) {
     throw new PluginSdkError('sdk.build.invalidResult', `${method} needs an int32 exitCode and bounded output.`);
+  }
+  if (Object.hasOwn(result, 'testResults')) {
+    const report = result.testResults;
+    if (version < 8 || ![METHODS.buildExecute, METHODS.buildTest].includes(method) || !isObject(report)
+        || report.format !== 'litheTestResults' || report.version !== 1 || !Array.isArray(report.tests)
+        || report.tests.length > 10000 || Buffer.byteLength(JSON.stringify(report)) > 8 * 1024 * 1024) {
+      throw new PluginSdkError('sdk.build.invalidResult', 'Inline test reports need protocol 8 and a bounded litheTestResults document.');
+    }
   }
   if (method === METHODS.buildPrepareRun
       && (!isObject(result.executable) || !['toolchain', 'command'].includes(result.executable.kind)

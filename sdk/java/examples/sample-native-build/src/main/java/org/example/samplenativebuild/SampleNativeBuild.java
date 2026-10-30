@@ -12,6 +12,7 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.Collections;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -49,6 +50,15 @@ public final class SampleNativeBuild {
             return object("projects", model, "targets", targets);
         });
         backend.onDependencies((params, context) -> object("dependencies", Collections.emptyList()));
+        // The fictional engine supplies only the non-sensitive projection;
+        // complete native documents are never sent through the SDK.
+        backend.onConfiguration((params, context) -> {
+            Path base = inside(Json.string(params, "root"));
+            Map<String, Object> engine = Json.object(Json.parse(new String(
+                    Files.readAllBytes(base.resolve("lithe-sample.json")), StandardCharsets.UTF_8)));
+            return engine.get("configuration") instanceof Map ? Json.object(engine.get("configuration"))
+                    : object("sources", Collections.emptyList());
+        });
         backend.onExecute((params, context) -> {
             if (!"build".equals(params.get("task"))) throw new PluginError("sample.task", "Unknown build task.");
             return build(select(params), strings(params.get("userArguments")), context);
@@ -70,7 +80,14 @@ public final class SampleNativeBuild {
     private Object prepare(Map<String, Object> params, CallContext context, boolean debug) throws IOException {
             List<Map<String, Object>> selected = select(params);
             Map<String, Object> target = Json.object(params.get("target"));
-            if (selected.size() != 1 || !"application".equals(params.get("run"))) throw new PluginError("sample.target", "Select one application.");
+            Map<String, Object> options = params.get("launchOptions") instanceof Map ? Json.object(params.get("launchOptions")) : null;
+            String execution = String.valueOf(params.get("run"));
+            if (!Arrays.asList("application", "service", "task").contains(execution)
+                    || (!"application".equals(execution) && options == null)
+                    || (options != null && (!strings(options.get("runtimeArguments")).isEmpty() || options.containsKey("entrypoint") || options.containsKey("debug") || !execution.equals(options.get("execution"))))) {
+                throw new PluginError("sample.launchOptions", "This engine does not support the requested runtime or entrypoint options.");
+            }
+            if (selected.size() != 1) throw new PluginError("sample.target", "Select one application.");
             Map<String, Object> project = selected.get(0);
             if (!(project.get("run") instanceof Map) || !"Main".equals(target.get("name")) || !project.get("path").equals(target.get("path"))) {
                 throw new PluginError("sample.target", "The selected application no longer exists.");
@@ -87,8 +104,10 @@ public final class SampleNativeBuild {
             }
             List<String> arguments = strings(run.get("arguments"));
             arguments.addAll(strings(params.get("userArguments")));
+            if (options != null) arguments.addAll(strings(options.get("arguments")));
             return object("executable", object("kind", "command", "value", run.get("command")), "arguments", arguments,
-                    "workingDirectory", project.get("path"), "environment", object());
+                    "workingDirectory", options != null && options.containsKey("workingDirectory") ? options.get("workingDirectory") : project.get("path"),
+                    "environment", options == null ? object() : options.get("environment"));
     }
 
     private Map<String, Object> build(List<Map<String, Object>> projects, List<String> arguments, CallContext context) throws IOException {
@@ -104,6 +123,7 @@ public final class SampleNativeBuild {
 
     private Object test(Map<String, Object> params, CallContext context) throws IOException {
         int matched = 0;
+        List<Object> results = new ArrayList<>();
         StringBuilder output = new StringBuilder();
         for (Map<String, Object> project : select(params)) {
             for (Map<String, Object> test : tests(project)) {
@@ -112,11 +132,18 @@ public final class SampleNativeBuild {
                 matched++;
                 Processes.Result result = run(test.get("command"), project, strings(params.get("userArguments")), context);
                 output.append(result.stdout()).append(result.stderr());
-                if (result.exitCode() != 0) return object("exitCode", result.exitCode(), "output", output.toString());
+                results.add(object("project", project.get("path"), "suite", test.get("suite"), "case", test.get("case"), "status", result.exitCode() == 0 ? "passed" : "failed"));
+                if (result.exitCode() != 0) return testReply(params, result.exitCode(), output.toString(), results);
             }
         }
         if (matched == 0 && (params.containsKey("suite") || params.containsKey("case"))) throw new PluginError("sample.test", "The selected test no longer exists.");
-        return object("exitCode", 0, "output", output.toString());
+        return testReply(params, 0, output.toString(), results);
+    }
+
+    private Object testReply(Map<String, Object> params, int exit, String output, List<Object> tests) {
+        Map<String, Object> reply = object("exitCode", exit, "output", output);
+        if (Boolean.TRUE.equals(params.get("testResults"))) reply.put("testResults", object("format", "litheTestResults", "version", 1, "tests", tests));
+        return reply;
     }
 
     private Processes.Result run(Object declared, Map<String, Object> project, List<String> arguments, CallContext context) throws IOException {

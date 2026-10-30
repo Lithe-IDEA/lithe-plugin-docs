@@ -107,6 +107,11 @@ export interface BuildExecutionParams extends BuildRequestParams {
 }
 
 export interface BuildTestParams extends BuildRequestParams {
+  /** Protocol 9: public semantic namespace and upstream-owned opaque identities. */
+  selectorKind?: string;
+  selectors?: string[];
+  /** Requires build protocol 8 and an inline report in the reply. */
+  testResults?: true;
   project?: BuildSelection | null;
   target?: BuildSelection | null;
   suite?: string;
@@ -115,7 +120,20 @@ export interface BuildTestParams extends BuildRequestParams {
   operationID: string;
 }
 
+/** Version 10. These are resolved user choices, not shell command strings. */
+export interface BuildLaunchOptions {
+  execution: 'application' | 'service' | 'task';
+  runtimeArguments: string[];
+  arguments: string[];
+  environment: Record<string, string>;
+  workingDirectory?: string;
+  entrypoint?: string;
+  /** Version 11. Suspend the JVM on a host-selected loopback endpoint. */
+  debug?: { runtime: 'jvm'; port: number };
+}
+
 export interface BuildRunParams extends BuildRequestParams {
+  launchOptions?: BuildLaunchOptions;
   run: string;
   project: BuildSelection;
   target: BuildSelection;
@@ -135,7 +153,15 @@ export interface BuildContext extends RequestContext {
   progress(report: BuildProgressReport): void;
 }
 
-export interface BuildExecutionResult { exitCode: number; output: string; }
+/** Results belong to this operation; the host does not discover report files. */
+export interface BuildTestResultsDocument {
+  format: 'litheTestResults'; version: 1;
+  /** Completed project/suite/case scopes; omitted means only returned cases are replaced. */
+  coverage?: { project: string; suite?: string; case?: string }[];
+  tests: { project?: string; suite: string; case: string; status: 'passed' | 'failed' | 'error' | 'skipped';
+    message?: string; durationMillis?: number; path?: string; line?: number; invocations?: number }[];
+}
+export interface BuildExecutionResult { exitCode: number; output: string; testResults?: BuildTestResultsDocument; }
 export interface BuildTestDiscovery {
   format?: 'litheTestDiscovery';
   version?: 1;
@@ -225,10 +251,12 @@ export interface ListenOptions {
 export interface Backend {
   readonly negotiated: Negotiated;
   readonly initializeParams: JsonObject | null;
-  /** Highest common version (1-4), or null before/without negotiation. */
+  /** Highest common version (1-8), or null before/without negotiation. */
   readonly buildVersion: number | null;
   readonly functionIDs: string[];
   readonly build: {
+    /** Non-sensitive source-backed settings; requires build protocol 7. */
+    configuration(handler: BuildHandler): Backend;
     model(handler: BuildHandler): Backend;
     dependencies(handler: BuildHandler): Backend;
     execute(handler: BuildExecutionHandler): Backend;

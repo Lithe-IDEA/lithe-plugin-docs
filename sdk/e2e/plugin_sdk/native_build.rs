@@ -2,12 +2,18 @@
 //! private function. The fictional engine owns all build/test/run facts.
 use super::{core, listing, Fixture, Sample, Session, BUILD_SYSTEM, WAIT};
 use serde_json::{json, Value};
+use sha2::{Digest, Sha256};
 use std::fs;
 use std::time::Instant;
 
 pub fn run(sample: &Sample) {
-    let manifest: Value =
+    let mut manifest: Value =
         serde_json::from_slice(&fs::read(sample.package.join("plugin.json")).unwrap()).unwrap();
+    let reports = std::env::var("LITHE_PLUGIN_SDK_REPORT_WORKFLOWS").as_deref() == Ok("1");
+    if reports {
+        manifest["requires"]["buildProviders"] = json!(8);
+        manifest["buildSystems"][0]["test"]["results"] = json!({"decoder":"provider"});
+    }
     let before = listing(&sample.package);
     assert_eq!(
         core("plugins.declarative.validate", json!({"manifest":manifest}))["status"],
@@ -20,7 +26,7 @@ pub fn run(sample: &Sample) {
     fs::create_dir_all(instance.join("app")).unwrap();
     fs::create_dir_all(instance.join("broken")).unwrap();
     fs::create_dir_all(instance.join("slow")).unwrap();
-    let config = json!({"projects":[
+    let mut config = json!({"projects":[
         {"name":"app","path":"app","build":[sample.node,"-e","const fs=require('fs'); const n=fs.existsSync('build-count')?Number(fs.readFileSync('build-count','utf8')):0; fs.writeFileSync('build-count',String(n+1)); console.log('native build')"],
          "tests":[
             {"suite":"Suite","case":"exact # [case]","command":[sample.node,"-e","console.log(JSON.stringify(process.argv.slice(1)))"]},
@@ -30,6 +36,16 @@ pub fn run(sample: &Sample) {
          "run":{"command":"node","arguments":["-e","process.exit(99)"]}},
         {"name":"slow","path":"slow","build":[sample.node,"-e","require('fs').writeFileSync('started', String(process.pid)); setInterval(()=>{}, 1000)"],"run":{"command":"node","arguments":[],"debugProgram":"native-program"}}
     ]});
+    let native_document = "<settings><!--keep--><cacheDirectory>/raw/cache</cacheDirectory><password>sdk-native-secret-sentinel</password></settings>";
+    let native_file = instance.join("settings.xml");
+    if std::env::var("LITHE_PLUGIN_SDK_CONFIGURATION_WORKFLOWS").as_deref() == Ok("1") {
+        fs::write(&native_file, native_document).unwrap();
+        config["configuration"] = json!({"sources":[{"id":"user","scope":"user",
+            "uri":url::Url::from_file_path(&native_file).unwrap().as_str(),
+            "revision":format!("sha256:{:x}", Sha256::digest(native_document.as_bytes())),"writable":true,
+            "rootElement":{"name":"settings","namespace":""},"fields":[{"id":"cacheDirectory","kind":"directory",
+                "value":"/raw/cache","effectiveValue":"/selected/cache","effectiveSource":"commandLine","path":["cacheDirectory"]}]}]});
+    }
     fs::write(instance.join("lithe-sample.json"), config.to_string()).unwrap();
     fs::write(instance.join("app/native-program"), "native debugger target fixture").unwrap();
     let launch = core(
@@ -60,6 +76,31 @@ pub fn run(sample: &Sample) {
         )
     };
     let app = json!({"name":"app","path":"nested/app"});
+    if std::env::var("LITHE_PLUGIN_SDK_CONFIGURATION_WORKFLOWS").as_deref() == Ok("1") {
+        let mut native = manifest.clone();
+        native["requires"]["buildProviders"] = json!(if reports {8} else {7});
+        native["buildSystems"][0]["configuration"] = json!({"source":"provider"});
+        let request = |command: &str, payload: Value| core(command,
+            json!({"manifest":native,"buildSystemID":BUILD_SYSTEM,"request":payload}));
+        let planned = request("build.configurationPlan", json!({"root":root}));
+        assert_eq!(planned["status"], "ok", "{planned}");
+        let reply = session.build_request("native-configuration", &planned["plan"]);
+        assert_eq!(reply["format"], "litheBuildConfiguration");
+        assert_eq!(reply["version"], 1);
+        assert!(!reply.to_string().contains("sdk-native-secret-sentinel"));
+        let decoded = request("build.decodeConfiguration", json!({"result":reply}));
+        assert_eq!(decoded["status"], "ok", "{decoded}");
+        assert_eq!(decoded["configuration"]["sources"][0]["fields"][0]["effectiveValue"], "/selected/cache");
+        let edited = request("build.editConfigurationDocument", json!({"snapshot":decoded["configuration"],
+            "edits":{"sourceID":"user","revision":reply["sources"][0]["revision"],"values":{"cacheDirectory":"/new/cache"}},
+            "document":native_document}));
+        assert_eq!(edited["status"], "ok", "{edited}");
+        let document = edited["edit"]["document"].as_str().unwrap();
+        assert!(document.contains("<cacheDirectory>/new/cache</cacheDirectory>"));
+        assert!(document.contains("<!--keep-->"));
+        assert!(document.contains("<password>sdk-native-secret-sentinel</password>"));
+        assert_eq!(fs::read_to_string(&native_file).unwrap(), native_document, "Core editing alone performs no native IO");
+    }
     let plan = build("build.modelPlan", json!({"root":root}))["plan"].clone();
     let result = session.build_request("model", &plan);
     let model = build(
@@ -87,7 +128,7 @@ pub fn run(sample: &Sample) {
         "request":{"workspaceRoot":workspace,"root":root,"result":source_reply}}));
     assert_eq!(source_model["status"], "ok", "{source_model}");
     let mut consumer = manifest.clone();
-    consumer["requires"]["buildProviders"] = json!(6);
+    consumer["requires"]["buildProviders"] = json!(if reports {8} else {6});
     consumer["requires"]["buildModelInputs"] = json!(1);
     consumer["buildSystems"][0]["modelInputs"] = json!([{"pluginID":producer["id"],"buildSystemID":"shared-source"}]);
     let resolved = core("build.resolveModelInputs", json!({"manifest":consumer,"buildSystemID":BUILD_SYSTEM,"request":{
@@ -143,6 +184,19 @@ pub fn run(sample: &Sample) {
     let tested = session.build_request("test-exact", &test_plan);
     assert_eq!(tested["exitCode"], 0, "{tested}");
     assert_eq!(tested["output"], "[\"a b\",\"x#y\"]\n");
+
+    if reports {
+        let decoded = build("build.decodeTestResults", json!({"workspaceRoot":workspace,"root":root,"result":tested["testResults"]}));
+        assert_eq!(decoded["status"], "ok", "{decoded}");
+        assert_eq!(decoded["results"]["summary"]["passed"], 1);
+        assert_eq!(decoded["results"]["tests"][0]["project"], "nested/app");
+        let plan = build("build.testPlan", json!({"root":root,"project":app,"suite":"Suite","case":"other","userArguments":[]}))["plan"].clone();
+        let failed = session.build_request("test-failure-with-report", &plan);
+        assert_eq!(failed["exitCode"], 7);
+        let decoded = build("build.decodeTestResults", json!({"workspaceRoot":workspace,"root":root,"result":failed["testResults"]}));
+        assert_eq!(decoded["results"]["summary"]["failed"], 1);
+        assert_eq!(decoded["results"]["tests"][0]["case"], "other");
+    }
 
     // An externally removed selector cannot silently widen to all tests.
     let mut changed = config.clone();
@@ -304,6 +358,26 @@ pub fn run(sample: &Sample) {
         "other workspace\n"
     );
     other.stop();
+    if std::env::var("LITHE_PLUGIN_SDK_RUN_OPTIONS_WORKFLOWS").as_deref() == Ok("1") {
+        fs::write(instance.join("lithe-sample.json"), config.to_string()).unwrap();
+        let mut native = manifest.clone();
+        native["requires"]["buildProviders"] = json!(10);
+        for execution in ["service", "task"] {
+            native["buildSystems"][0]["run"].as_array_mut().unwrap().push(json!({"id":execution,"source":"provider", "execution":execution,"fromTargets":{"tags":["application"]}}));
+            let options = json!({"execution":execution,"runtimeArguments":[],"arguments":["a b","雪",""],"environment":{"EXAMPLE":"typed value"},"workingDirectory":"."});
+            let plan = core("build.prepareRunPlan", json!({"manifest":native,"buildSystemID":BUILD_SYSTEM,"request":{
+                "root":root,"workspaceRoot":workspace,"run":execution,"project":app,"target":{"name":target["name"],"path":target["path"],"tags":target["tags"]},"launchOptions":options}}));
+            assert_eq!(plan["status"], "ok", "{plan}");
+            let result = session.build_request(&format!("prepare-{execution}"), &plan["plan"]);
+            let decoded = core("build.decodeRunPreparation", json!({"manifest":native,"buildSystemID":BUILD_SYSTEM,
+                "request":{"root":root,"workspaceRoot":workspace,"launchOptions":options,"result":result}}));
+            assert_eq!(decoded["status"], "ok", "{decoded}");
+            assert_eq!(decoded["launch"]["workingDirectory"], ".");
+            assert_eq!(decoded["launch"]["environment"]["EXAMPLE"], "typed value");
+            let args = decoded["launch"]["arguments"].as_array().unwrap();
+            assert_eq!(&args[args.len()-3..], json!(["a b","雪",""]).as_array().unwrap());
+        }
+    }
     session.stop();
     drop(other);
     drop(session);

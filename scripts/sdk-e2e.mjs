@@ -51,6 +51,8 @@ function output(command, args, trim = true) {
     const child = spawn(command, args, { stdio: ['ignore', 'pipe', 'inherit'],
       timeout: 15000, killSignal: 'SIGKILL', env: { ...process.env, GIT_OPTIONAL_LOCKS: '0' } });
     let text = '';
+    // StringDecoder preserves UTF-8 characters when Git splits a large diff across chunks.
+    child.stdout.setEncoding('utf8');
     child.stdout.on('data', chunk => { text += chunk; });
     child.on('error', reject);
     child.on('close', code => code === 0
@@ -138,13 +140,16 @@ async function rustSample() {
 
 async function main() {
   const { values } = parseArgs({ options: { ref: { type: 'string' }, source: { type: 'string' },
-    'working-tree': { type: 'boolean' }, 'build-workflows': { type: 'boolean' } } });
+    'working-tree': { type: 'boolean' }, 'build-workflows': { type: 'boolean' }, 'native-configuration': { type: 'boolean' }, 'provider-reports': { type: 'boolean' }, 'provider-run-options': { type: 'boolean' } } });
   if (values['working-tree'] && (!values.source || values.ref)) {
     throw new Error('--working-tree requires a local --source and cannot be combined with --ref.');
   }
   const lock = await readLock();
   const schema = JSON.parse(await readFile(join(repository, 'contract/v1/plugin-manifest.schema.json'), 'utf8'));
-  const buildWorkflows = includesNativeWorkflows(schema, values['build-workflows']);
+  const reportWorkflows = values['provider-reports'] || schema.properties.requires.properties.buildProviders.enum.includes(8);
+  const configurationWorkflows = values['native-configuration'] || schema.properties.requires.properties.buildProviders.enum.includes(7);
+  const runOptionsWorkflows = values['provider-run-options'] || schema.properties.requires.properties.buildProviders.enum.includes(10);
+  const buildWorkflows = includesNativeWorkflows(schema, values['build-workflows'] || configurationWorkflows || reportWorkflows || runOptionsWorkflows);
   const ref = values['working-tree'] ? 'HEAD' : values.ref ?? lock.source.revision;
   const source = values.source ?? `${lock.source.repository}.git`;
 
@@ -165,6 +170,9 @@ async function main() {
     env: {
       ...process.env,
       LITHE_PLUGIN_SDK_ROOT: repository,
+      LITHE_PLUGIN_SDK_RUN_OPTIONS_WORKFLOWS: runOptionsWorkflows ? '1' : '0',
+      LITHE_PLUGIN_SDK_REPORT_WORKFLOWS: reportWorkflows ? '1' : '0',
+      LITHE_PLUGIN_SDK_CONFIGURATION_WORKFLOWS: configurationWorkflows ? '1' : '0',
       LITHE_PLUGIN_SDK_NODE: process.execPath,
       LITHE_PLUGIN_SDK_JAVA: java,
       LITHE_PLUGIN_SDK_JAVA_SAMPLE: jar,

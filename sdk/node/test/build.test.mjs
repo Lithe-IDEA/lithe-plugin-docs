@@ -13,9 +13,10 @@ const methods = [
   ['discoverTests', 3, { tests: [{ suite: 'Suite', case: 'exact # [case]' }] }],
   ['prepareRun', 4, launch],
   ['prepareDebug', 5, { program: 'app/bin/main', arguments: [], workingDirectory: 'app', environment: {} }],
+  ['configuration', 7, { sources: [] }],
 ];
 
-for (const version of [1, 2, 3, 4, 5, 6]) {
+for (const version of [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11]) {
   test(`build protocol ${version} admits only its typed methods`, { timeout: 15000 }, async (t) => {
     const backend = createBackend();
     const invoked = [];
@@ -32,7 +33,8 @@ for (const version of [1, 2, 3, 4, 5, 6]) {
         assert.ok(!invoked.includes(method));
       } else {
         assert.deepEqual(response.result, method === 'discoverTests'
-          ? { ...reply, format: 'litheTestDiscovery', version: 1 } : reply);
+          ? { ...reply, format: 'litheTestDiscovery', version: 1 } : method === 'configuration'
+            ? { ...reply, format: 'litheBuildConfiguration', version: 1 } : reply);
       }
     }
   });
@@ -96,7 +98,7 @@ test('native debug progress preserves wire identity, UTF-8 limits and call owner
     context.progress({ message: '😀'.repeat(2000), output: '界'.repeat(30000), percentage: 120 });
     entered.open();
     await release.opened;
-    return methods.at(-1)[2];
+    return methods.find(([name]) => name === 'prepareDebug')[2];
   });
   const host = new TestHost(backend);
   t.after(async () => { release.open(); await host.close(); });
@@ -109,7 +111,7 @@ test('native debug progress preserves wire identity, UTF-8 limits and call owner
   assert.equal(Buffer.byteLength(report.output), 65535);
   assert.equal(report.percentage, 100);
   release.open();
-  assert.deepEqual((await pending).result, methods.at(-1)[2]);
+  assert.deepEqual((await pending).result, methods.find(([name]) => name === 'prepareDebug')[2]);
   late({ message: 'late output', output: 'late' });
   assert.equal(host.messages.filter((message) => message.method === 'lithe/build/progress').length, 1);
 });
@@ -180,7 +182,7 @@ test('build parameters need a wire operation ID and backend errors keep their ca
 test('native debug refuses adapter, process and arbitrary DAP result fields', { timeout: 15000 }, async (t) => {
   for (const field of ['adapter', 'launch', 'dapArguments']) {
     const backend = createBackend();
-    backend.build.prepareDebug(() => ({ ...methods.at(-1)[2], [field]: 'untrusted' }));
+    backend.build.prepareDebug(() => ({ ...methods.find(([name]) => name === 'prepareDebug')[2], [field]: 'untrusted' }));
     const host = new TestHost(backend);
     t.after(() => host.close());
     await host.initialize({ litheBuild: { versions: [5] } });
@@ -192,7 +194,7 @@ test('read-only model inputs require protocol 6 and preserve host identity', { t
   const modelInputs = { version: 1, revision: 17, inputs: [
     { pluginID: 'dev.source', buildSystemID: 'source', state: 'unavailable', instances: [] },
   ] };
-  for (const version of [5, 6]) {
+  for (const version of [5, 6, 7, 8]) {
     const seen = [];
     const backend = createBackend();
     backend.build.model((params) => { seen.push(params.modelInputs); return { projects: [], targets: [], tasks: [] }; });
@@ -203,5 +205,102 @@ test('read-only model inputs require protocol 6 and preserve host identity', { t
     if (version === 5) { assert.equal(response.error.code, -32602); assert.equal(seen.length, 0); }
     else { assert.deepEqual(seen, [modelInputs]); assert.ok(response.result); }
     await host.close();
+  }
+});
+
+for (const version of [7, 8]) {
+  test(`inline test reports require protocol 8 (peer ${version})`, { timeout: 15000 }, async t => {
+    let calls = 0;
+    const report = { format: 'litheTestResults', version: 1, tests: [
+      { project: 'a', suite: 'Same', case: 'checks', status: 'failed' },
+      { project: 'b', suite: 'Same', case: 'checks', status: 'passed' },
+    ] };
+    const backend = createBackend();
+    backend.build.test(() => { calls++; return { exitCode: 1, output: 'failed', testResults: report }; });
+    const host = new TestHost(backend);
+    t.after(() => host.close());
+    await host.initialize({ litheBuild: { versions: [version] } });
+    const response = await host.request('lithe/build/test', { operationID: 'wire-reports', testResults: true });
+    if (version === 7) { assert.equal(response.error.code, -32602); assert.equal(calls, 0); }
+    else { assert.deepEqual(response.result.testResults, report); assert.equal(response.result.exitCode, 1); }
+  });
+}
+
+test('malformed inline report cannot become an empty successful outcome', { timeout: 15000 }, async t => {
+  const backend = createBackend();
+  backend.build.test(() => ({ exitCode: 0, output: '', testResults: { format: 'wrong', version: 1, tests: [] } }));
+  const host = new TestHost(backend); t.after(() => host.close());
+  await host.initialize({ litheBuild: { versions: [8] } });
+  const response = await host.request('lithe/build/test', { operationID: 'wire-invalid', testResults: true });
+  assert.ok(response.error); assert.equal(response.result, undefined);
+});
+
+for (const version of [8, 9]) {
+  test(`opaque selectors are forwarded only after protocol 9 agreement (peer ${version})`, { timeout: 15000 }, async t => {
+    const seen = [];
+    const backend = createBackend();
+    backend.build.test(params => { seen.push(params); return { exitCode: 0, output: '' }; });
+    const host = new TestHost(backend); t.after(() => host.close());
+    await host.initialize({ litheBuild: { versions: [version] } });
+    const params = { operationID: 'wire-selectors', selectorKind: 'org.example.semantic', selectors: ['opaque # [case] () 中文'] };
+    const response = await host.request('lithe/build/test', params);
+    if (version < 9) { assert.equal(response.error.code, -32602); assert.deepEqual(seen, []); }
+    else {
+      assert.ok(response.result); assert.deepEqual(seen, [params]);
+      for (const edits of [{ suite: 'Suite' }, { case: 'method' }, { selectors: [''] }, { selectors: ['bad\nvalue'] }, { selectors: Array(65).fill('test') }, { selectorKind: '' }]) {
+        assert.equal((await host.request('lithe/build/test', { ...params, ...edits })).error.code, -32602);
+      }
+      assert.equal(seen.length, 1);
+    }
+  });
+}
+
+
+test('typed launch options preserve argv only after version 10 agreement', { timeout: 15000 }, async (t) => {
+  const options = { execution: 'service', runtimeArguments: ['-Dmessage=hello world'], arguments: ['雪', '', 'a b', 'C:\\path'], environment: { EXAMPLE: 'x' }, workingDirectory: '.', entrypoint: 'example.Main' };
+  for (const version of [9, 10]) {
+    let seen;
+    const backend = createBackend();
+    backend.build.prepareRun(params => { seen = params.launchOptions; return launch; });
+    backend.build.model(() => ({ projects: [] }));
+    const host = new TestHost(backend); t.after(() => host.close());
+    await host.initialize({ litheBuild: { versions: [version] } });
+    const request = launchOptions => host.request('lithe/build/prepareRun', { operationID: 'wire-options', launchOptions });
+    const response = await request(options);
+    if (version === 9) { assert.equal(response.error.code, -32602); assert.equal(seen, undefined); continue; }
+    assert.deepEqual(seen, options); assert.deepEqual(response.result, launch);
+    for (const patch of [{ execution: 'unknown' }, { arguments: ['bad\0'] }, { runtimeArguments: Array(1025).fill('x') },
+      { environment: { 'BAD=NAME': 'x' } }, { environment: { A: 'bad\0' } }, { workingDirectory: '../escape' },
+      { workingDirectory: '/absolute' }, { workingDirectory: 'C:relative' }, { workingDirectory: 'a//b' },
+      { workingDirectory: 'a/./b' }, { workingDirectory: 'a\\b' }, { entrypoint: '' }, { entrypoint: null }, { unknown: true }]) {
+      seen = undefined; assert.equal((await request({ ...options, ...patch })).error.code, -32602, JSON.stringify(patch));
+      assert.equal(seen, undefined);
+    }
+    assert.equal((await host.request('lithe/build/model', { launchOptions: options })).error.code, -32602);
+  }
+});
+
+
+test('JVM debug options require protocol 11 and an exact host-selected endpoint', { timeout: 15000 }, async t => {
+  for (const version of [10, 11]) {
+    let calls = 0;
+    const backend = createBackend();
+    backend.build.prepareRun(() => { calls++; return launch; });
+    const host = new TestHost(backend); t.after(() => host.close());
+    await host.initialize({ litheBuild: { versions: [version] } });
+    const options = { execution: 'service', runtimeArguments: [], arguments: [], environment: {}, debug: { runtime: 'jvm', port: 51235 } };
+    const request = launchOptions => host.request('lithe/build/prepareRun', { operationID: 'jvm-debug', launchOptions });
+    const response = await request(options);
+    if (version === 10) { assert.equal(response.error.code, -32602); assert.equal(calls, 0); }
+    else {
+      assert.deepEqual(response.result, launch);
+      for (const debug of [null, {}, { runtime: 'native', port: 51235 }, { runtime: 'jvm', port: 0 },
+        { runtime: 'jvm', port: 65536 }, { runtime: 'jvm', port: 1.5 }, { runtime: 'jvm', port: true },
+        { runtime: 'jvm', port: 51235, host: 'remote' }]) {
+        assert.equal((await request({ ...options, debug })).error.code, -32602);
+      }
+      assert.equal((await request({ ...options, execution: 'task' })).error.code, -32602);
+      assert.equal(calls, 1);
+    }
   }
 });

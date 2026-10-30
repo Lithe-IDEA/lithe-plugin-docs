@@ -76,8 +76,9 @@ JAR it starts must hold everything it loads.
 | `onModel(handler)`, `onDependencies(handler)` | Implement the typed build requests. The SDK stamps `format` and `version`. Core validates the document. `litheBuild` is answered only when a handler exists. |
 | `onExecute(handler)` | Protocol 2+: a bounded provider-owned task, returning `{ exitCode, output }`. |
 | `onTest(handler)`, `onDiscoverTests(handler)` | Protocol 3+: exact execution and runnable selectors; discovery format/version are stamped. |
+| `onConfiguration(handler)` | Protocol 7+: read-only non-sensitive raw/effective native configuration; stamps `litheBuildConfiguration`, version 1. The host owns explicit native-file saves. |
 | `onPrepareRun(handler)` | Protocol 4: prepare a portable plan; the host owns the application. |
-| `negotiated().buildVersion()` | Highest common build version (1–6), or zero; newer methods are refused before their handler runs. |
+| `negotiated().buildVersion()` | Highest common build version (1–7), or zero; newer methods are refused before their handler runs. |
 | `function(id, handler)` | Declares a function offered in `initialize`. |
 | `registerFunction(id, handler)`, `unregisterFunction(id)` | Add or withdraw a function. Called before the `initialize` answer (for example from `onInitialize`), they change the initial list. Later calls send `lithe/function/register` or `lithe/function/unregister`, in order. Both return a `CompletableFuture`. Withdrawing a function revokes its running calls. |
 | `onInitialize(hook)`, `onShutdown(hook)` | Lifecycle hooks. `onInitialize` receives the `initialize` params and what was negotiated. |
@@ -190,3 +191,66 @@ The two native workflow samples demonstrate independent producer and consumer
 backends in the Core end-to-end tests. Their engine is fictional; this does not
 migrate Maven, JDT, LLDB or existing plugin business logic. The contract mirror
 must be synced from the merged Lithe revision before these changes are released.
+
+## Inline test reports (development protocol 8)
+
+A test declared with `results: { "decoder": "provider" }` requires buildProviders 8.
+Core sends `testResults: true`; answer with `testResults: { format: "litheTestResults",
+version: 1, tests: [...] }` beside `exitCode` and `output`. Cases carry suite/case/status
+and optional project/source paths, message, durationMillis and invocations. A failed
+test still returns its nonzero exit code and current reports. Report discovery and
+freshness belong to the provider's upstream engine; never return old files or silently
+empty results after a read failure. Core validates 10,000 cases/8 MiB and keeps equal
+suite/case names in distinct projects separate. Earlier negotiation refuses the new
+request field. Ordinary execute replies may include reports for build phases that run
+tests. These SDK sources are development inputs pending a coordinated host/SDK release.
+
+## Opaque test selectors (development protocol 9)
+
+`onTest` can receive `selectorKind` and `selectors` for a namespace declared by
+`test.selectorKinds`. The SDK admits them only after protocol 9 negotiation and
+rejects conflicts with suite/case, more than 64 values, empty/control-containing
+values and values exceeding 4096 UTF-8 bytes. An empty list selects the normal
+workspace/project scope. Preserve language-engine identities until mapping them
+to the upstream runner, and reject selections that cannot be represented exactly.
+
+## Java build preparation tasks (development convention)
+
+A build provider can declare project tasks `java-prepare-run-main` and
+`java-prepare-run-test` and handle them with `onExecute`. The first prepares
+main resources, and the second main plus test resources. The language workflow
+uses current model source roles, awaits successful completion, then asks JDT for
+runtime paths. The backend owns upstream filtering and reactor semantics.
+These are ordinary public task IDs; no Java source parsing, private function or
+new backend method is involved. Per-run options/tools are ephemeral plan inputs;
+never overwrite saved build defaults while preparing an application.
+
+
+## Typed run choices (development protocol 10)
+
+`onPrepareRun` receives optional `launchOptions` after version-10 negotiation.
+Its execution kind, runtime/program argv arrays, environment and optional
+workspace-relative working directory/opaque entrypoint are resolved user choices.
+The SDK rejects malformed options or older sessions before invoking the handler.
+Service/task declarations require protocol 10 and these options; their process
+still belongs to the host after preparation. Preserve empty argv values, spaces,
+Unicode and literal backslashes. Reject unsupported runtime or entrypoint choices;
+the native example consumes supported arguments, environment and cwd directly.
+No new runtime dependency or Java baseline is introduced.
+
+Test an unmerged host with
+`node scripts/sdk-e2e.mjs --source <Lithe checkout> --working-tree --build-workflows --provider-run-options`.
+The contract mirror and released SDK remain pinned until the corresponding
+preview commit is merged and synchronized.
+
+
+## JVM service debug choices (development protocol 11)
+
+A service preparation may receive `launchOptions.debug = { runtime: 'jvm', port: 51235 }`.
+This is a host-selected loopback port, with a suspended JVM and exactly one agent;
+it is not permission to choose an endpoint, adapter or DAP arguments. Reject the
+choice if your engine cannot honor it. SDKs refuse it on protocol 10 or older.
+The portable process result is unchanged, and the host owns process lifetime,
+readiness, attachment and cleanup. The native-build examples explicitly reject
+this JVM choice rather than silently ignoring it. No release version or lock is
+changed by this development protocol increment.

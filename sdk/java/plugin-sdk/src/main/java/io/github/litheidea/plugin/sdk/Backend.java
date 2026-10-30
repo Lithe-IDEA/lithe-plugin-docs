@@ -103,6 +103,7 @@ public final class Backend {
         formats.put(Protocol.BUILD_MODEL, "litheBuildModel");
         formats.put(Protocol.BUILD_DEPENDENCIES, "litheDependencies");
         formats.put(Protocol.BUILD_DISCOVER_TESTS, "litheTestDiscovery");
+        formats.put(Protocol.BUILD_CONFIGURATION, "litheBuildConfiguration");
         BUILD_FORMATS = Collections.unmodifiableMap(formats);
     }
 
@@ -181,6 +182,11 @@ public final class Backend {
             Collections.sort(ids);
             return ids;
         }
+    }
+
+    /** Returns non-sensitive native source facts and generic XML edit bindings; protocol 7. */
+    public Backend onConfiguration(Handler handler) {
+        return declareBuild(Protocol.BUILD_CONFIGURATION, handler);
     }
 
     /** Answers {@code lithe/build/model} with a {@code litheBuildModel} document. */
@@ -689,8 +695,37 @@ public final class Backend {
             respond(id, null, error(Protocol.INVALID_PARAMS, "Model inputs require build protocol 6."));
             return;
         }
+        if (arguments.containsKey("testResults") && (negotiated.buildVersion() < 8
+                || !Protocol.BUILD_TEST.equals(method) || !Boolean.TRUE.equals(arguments.get("testResults")))) {
+            respond(id, null, error(Protocol.INVALID_PARAMS, "Inline test reports require build protocol 8 and a test request."));
+            return;
+        }
+        if (arguments.get("launchOptions") instanceof Map && Json.object(arguments.get("launchOptions")).containsKey("debug") && negotiated.buildVersion() < 11) {
+            respond(id, null, error(Protocol.INVALID_PARAMS, "Runtime debug options require build protocol 11."));
+            return;
+        }
+        if (arguments.containsKey("launchOptions") && (negotiated.buildVersion() < 10 || !Protocol.BUILD_PREPARE_RUN.equals(method) || !Protocol.validBuildLaunchOptions(arguments.get("launchOptions")))) {
+            respond(id, null, error(Protocol.INVALID_PARAMS, "Typed launch options require build protocol 10 and valid run preparation options."));
+            return;
+        }
+        if (arguments.containsKey("selectorKind") || arguments.containsKey("selectors")) {
+            Object kind = arguments.get("selectorKind"), selectors = arguments.get("selectors");
+            boolean valid = negotiated.buildVersion() >= 9 && Protocol.BUILD_TEST.equals(method)
+                    && kind instanceof String && ((String) kind).matches("[a-zA-Z0-9][a-zA-Z0-9._-]{0,119}")
+                    && selectors instanceof List && ((List<?>) selectors).size() <= 64
+                    && !arguments.containsKey("suite") && !arguments.containsKey("case");
+            if (valid) for (Object selector : (List<?>) selectors) {
+                if (!(selector instanceof String) || ((String) selector).isEmpty()
+                        || ((String) selector).getBytes(StandardCharsets.UTF_8).length > 4096
+                        || ((String) selector).chars().anyMatch(Character::isISOControl)) { valid = false; break; }
+            }
+            if (!valid) {
+                respond(id, null, error(Protocol.INVALID_PARAMS, "Opaque selectors require build protocol 9 and a valid test selection."));
+                return;
+            }
+        }
         if (!Protocol.buildProgress(method)) {
-            run(id, null, null, context -> handler.handle(arguments, context), result -> buildResult(method, result), null);
+            run(id, null, null, context -> handler.handle(arguments, context), result -> buildResult(method, result, negotiated.buildVersion()), null);
             return;
         }
         Object wireId = arguments.get("operationID");
@@ -717,7 +752,7 @@ public final class Backend {
             }
         };
         run(id, null, (String) wireId, context -> handler.handle(arguments, context),
-                result -> buildResult(method, result), () -> reporting.set(false), progress);
+                result -> buildResult(method, result, negotiated.buildVersion()), () -> reporting.set(false), progress);
     }
 
     private interface Invocation {
@@ -992,7 +1027,9 @@ public final class Backend {
      * plain document. A result in another format is a backend bug: Core would
      * refuse it as {@code plugin.build.invalidOutput}, so it fails here with a log.
      */
-    static Object buildResult(String method, Object result) {
+    static Object buildResult(String method, Object result) { return buildResult(method, result, Protocol.BUILD_VERSION); }
+
+    private static Object buildResult(String method, Object result, int protocolVersion) {
         String expected = BUILD_FORMATS.get(method);
         if (!(result instanceof Map)) {
             throw new PluginSdkError("sdk.build.invalidResult", method + " must return a reply object.");
@@ -1020,6 +1057,17 @@ public final class Backend {
                 throw new PluginSdkError("sdk.build.invalidResult", method + " needs an int32 exitCode and bounded output.");
             }
             document.put("exitCode", ((Number) exit).longValue());
+        }
+        if (document.containsKey("testResults")) {
+            Object value = document.get("testResults");
+            Map<String, Object> report = value instanceof Map ? Json.object(value) : Collections.emptyMap();
+            Object tests = report.get("tests");
+            if (protocolVersion < 8 || !(Protocol.BUILD_TEST.equals(method) || Protocol.BUILD_EXECUTE.equals(method))
+                    || !"litheTestResults".equals(report.get("format")) || !(report.get("version") instanceof Number)
+                    || ((Number) report.get("version")).doubleValue() != 1 || !(tests instanceof List)
+                    || ((List<?>) tests).size() > 10000 || Protocol.utf8Length(Json.stringify(report)) > 8 * 1024 * 1024) {
+                throw new PluginSdkError("sdk.build.invalidResult", "Inline test reports need protocol 8 and a bounded litheTestResults document.");
+            }
         }
         if (Protocol.BUILD_PREPARE_DEBUG.equals(method)) {
             if (!(document.get("program") instanceof String) || !(document.get("workingDirectory") instanceof String)

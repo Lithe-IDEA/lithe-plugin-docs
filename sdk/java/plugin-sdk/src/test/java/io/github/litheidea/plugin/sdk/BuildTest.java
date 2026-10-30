@@ -31,19 +31,44 @@ class BuildTest {
     }
 
     @Test
+    void opaqueSelectorsCannotBeIgnoredByAnOlderBackend() {
+        for (int version : new int[] {8, 9}) {
+            AtomicReference<Object> seen = new AtomicReference<>();
+            Backend backend = Backend.create(null, null).onTest((params, context) -> {
+                seen.set(params.get("selectors")); return map("exitCode", 0, "output", "");
+            });
+            TestHost host = new TestHost(backend);
+            try {
+                host.initialize(offered(version));
+                Map<String, Object> params = map("operationID", "wire-selectors", "selectorKind", "org.example.semantic",
+                        "selectors", Arrays.asList("opaque # [case] () 中文"));
+                Map<String, Object> result = host.request(Protocol.BUILD_TEST, params);
+                if (version == 8) { assertEquals(-32602L, errorCode(result)); assertEquals(null, seen.get()); }
+                else {
+                    assertTrue(result.containsKey("result")); assertEquals(params.get("selectors"), seen.get());
+                    params.put("suite", "Suite"); assertEquals(-32602L, errorCode(host.request(Protocol.BUILD_TEST, params)));
+                    params.remove("suite"); params.put("selectors", Arrays.asList("bad\nvalue"));
+                    assertEquals(-32602L, errorCode(host.request(Protocol.BUILD_TEST, params)));
+                }
+            } finally { host.close(); }
+        }
+    }
+
+    @Test
     void eachVersionAdmitsOnlyItsTypedMethods() {
-        List<String> methods = Arrays.asList("execute", "test", "discoverTests", "prepareRun", "prepareDebug");
-        int[] minimum = {2, 3, 3, 4, 5};
+        List<String> methods = Arrays.asList("execute", "test", "discoverTests", "prepareRun", "prepareDebug", "configuration");
+        int[] minimum = {2, 3, 3, 4, 5, 7};
         List<Map<String, Object>> replies = Arrays.asList(map("exitCode", 0, "output", "built\n"),
                 map("exitCode", 2, "output", "test failed\n"),
-                map("tests", Arrays.asList(map("suite", "Suite", "case", "exact # [case]"))), LAUNCH, map("program", "app/bin/main", "arguments", Arrays.asList("a b"), "workingDirectory", "app", "environment", map()));
-        for (int version = 1; version <= 6; version++) {
+                map("tests", Arrays.asList(map("suite", "Suite", "case", "exact # [case]"))), LAUNCH, map("program", "app/bin/main", "arguments", Arrays.asList("a b"), "workingDirectory", "app", "environment", map()), map("sources", Collections.emptyList()));
+        for (int version = 1; version <= 10; version++) {
             Backend backend = Backend.create(null, null)
                     .onExecute((params, context) -> replies.get(0))
                     .onTest((params, context) -> replies.get(1))
                     .onDiscoverTests((params, context) -> replies.get(2))
                     .onPrepareRun((params, context) -> replies.get(3))
-                    .onPrepareDebug((params, context) -> replies.get(4));
+                    .onPrepareDebug((params, context) -> replies.get(4))
+                    .onConfiguration((params, context) -> replies.get(5));
             TestHost host = new TestHost(backend);
             try {
                 Map<String, Object> result = Json.object(host.initialize(offered(version, 99)).get("result"));
@@ -57,7 +82,7 @@ class BuildTest {
                     } else {
                         // Compare JSON-normalized numeric types, as seen on the wire.
                         Map<String, Object> expected = Json.object(Json.parse(Json.stringify(replies.get(index))));
-                        if (index == 2) { expected.put("format", "litheTestDiscovery"); expected.put("version", 1L); }
+                        if (index == 2 || index == 5) { expected.put("format", index == 2 ? "litheTestDiscovery" : "litheBuildConfiguration"); expected.put("version", 1L); }
                         assertEquals(expected, response.get("result"));
                     }
                 }
@@ -66,10 +91,30 @@ class BuildTest {
     }
 
     @Test
+    void inlineReportsNeedVersionEightAndRemainBoundToTheCompletingTest() {
+        for (int version : new int[] {7, 8}) {
+            java.util.concurrent.atomic.AtomicInteger calls = new java.util.concurrent.atomic.AtomicInteger();
+            Map<String, Object> report = map("format", "litheTestResults", "version", 1L, "tests", Arrays.asList(
+                    map("project", "a", "suite", "Same", "case", "checks", "status", "failed"),
+                    map("project", "b", "suite", "Same", "case", "checks", "status", "passed")));
+            Backend backend = Backend.create(null, null).onTest((params, context) -> {
+                calls.incrementAndGet(); return map("exitCode", 1, "output", "failed", "testResults", report);
+            });
+            TestHost host = new TestHost(backend);
+            try {
+                host.initialize(offered(version));
+                Map<String, Object> response = host.request("lithe/build/test", map("operationID", "wire-reports", "testResults", true));
+                if (version == 7) { assertEquals(-32602L, errorCode(response)); assertEquals(0, calls.get()); }
+                else { assertEquals(report, Json.object(response.get("result")).get("testResults")); assertEquals(1, calls.get()); }
+            } finally { host.close(); }
+        }
+    }
+
+    @Test
     void readOnlyModelInputsRequireVersionSixAndPreserveHostIdentity() {
         Map<String, Object> inputs = map("version", 1L, "revision", 17L, "inputs", Arrays.asList(
                 map("pluginID", "dev.source", "buildSystemID", "source", "state", "unavailable", "instances", Collections.emptyList())));
-        for (int version : new int[] {5, 6}) {
+        for (int version : new int[] {5, 6, 7, 8}) {
             AtomicReference<Object> seen = new AtomicReference<>();
             Backend backend = Backend.create(null, null).onModel((params, context) -> {
                 seen.set(params.get("modelInputs"));
@@ -219,4 +264,61 @@ class BuildTest {
         for (int index = 0; index < count; index++) result.append(text);
         return result.toString();
     }
+    @Test
+    void typedLaunchOptionsRequireVersionTenAndPreserveArgumentBoundaries() {
+        Map<String, Object> options = map("execution", "service", "runtimeArguments", Arrays.asList("-Dmessage=hello world"),
+                "arguments", Arrays.asList("雪", "", "a b", "C:\\path"), "environment", map("EXAMPLE", "x"),
+                "workingDirectory", ".", "entrypoint", "example.Main");
+        for (int version : new int[] {9, 10}) {
+            AtomicReference<Object> seen = new AtomicReference<>();
+            Backend backend = Backend.create(null, null).onPrepareRun((params, context) -> { seen.set(params.get("launchOptions")); return LAUNCH; })
+                    .onModel((params, context) -> map("projects", Collections.emptyList()));
+            TestHost host = new TestHost(backend);
+            try {
+                host.initialize(offered(version));
+                Map<String, Object> response = host.request(Protocol.BUILD_PREPARE_RUN, map("operationID", "wire-options", "launchOptions", options));
+                if (version == 9) { assertEquals(-32602L, errorCode(response)); assertEquals(null, seen.get()); continue; }
+                assertEquals(options, seen.get()); assertEquals(LAUNCH, response.get("result"));
+                for (Map<String, Object> patch : Arrays.asList(map("execution", "unknown"), map("arguments", Arrays.asList("bad\u0000")),
+                        map("runtimeArguments", Collections.nCopies(1025, "x")), map("environment", map("BAD=NAME", "x")),
+                        map("environment", map("A", "bad\u0000")), map("workingDirectory", "../escape"), map("workingDirectory", "/absolute"),
+                        map("workingDirectory", "C:relative"), map("workingDirectory", "a//b"), map("workingDirectory", "a/./b"),
+                        map("workingDirectory", "a\\b"), map("entrypoint", ""), map("entrypoint", null), map("unknown", true))) {
+                    Map<String, Object> invalid = new java.util.LinkedHashMap<>(options); invalid.putAll(patch); seen.set(null);
+                    assertEquals(-32602L, errorCode(host.request(Protocol.BUILD_PREPARE_RUN, map("operationID", "wire-options", "launchOptions", invalid))), patch.toString());
+                    assertEquals(null, seen.get());
+                }
+                assertEquals(-32602L, errorCode(host.request(Protocol.BUILD_MODEL, map("launchOptions", options))));
+            } finally { host.close(); }
+        }
+    }
+
+
+    @Test
+    void jvmDebugRequiresVersionElevenAndAHostSelectedEndpoint() {
+        for (int version : new int[] {10, 11}) {
+            java.util.concurrent.atomic.AtomicInteger calls = new java.util.concurrent.atomic.AtomicInteger();
+            Backend backend = Backend.create(null, null).onPrepareRun((params, context) -> { calls.incrementAndGet(); return LAUNCH; });
+            TestHost host = new TestHost(backend);
+            try {
+                host.initialize(offered(version));
+                Map<String, Object> options = map("execution", "service", "runtimeArguments", Collections.emptyList(),
+                        "arguments", Collections.emptyList(), "environment", map(), "debug", map("runtime", "jvm", "port", 51235));
+                Map<String, Object> response = host.request(Protocol.BUILD_PREPARE_RUN, map("operationID", "jvm-debug", "launchOptions", options));
+                if (version == 10) { assertEquals(-32602L, errorCode(response)); assertEquals(0, calls.get()); }
+                else {
+                    assertEquals(LAUNCH, response.get("result"));
+                    for (Object debug : Arrays.asList(null, map(), map("runtime", "native", "port", 51235),
+                            map("runtime", "jvm", "port", 0), map("runtime", "jvm", "port", 65536),
+                            map("runtime", "jvm", "port", 1.5), map("runtime", "jvm", "port", true),
+                            map("runtime", "jvm", "port", 51235, "host", "remote"))) {
+                        options.put("debug", debug);
+                        assertEquals(-32602L, errorCode(host.request(Protocol.BUILD_PREPARE_RUN, map("operationID", "jvm-debug", "launchOptions", options))));
+                    }
+                    assertEquals(1, calls.get());
+                }
+            } finally { host.close(); }
+        }
+    }
+
 }
