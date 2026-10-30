@@ -130,6 +130,14 @@ Java feature version from the configured compiler execution model. Maven's
 backend calculates its own lifecycle plan without executing goals, evaluates
 compiler parameters with Maven's evaluator, and accounts for main/test and
 custom executions. Missing means unknown (including an unavailable descriptor
-or unresolved expression). Hosts must not fill the gap by parsing POM text.
+or unsupported evaluated version). Hosts must not fill the gap by parsing POM text.
 The highest known floor applies to project toolchain selection; platform Java
 version preferences must not lower it.
+
+Maven also publishes optional scalar `maven.wrapper` (`mvnw` or `mvnw.cmd`,
+relative to the instance root) and `maven.minimumVersion` properties, read from
+that instance's native script/Wrapper configuration. Hosts project the script
+into a workspace-relative path. Java Properties semantics own comments and URL
+escaping; unknown distribution filenames stay unknown, and model reading never
+executes the Wrapper. Script and properties changes invalidate the model.
+Multiple independent reactors must not share one global Wrapper selection.
