@@ -3,12 +3,12 @@
   "source": {
     "repository": "https://github.com/1lck/Lithe-IDEA",
     "directory": "shared/contracts/plugins/v1",
-    "revision": "f20601ee6194f32d597031556ea628de586ac2e2"
+    "revision": "9175bd73431aec5086f1fe4c532be54fc49ba4e8"
   },
   "files": [
     {
       "path": "README.md",
-      "sha256": "1ac89012a6e620ddeec63b0fc82460c56f05623a1d2a29dcf45e87fa123a4806"
+      "sha256": "b2864095465511324cfde17968184fb87ac9191711c18a68fd48c5db91149f35"
     },
     {
       "path": "fixtures/backend-workspace.plugin.json",
@@ -95,6 +95,10 @@
       "sha256": "685144e417bbf01b013144dec109d51b56922f98811e9ea6eda34da26749165c"
     },
     {
+      "path": "fixtures/command-backend.plugin.json",
+      "sha256": "791f11f3b9d59d5909a9ca94788bddb7f7493b7610361553d5733d7aed18df22"
+    },
+    {
       "path": "fixtures/command-plans.json",
       "sha256": "a188fd65f6cdb47f9e9ad4b0de3a7ddcd17e4e577b34f6e25b96d2c1f2bdca7c"
     },
@@ -116,7 +120,7 @@
     },
     {
       "path": "fixtures/function-protocol.json",
-      "sha256": "d8f11ab3287d24210e9369ec6b5fcdb65316d6afe82c60583455c84065ae583b"
+      "sha256": "c00b99c31f4c2b5d2cb7644d123cdec69d8bc439a5f043e5b655db6351545cff"
     },
     {
       "path": "fixtures/hello-lithe.plugin.json",
@@ -228,7 +232,7 @@
     },
     {
       "path": "plugin-manifest.schema.json",
-      "sha256": "789a340f03a598f9e1505ff887a90ee5a0b8a004071ef331d6382a97ea1b9f11"
+      "sha256": "3065b75d2a2e3913e6ac002acfe50f9da179e703603b06753c9bfd171ffe8905"
     }
   ]
 }

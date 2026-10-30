@@ -405,7 +405,7 @@ hosts. Level 3 versions each section on its own. A level 3 manifest lists in
 | `serverProcess` | The launch fields of language servers, of build providers with a process of their own, of VCS providers, and of the plugin backend: `launch`, `arguments`, `validationArguments`, `runtimeDependencies`, `initializationOptions` | `1` |
 | `executionProviders` | `executionProviders[]` | `1` |
 | `settings` | `settings[]` and `settingActions[]` | `1`, `2` (adds [placement, scope, effect, page buttons](#settings-v2-placement-scope-effect-and-page-buttons)) |
-| `ui` | `ui` | `1`, `2` (adds [web content](#web-content-ui-2)) |
+| `ui` | `ui` | `1`, `2` (web content), `3` (native controls), `4` ([backend-only commands](#backend-only-commands-ui-4)) |
 | `buildSystems` | Declarative build detection, models, and command plans | `1` |
 | `buildProviders` | `buildSystems[].provider`, including own-process and shared language-server providers; v2 tasks, v3 tests, v4 run, v5 native debug preparation, v6 read-only model inputs | `1`, `2`, `3`, `4`, `5`, `6` |
 | `buildModelInputs` | Optional public model sharing between enabled workspace plugins | `1` |
@@ -1876,7 +1876,7 @@ granted services as `lsp.startServer.hostServices` (from the launch plan's
 - A session holds at most 16 unanswered host requests; a further one is
   refused with `plugin.host.failed`. Unanswered requests end with the session.
 - `hostServices` needs `pluginId` and names only services this Core defines
-  (`credentials`, `workspace`); otherwise `lsp.startServer` is
+  (`credentials`, `workspace`, or registered method-grant names); otherwise `lsp.startServer` is
   `invalid_request`.
 
 ### Workspace contexts and capability discovery (protocol version 3)
@@ -1902,7 +1902,7 @@ notifications.
   grants only the services it has handlers for, so a listed method never
   fails for want of one. `backendAuthority` is `"local"`: the backend runs on
   the machine that runs Lithe. `limits` gives `pendingHostRequests`,
-  `functionResultBytes`, `errorMessageBytes` (the cut of a host failure's
+  `functionResultBytes`, `hostRequestBytes`, `hostResultBytes`, `errorMessageBytes` (the cut of a host failure's
   message), `errorDetailsBytes`, and `notificationBytes`. A backend must
   check `services` instead of assuming a method from the version.
 - A context is one open workspace in one window:
@@ -2070,6 +2070,103 @@ So that a version 3 backend works with every host of version 3:
 
 `fixtures/function-protocol.json` (`hostRequests`) holds the
 unsupported-option cases.
+
+### Public document, file and window methods (protocol version 3)
+
+These methods are implemented by the macOS host. Windows does not advertise
+`backend` support. `getCapabilities` lists only the intersection of the plugin's
+permission-derived grants and this host's registered method handlers.
+
+New grants in `lsp.startServer.hostServices` use **full method names**, not service
+names. The legacy `workspace` grant still admits only `listContexts`, `getContext`
+and `getFolders`; it never grants file reads. The legacy `credentials` grant is
+unchanged. Registering another handler cannot replace a method already registered.
+
+All methods below require `context: {contextID, generation}`. Resource arguments
+use `{rootID, path}` from that plugin's `getFolders` response; paths use `/` and
+are relative to the root. A root ID is not a lifetime or an authorization token.
+Opening the same folder in two windows creates independent context-owned leases;
+closing one does not invalidate the other, and reopening works with generation 1
+in its new context. Remote contexts are explicitly refused by this first set of
+methods. Unknown options fail before side effects with `unsupportedOption`.
+
+| Methods (prefix `lithe/host/`) | Permission | Params in addition to `context` | Result |
+| --- | --- | --- | --- |
+| `documents/list` | `documents.read` | none | `{documents:[<summary>]}` |
+| `documents/getSnapshot` | `documents.read` | `documentID` | `{document:<summary>, text}` from the dirty live buffer |
+| `editor/getActive` | `documents.read` | none | summary of the foreground text tab, or `null` |
+| `editor/getSelections` | `documents.read` | `documentID` | `{documentID,version,selections:[{anchor,active}],primaryIndex}` |
+| `editor/applyEdits` | `editor.edit` | `documentID,expectedVersion,edits:[{range,text}]` | `{documentID,version,applied}` |
+| `editor/replaceSelections` | `editor.edit` | `documentID,expectedVersion,selections:[{anchor,active}],replacements:[string]` | same; one replacement for all selections or one per selection |
+| `editor/insertText` | `editor.edit` | `documentID,expectedVersion,at,text` | same |
+| `workspace/readDirectory` | `workspace.files.read` | `resource,cursor?,limit?` | `{entries:[{name,resource,kind}],nextCursor}` |
+| `workspace/stat` | `workspace.files.read` | `resource` | `{resource,kind,size,modifiedMilliseconds}` |
+| `workspace/readFile` | `workspace.files.read` | `resource,maximumBytes?` | `{resource,source:"disk",byteCount,isTruncated,identity,text?,encoding?,base64?}` |
+| `workspace/watch` | `workspace.files.watch` | `resource,recursive?` (default false) | `{subscriptionID}`; events contain `{rootID,changedPaths,requiresRescan}` |
+| `workspace/findFiles` | `workspace.search` | `resource` naming the root (`path:""`), `query,fileMask?,cursor?,limit?` | `{matches:[<resource>],nextCursor,isTruncated,source:"disk"}` |
+| `workspace/findText` | `workspace.search` | root `resource,pattern,fileMask?,caseSensitive?,wholeWords?,regularExpression?,cursor?,limit?` | same envelope, matches `{resource,line,preview,range:null}`; the upstream search owner currently reports lines, not exact match spans |
+| `editor/open`, `editor/reveal` | `editor.open` | `resource,activation?` (`select` or `background`), `range?,tab?` (`regular` only) | document identity/version and state, `wasAlreadyOpen,windowIsForeground,appliedSelection` |
+| `preview/openHTML` | `preview.open` | HTML `resource,presentation?` (`editorAndPreview` or `previewOnly`), `range?` | open result plus `usesLiveBuffer:true,presentation`; explicitly changes the existing tab's presentation |
+| `browser/openExternal` | `browser.open` | exactly one of HTTP(S) `url` or HTML `resource`; `unsaved?` (`openSavedFile` or `requireSaved`) for a resource | `{opened:true,source:"web"|"disk",hasUnsavedChanges?}` |
+| `window/showInformation`, `window/showWarning`, `window/showError` | `window.messages` | `text,actions?` | `{selectedIndex}`; zero-based, or `null` on dismissal |
+
+A document summary has `documentID,version,path,languageID,isReadOnly,isDirty,
+encoding,lineEnding`. `path` is workspace-relative or null for a document outside
+the root; `languageID` may be null. Positions `{line,column}` are one-based UTF-16;
+ranges `{start,end}` are half-open and cannot split a surrogate pair. Selections
+keep anchor/active direction. Batches are atomic and one Monaco undo step. Stale
+versions, read-only buffers, pending editor synchronization and IME composition
+are refused. Background documents without a mounted editor can be listed/read,
+but edits/selections may return `busy`; opening a foreground tab does not imply
+that its web editor is already ready. Retry reads after readiness, not edits
+blindly. `editor.open/reveal` currently applies a range's start as a caret and
+reports `{kind:"caret",line,column}`, not a fabricated full selection.
+
+Limits: snapshots and file reads expose at most 128 KiB of source text/bytes per
+call; oversized snapshots return `limitExceeded`, file reads report truncation.
+This leaves room for worst-case JSON escaping under the 1 MiB serialized host
+request/result budget. Batches contain at most 1,000 edits/selections. Directory
+pages default to 200 and cap at 1,000; search pages default to 100 and cap at 200,
+with the search owner's overall 200-result cap. Explicit file reads use
+component-wise `O_NOFOLLOW`; listings omit symlinks. Hidden-file rules affect
+listing/search/watch, not authorization for explicit reads. Open/browser paths
+retain the existing canonical containment checks and their documented
+check-to-open race; native backends are not OS-sandboxed.
+
+Machine host requests have a 30-second host deadline. User-choice messages wait
+until the user answers, the request is cancelled, or the context/session closes.
+Messages retain the per-plugin/window rate and queue limits (5/10 seconds,
+3 pending per plugin, 10 per window, 2,000 text characters, 3 actions of 40
+characters). Session exit revokes grants and cancels requests/subscriptions;
+old session callbacks cannot affect a replacement. Closing a context cancels its
+requests with `contextExpired`. Notifications have a 128-entry per-session queue;
+context revisions coalesce to the latest, and overflow ends the session instead
+of allowing unbounded memory or silently losing commands. Notification/response
+writes share the process write watchdog and stop cleanup with function requests.
+
+Cancellation or timeout **does not promise rollback**: an edit or external open
+may already have committed. The SDK must not replay a mutation on these failures.
+On `versionConflict`, reread and recompute; on `contextExpired`, resolve the
+original target again, never substitute the focused window. `busy`/`rateLimited`
+may be retried with bounds; `permissionDenied`/`readOnly` need user intervention.
+
+### Backend-only commands (`ui` 4)
+
+`requires.ui:4` permits `ui.commands` without `toolWindowID` and allows an empty
+or omitted `toolWindows` array. Such a command requires `backend:2`, the existing
+`ui.contribute` and `backend.launch` permissions, and its `onCommand:<id>` event.
+Versions 1-3 retain their window-required behavior. An old host rejects ui 4 at
+installation, rather than accepting a command it cannot execute. See
+`fixtures/command-backend.plugin.json`.
+
+The command appears through the ordinary workbench command contributions and
+sends `commands/didRun` without opening a dummy tool window. Commands arriving
+while initialize is pending wait until ready; a crashed backend can start again
+on its declared command event. Background workspace activation has two concurrent
+start slots; explicit command activation does not wait for unrelated background
+plugins. `didRun` remains an event, not an acknowledgement that the command's
+business action succeeded; a future result-bearing execute API must use the
+existing request lifecycle rather than infer success from notification delivery.
 
 ### Compatibility
 

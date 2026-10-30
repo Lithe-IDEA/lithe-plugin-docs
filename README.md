@@ -131,7 +131,7 @@ SDK 的源码都在本仓库的 `sdk/` 下，发布在[本仓库的 Releases](ht
 | [原生构建工作流（开发中）](guides/native-build-workflows.md) | Node/Java SDK 的构建执行、精确测试、运行准备，以及未提交源码的真实 Core 验证 |
 | [构建、运行与测试接入](guides/build-tool-integration.md) | 可用的执行提供者示例、工程后端边界，以及开发中的 API 3 状态 |
 | [编写调试适配器插件](guides/debug-adapter-plugin.md) | API 4：从最小清单到启动方式、先编译再调试的 `executable`、调试控制台补全，以及预发布与转正 |
-| [插件后端：工作区上下文与宿主服务（开发中）](guides/plugin-backend-workspace.md) | `backend` 2 与协议 3：免页面启动、工作区上下文、宿主通知、失败码，以及协议 3 只增不改时后端要遵守的规则 |
+| [插件后端：工作区上下文与宿主服务（开发中）](guides/plugin-backend-workspace.md) | `backend` 2 与协议 3：免页面启动、工作区上下文、纯后端命令（`ui` 4）、文档/文件/窗口宿主方法、宿主通知、失败码，以及协议 3 只增不改时后端要遵守的规则 |
 
 收录和上架的规则由 Lithe Store 维护：[发布社区插件](https://github.com/Lithe-IDEA/Lithe-store/blob/main/docs/publishing.md)讲怎么打包、提交收录和发布新版本，[版本追踪与更新](https://github.com/Lithe-IDEA/Lithe-store/blob/main/docs/versioning-and-updates.md)讲 Lithe 怎么选择可安装的版本。
 
