@@ -1,6 +1,9 @@
 package io.github.litheidea.plugin.sdk;
 
 import java.nio.charset.StandardCharsets;
+import java.util.Arrays;
+import java.util.List;
+import java.util.Map;
 import java.util.regex.Pattern;
 
 /**
@@ -13,7 +16,7 @@ import java.util.regex.Pattern;
 public final class Protocol {
     /** Protocol versions this SDK can answer. */
     public static final int FUNCTIONS_VERSION = 1;
-    public static final int BUILD_VERSION = 9;
+    public static final int BUILD_VERSION = 10;
 
     public static final String INITIALIZE = "initialize";
     public static final String INITIALIZED = "initialized";
@@ -132,4 +135,37 @@ public final class Protocol {
     static int utf8Length(String value) {
         return value.getBytes(StandardCharsets.UTF_8).length;
     }
+    /** Strict portable user choices accepted by build protocol 10. */
+    static boolean validBuildLaunchOptions(Object raw) {
+        if (!(raw instanceof Map)) return false;
+        Map<?, ?> value = (Map<?, ?>) raw;
+        List<String> allowed = Arrays.asList("execution", "runtimeArguments", "arguments", "environment", "workingDirectory", "entrypoint");
+        if (!allowed.containsAll(value.keySet()) || !Arrays.asList("application", "service", "task").contains(value.get("execution"))) return false;
+        for (String name : Arrays.asList("runtimeArguments", "arguments")) {
+            Object arguments = value.get(name);
+            if (!(arguments instanceof List) || ((List<?>) arguments).size() > 1024) return false;
+            for (Object argument : (List<?>) arguments) if (!launchText(argument, 65536)) return false;
+        }
+        Object environment = value.get("environment");
+        if (!(environment instanceof Map) || ((Map<?, ?>) environment).size() > 64) return false;
+        for (Map.Entry<?, ?> entry : ((Map<?, ?>) environment).entrySet()) {
+            if (!(entry.getKey() instanceof String) || !((String) entry.getKey()).matches("[A-Za-z_][A-Za-z0-9_]{0,127}") || !launchText(entry.getValue(), 65536)) return false;
+        }
+        if (value.containsKey("entrypoint") && (!launchText(value.get("entrypoint"), 4096) || ((String) value.get("entrypoint")).isEmpty())) return false;
+        if (value.containsKey("workingDirectory")) {
+            Object rawPath = value.get("workingDirectory");
+            if (!launchText(rawPath, 4096)) return false;
+            String path = (String) rawPath;
+            if (path.isEmpty() || path.indexOf('\\') >= 0 || path.matches("^[A-Za-z]:.*")) return false;
+            if (!".".equals(path)) for (String part : path.split("/", -1)) {
+                if (part.isEmpty() || ".".equals(part) || "..".equals(part)) return false;
+            }
+        }
+        return true;
+    }
+
+    private static boolean launchText(Object value, int maximum) {
+        return value instanceof String && ((String) value).getBytes(StandardCharsets.UTF_8).length <= maximum && ((String) value).indexOf(0) < 0;
+    }
+
 }

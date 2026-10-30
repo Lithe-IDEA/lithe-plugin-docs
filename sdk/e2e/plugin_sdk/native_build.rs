@@ -358,6 +358,26 @@ pub fn run(sample: &Sample) {
         "other workspace\n"
     );
     other.stop();
+    if std::env::var("LITHE_PLUGIN_SDK_RUN_OPTIONS_WORKFLOWS").as_deref() == Ok("1") {
+        fs::write(instance.join("lithe-sample.json"), config.to_string()).unwrap();
+        let mut native = manifest.clone();
+        native["requires"]["buildProviders"] = json!(10);
+        for execution in ["service", "task"] {
+            native["buildSystems"][0]["run"].as_array_mut().unwrap().push(json!({"id":execution,"source":"provider", "execution":execution,"fromTargets":{"tags":["application"]}}));
+            let options = json!({"execution":execution,"runtimeArguments":[],"arguments":["a b","雪",""],"environment":{"EXAMPLE":"typed value"},"workingDirectory":"."});
+            let plan = core("build.prepareRunPlan", json!({"manifest":native,"buildSystemID":BUILD_SYSTEM,"request":{
+                "root":root,"workspaceRoot":workspace,"run":execution,"project":app,"target":{"name":target["name"],"path":target["path"],"tags":target["tags"]},"launchOptions":options}}));
+            assert_eq!(plan["status"], "ok", "{plan}");
+            let result = session.build_request(&format!("prepare-{execution}"), &plan["plan"]);
+            let decoded = core("build.decodeRunPreparation", json!({"manifest":native,"buildSystemID":BUILD_SYSTEM,
+                "request":{"root":root,"workspaceRoot":workspace,"launchOptions":options,"result":result}}));
+            assert_eq!(decoded["status"], "ok", "{decoded}");
+            assert_eq!(decoded["launch"]["workingDirectory"], ".");
+            assert_eq!(decoded["launch"]["environment"]["EXAMPLE"], "typed value");
+            let args = decoded["launch"]["arguments"].as_array().unwrap();
+            assert_eq!(&args[args.len()-3..], json!(["a b","雪",""]).as_array().unwrap());
+        }
+    }
     session.stop();
     drop(other);
     drop(session);

@@ -16,7 +16,7 @@ const methods = [
   ['configuration', 7, { sources: [] }],
 ];
 
-for (const version of [1, 2, 3, 4, 5, 6, 7, 8, 9]) {
+for (const version of [1, 2, 3, 4, 5, 6, 7, 8, 9, 10]) {
   test(`build protocol ${version} admits only its typed methods`, { timeout: 15000 }, async (t) => {
     const backend = createBackend();
     const invoked = [];
@@ -254,3 +254,28 @@ for (const version of [8, 9]) {
     }
   });
 }
+
+
+test('typed launch options preserve argv only after version 10 agreement', { timeout: 15000 }, async (t) => {
+  const options = { execution: 'service', runtimeArguments: ['-Dmessage=hello world'], arguments: ['雪', '', 'a b', 'C:\\path'], environment: { EXAMPLE: 'x' }, workingDirectory: '.', entrypoint: 'example.Main' };
+  for (const version of [9, 10]) {
+    let seen;
+    const backend = createBackend();
+    backend.build.prepareRun(params => { seen = params.launchOptions; return launch; });
+    backend.build.model(() => ({ projects: [] }));
+    const host = new TestHost(backend); t.after(() => host.close());
+    await host.initialize({ litheBuild: { versions: [version] } });
+    const request = launchOptions => host.request('lithe/build/prepareRun', { operationID: 'wire-options', launchOptions });
+    const response = await request(options);
+    if (version === 9) { assert.equal(response.error.code, -32602); assert.equal(seen, undefined); continue; }
+    assert.deepEqual(seen, options); assert.deepEqual(response.result, launch);
+    for (const patch of [{ execution: 'unknown' }, { arguments: ['bad\0'] }, { runtimeArguments: Array(1025).fill('x') },
+      { environment: { 'BAD=NAME': 'x' } }, { environment: { A: 'bad\0' } }, { workingDirectory: '../escape' },
+      { workingDirectory: '/absolute' }, { workingDirectory: 'C:relative' }, { workingDirectory: 'a//b' },
+      { workingDirectory: 'a/./b' }, { workingDirectory: 'a\\b' }, { entrypoint: '' }, { entrypoint: null }, { unknown: true }]) {
+      seen = undefined; assert.equal((await request({ ...options, ...patch })).error.code, -32602, JSON.stringify(patch));
+      assert.equal(seen, undefined);
+    }
+    assert.equal((await host.request('lithe/build/model', { launchOptions: options })).error.code, -32602);
+  }
+});

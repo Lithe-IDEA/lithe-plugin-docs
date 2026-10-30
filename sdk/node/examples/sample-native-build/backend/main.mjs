@@ -58,7 +58,13 @@ backend.build.prepareDebug((params, context) => prepare(params, context, true));
 async function prepare(params, context, debug) {
   const selected = await select(params);
   const project = selected[0];
-  if (selected.length !== 1 || params.run !== 'application' || !project.run
+  const options = params.launchOptions;
+  const execution = params.run === 'application' ? 'application' : params.run;
+  if ((options && (options.runtimeArguments.length || options.entrypoint || options.execution !== execution))
+      || (!['application', 'service', 'task'].includes(params.run)) || (params.run !== 'application' && !options)) {
+    throw new PluginError('sample.launchOptions', 'This engine does not support the requested runtime or entrypoint options.');
+  }
+  if (selected.length !== 1 || !project.run
       || params.target?.name !== 'Main' || params.target?.path !== project.path) {
     throw new PluginError('sample.target', 'The selected application no longer exists.');
   }
@@ -70,8 +76,8 @@ async function prepare(params, context, debug) {
       workingDirectory: project.path, environment: {} };
   }
   return { executable: { kind: 'command', value: project.run.command },
-    arguments: [...project.run.arguments, ...params.userArguments],
-    workingDirectory: project.path, environment: {} };
+    arguments: [...project.run.arguments, ...params.userArguments, ...(options?.arguments ?? [])],
+    workingDirectory: options?.workingDirectory ?? project.path, environment: options?.environment ?? {} };
 }
 
 async function build(selected, arguments_, context) {

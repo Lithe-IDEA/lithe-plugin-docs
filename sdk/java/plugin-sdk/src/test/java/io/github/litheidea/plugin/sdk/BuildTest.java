@@ -61,7 +61,7 @@ class BuildTest {
         List<Map<String, Object>> replies = Arrays.asList(map("exitCode", 0, "output", "built\n"),
                 map("exitCode", 2, "output", "test failed\n"),
                 map("tests", Arrays.asList(map("suite", "Suite", "case", "exact # [case]"))), LAUNCH, map("program", "app/bin/main", "arguments", Arrays.asList("a b"), "workingDirectory", "app", "environment", map()), map("sources", Collections.emptyList()));
-        for (int version = 1; version <= 9; version++) {
+        for (int version = 1; version <= 10; version++) {
             Backend backend = Backend.create(null, null)
                     .onExecute((params, context) -> replies.get(0))
                     .onTest((params, context) -> replies.get(1))
@@ -264,4 +264,33 @@ class BuildTest {
         for (int index = 0; index < count; index++) result.append(text);
         return result.toString();
     }
+    @Test
+    void typedLaunchOptionsRequireVersionTenAndPreserveArgumentBoundaries() {
+        Map<String, Object> options = map("execution", "service", "runtimeArguments", Arrays.asList("-Dmessage=hello world"),
+                "arguments", Arrays.asList("雪", "", "a b", "C:\\path"), "environment", map("EXAMPLE", "x"),
+                "workingDirectory", ".", "entrypoint", "example.Main");
+        for (int version : new int[] {9, 10}) {
+            AtomicReference<Object> seen = new AtomicReference<>();
+            Backend backend = Backend.create(null, null).onPrepareRun((params, context) -> { seen.set(params.get("launchOptions")); return LAUNCH; })
+                    .onModel((params, context) -> map("projects", Collections.emptyList()));
+            TestHost host = new TestHost(backend);
+            try {
+                host.initialize(offered(version));
+                Map<String, Object> response = host.request(Protocol.BUILD_PREPARE_RUN, map("operationID", "wire-options", "launchOptions", options));
+                if (version == 9) { assertEquals(-32602L, errorCode(response)); assertEquals(null, seen.get()); continue; }
+                assertEquals(options, seen.get()); assertEquals(LAUNCH, response.get("result"));
+                for (Map<String, Object> patch : Arrays.asList(map("execution", "unknown"), map("arguments", Arrays.asList("bad\u0000")),
+                        map("runtimeArguments", Collections.nCopies(1025, "x")), map("environment", map("BAD=NAME", "x")),
+                        map("environment", map("A", "bad\u0000")), map("workingDirectory", "../escape"), map("workingDirectory", "/absolute"),
+                        map("workingDirectory", "C:relative"), map("workingDirectory", "a//b"), map("workingDirectory", "a/./b"),
+                        map("workingDirectory", "a\\b"), map("entrypoint", ""), map("entrypoint", null), map("unknown", true))) {
+                    Map<String, Object> invalid = new java.util.LinkedHashMap<>(options); invalid.putAll(patch); seen.set(null);
+                    assertEquals(-32602L, errorCode(host.request(Protocol.BUILD_PREPARE_RUN, map("operationID", "wire-options", "launchOptions", invalid))), patch.toString());
+                    assertEquals(null, seen.get());
+                }
+                assertEquals(-32602L, errorCode(host.request(Protocol.BUILD_MODEL, map("launchOptions", options))));
+            } finally { host.close(); }
+        }
+    }
+
 }

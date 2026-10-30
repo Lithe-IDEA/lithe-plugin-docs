@@ -120,7 +120,18 @@ export interface BuildTestParams extends BuildRequestParams {
   operationID: string;
 }
 
+/** Version 10. These are resolved user choices, not shell command strings. */
+export interface BuildLaunchOptions {
+  execution: 'application' | 'service' | 'task';
+  runtimeArguments: string[];
+  arguments: string[];
+  environment: Record<string, string>;
+  workingDirectory?: string;
+  entrypoint?: string;
+}
+
 export interface BuildRunParams extends BuildRequestParams {
+  launchOptions?: BuildLaunchOptions;
   run: string;
   project: BuildSelection;
   target: BuildSelection;

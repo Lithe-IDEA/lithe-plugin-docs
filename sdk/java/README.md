@@ -224,3 +224,21 @@ runtime paths. The backend owns upstream filtering and reactor semantics.
 These are ordinary public task IDs; no Java source parsing, private function or
 new backend method is involved. Per-run options/tools are ephemeral plan inputs;
 never overwrite saved build defaults while preparing an application.
+
+
+## Typed run choices (development protocol 10)
+
+`onPrepareRun` receives optional `launchOptions` after version-10 negotiation.
+Its execution kind, runtime/program argv arrays, environment and optional
+workspace-relative working directory/opaque entrypoint are resolved user choices.
+The SDK rejects malformed options or older sessions before invoking the handler.
+Service/task declarations require protocol 10 and these options; their process
+still belongs to the host after preparation. Preserve empty argv values, spaces,
+Unicode and literal backslashes. Reject unsupported runtime or entrypoint choices;
+the native example consumes supported arguments, environment and cwd directly.
+No new runtime dependency or Java baseline is introduced.
+
+Test an unmerged host with
+`node scripts/sdk-e2e.mjs --source <Lithe checkout> --working-tree --build-workflows --provider-run-options`.
+The contract mirror and released SDK remain pinned until the corresponding
+preview commit is merged and synchronized.

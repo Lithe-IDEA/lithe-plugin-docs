@@ -123,7 +123,7 @@ package. The SDK has no dependencies.
 | `backend.build.test(handler)`, `backend.build.discoverTests(handler)` | Protocol 3+: exact test execution and runnable selectors; discovery gets `format: "litheTestDiscovery"`, `version: 1`. |
 | `backend.build.configuration(handler)` | Protocol 7+: read-only non-sensitive raw/effective native configuration; stamps `litheBuildConfiguration`, version 1. The host owns explicit native-file saves. |
 | `backend.build.prepareRun(handler)` | Protocol 4: returns a portable launch plan after upstream synchronization/build; the host owns the application process. |
-| `backend.buildVersion` | Highest common negotiated build version (1–9), or `null`; methods newer than that version are refused before their handler runs. |
+| `backend.buildVersion` | Highest common negotiated build version (1–10), or `null`; methods newer than that version are refused before their handler runs. |
 | `backend.vcs(id, handlers, traits?)` | Implements the typed VCS requests; see [A VCS provider](#a-vcs-provider). `litheVcs` is answered only when the host offers it. |
 | `backend.function(id, handler)` | Declares a function offered in `initialize`. |
 | `backend.registerFunction(id, handler)`, `backend.unregisterFunction(id)` | Adds or withdraws a function. Called before the `initialize` answer (for example from `onInitialize`), they change the initial list; later they send `lithe/function/register` / `unregister`. Withdrawing revokes running calls. |
@@ -276,3 +276,22 @@ normal workspace/project scope. The SDK rejects these fields before the handler
 on older negotiated versions, invalid identifiers, more than 64 selectors,
 empty/control-containing values, or values larger than 4096 UTF-8 bytes. The
 backend must reject identities its upstream runner cannot represent exactly.
+
+
+## Typed run choices (development protocol 10)
+
+`backend.build.prepareRun` receives optional `params.launchOptions` only with
+protocol 10: an execution kind, separate runtime/program argv arrays, environment,
+and optional workspace-relative working directory and opaque entrypoint. Service
+and task declarations require version 10 and these options; preparation still
+finishes before the host starts and owns the process. Both SDK and Core refuse
+old sessions or malformed fields before calling the handler. Empty argv values,
+spaces, Unicode and literal backslashes remain separate values. Reject choices
+your engine cannot implement; do not silently drop runtime or entrypoint choices.
+The native sample demonstrates that refusal and consumes supported arguments,
+environment and cwd without parsing a shell string.
+
+Validate the development host combination with
+`node scripts/sdk-e2e.mjs --source <Lithe checkout> --working-tree --build-workflows --provider-run-options`.
+This flag explicitly tests unmerged Core work. The contract mirror and released
+SDK stay pinned until the corresponding preview commit is merged and synchronized.

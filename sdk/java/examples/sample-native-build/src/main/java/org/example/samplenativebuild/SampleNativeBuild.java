@@ -12,6 +12,7 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.Collections;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -79,7 +80,14 @@ public final class SampleNativeBuild {
     private Object prepare(Map<String, Object> params, CallContext context, boolean debug) throws IOException {
             List<Map<String, Object>> selected = select(params);
             Map<String, Object> target = Json.object(params.get("target"));
-            if (selected.size() != 1 || !"application".equals(params.get("run"))) throw new PluginError("sample.target", "Select one application.");
+            Map<String, Object> options = params.get("launchOptions") instanceof Map ? Json.object(params.get("launchOptions")) : null;
+            String execution = String.valueOf(params.get("run"));
+            if (!Arrays.asList("application", "service", "task").contains(execution)
+                    || (!"application".equals(execution) && options == null)
+                    || (options != null && (!strings(options.get("runtimeArguments")).isEmpty() || options.containsKey("entrypoint") || !execution.equals(options.get("execution"))))) {
+                throw new PluginError("sample.launchOptions", "This engine does not support the requested runtime or entrypoint options.");
+            }
+            if (selected.size() != 1) throw new PluginError("sample.target", "Select one application.");
             Map<String, Object> project = selected.get(0);
             if (!(project.get("run") instanceof Map) || !"Main".equals(target.get("name")) || !project.get("path").equals(target.get("path"))) {
                 throw new PluginError("sample.target", "The selected application no longer exists.");
@@ -96,8 +104,10 @@ public final class SampleNativeBuild {
             }
             List<String> arguments = strings(run.get("arguments"));
             arguments.addAll(strings(params.get("userArguments")));
+            if (options != null) arguments.addAll(strings(options.get("arguments")));
             return object("executable", object("kind", "command", "value", run.get("command")), "arguments", arguments,
-                    "workingDirectory", project.get("path"), "environment", object());
+                    "workingDirectory", options != null && options.containsKey("workingDirectory") ? options.get("workingDirectory") : project.get("path"),
+                    "environment", options == null ? object() : options.get("environment"));
     }
 
     private Map<String, Object> build(List<Map<String, Object>> projects, List<String> arguments, CallContext context) throws IOException {

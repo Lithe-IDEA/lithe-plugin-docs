@@ -700,6 +700,10 @@ public final class Backend {
             respond(id, null, error(Protocol.INVALID_PARAMS, "Inline test reports require build protocol 8 and a test request."));
             return;
         }
+        if (arguments.containsKey("launchOptions") && (negotiated.buildVersion() < 10 || !Protocol.BUILD_PREPARE_RUN.equals(method) || !Protocol.validBuildLaunchOptions(arguments.get("launchOptions")))) {
+            respond(id, null, error(Protocol.INVALID_PARAMS, "Typed launch options require build protocol 10 and valid run preparation options."));
+            return;
+        }
         if (arguments.containsKey("selectorKind") || arguments.containsKey("selectors")) {
             Object kind = arguments.get("selectorKind"), selectors = arguments.get("selectors");
             boolean valid = negotiated.buildVersion() >= 9 && Protocol.BUILD_TEST.equals(method)

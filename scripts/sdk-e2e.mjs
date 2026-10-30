@@ -140,7 +140,7 @@ async function rustSample() {
 
 async function main() {
   const { values } = parseArgs({ options: { ref: { type: 'string' }, source: { type: 'string' },
-    'working-tree': { type: 'boolean' }, 'build-workflows': { type: 'boolean' }, 'native-configuration': { type: 'boolean' }, 'provider-reports': { type: 'boolean' } } });
+    'working-tree': { type: 'boolean' }, 'build-workflows': { type: 'boolean' }, 'native-configuration': { type: 'boolean' }, 'provider-reports': { type: 'boolean' }, 'provider-run-options': { type: 'boolean' } } });
   if (values['working-tree'] && (!values.source || values.ref)) {
     throw new Error('--working-tree requires a local --source and cannot be combined with --ref.');
   }
@@ -148,7 +148,8 @@ async function main() {
   const schema = JSON.parse(await readFile(join(repository, 'contract/v1/plugin-manifest.schema.json'), 'utf8'));
   const reportWorkflows = values['provider-reports'] || schema.properties.requires.properties.buildProviders.enum.includes(8);
   const configurationWorkflows = values['native-configuration'] || schema.properties.requires.properties.buildProviders.enum.includes(7);
-  const buildWorkflows = includesNativeWorkflows(schema, values['build-workflows'] || configurationWorkflows || reportWorkflows);
+  const runOptionsWorkflows = values['provider-run-options'] || schema.properties.requires.properties.buildProviders.enum.includes(10);
+  const buildWorkflows = includesNativeWorkflows(schema, values['build-workflows'] || configurationWorkflows || reportWorkflows || runOptionsWorkflows);
   const ref = values['working-tree'] ? 'HEAD' : values.ref ?? lock.source.revision;
   const source = values.source ?? `${lock.source.repository}.git`;
 
@@ -169,6 +170,7 @@ async function main() {
     env: {
       ...process.env,
       LITHE_PLUGIN_SDK_ROOT: repository,
+      LITHE_PLUGIN_SDK_RUN_OPTIONS_WORKFLOWS: runOptionsWorkflows ? '1' : '0',
       LITHE_PLUGIN_SDK_REPORT_WORKFLOWS: reportWorkflows ? '1' : '0',
       LITHE_PLUGIN_SDK_CONFIGURATION_WORKFLOWS: configurationWorkflows ? '1' : '0',
       LITHE_PLUGIN_SDK_NODE: process.execPath,

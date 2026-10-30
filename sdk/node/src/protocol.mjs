@@ -6,7 +6,7 @@
 
 /** Protocol versions this SDK can answer. */
 export const FUNCTIONS_VERSION = 1;
-export const BUILD_VERSION = 9;
+export const BUILD_VERSION = 10;
 export const VCS_VERSION = 1;
 
 export const METHODS = Object.freeze({
@@ -157,4 +157,27 @@ export function isReservedMethod(method) {
     method === METHODS.cancelRequest ||
     method.startsWith('lithe/')
   );
+}
+
+/** Version-10 user choices remain argv arrays until the owning tool consumes them. */
+export function isBuildLaunchOptions(value) {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return false;
+  const allowed = ['execution', 'runtimeArguments', 'arguments', 'environment', 'workingDirectory', 'entrypoint'];
+  if (Object.keys(value).some(key => !allowed.includes(key))
+      || !['application', 'service', 'task'].includes(value.execution)) return false;
+  const text = (item, maximum) => typeof item === 'string' && Buffer.byteLength(item) <= maximum && !item.includes('\0');
+  for (const arguments_ of [value.runtimeArguments, value.arguments]) {
+    if (!Array.isArray(arguments_) || arguments_.length > 1024 || arguments_.some(item => !text(item, 65536))) return false;
+  }
+  const environment = value.environment;
+  if (!environment || typeof environment !== 'object' || Array.isArray(environment)
+      || Object.keys(environment).length > 64 || Object.entries(environment).some(([key, item]) =>
+        !/^[A-Za-z_][A-Za-z0-9_]{0,127}$/.test(key) || !text(item, 65536))) return false;
+  if (Object.hasOwn(value, 'entrypoint') && (!text(value.entrypoint, 4096) || !value.entrypoint)) return false;
+  if (Object.hasOwn(value, 'workingDirectory')) {
+    const path = value.workingDirectory;
+    if (!text(path, 4096) || !path || path.includes('\\') || /^[A-Za-z]:/.test(path)
+        || (path !== '.' && path.split('/').some(part => !part || part === '.' || part === '..'))) return false;
+  }
+  return true;
 }

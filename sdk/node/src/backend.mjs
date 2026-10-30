@@ -18,6 +18,7 @@ import {
   ERROR_CODES,
   FUNCTIONS_VERSION,
   isFunctionId,
+  isBuildLaunchOptions,
   isReservedMethod,
   isVcsId,
   LIMITS,
@@ -490,6 +491,11 @@ class Backend {
   }
 
   #invokeBuild(id, method, params, handler) {
+    if (Object.hasOwn(params ?? {}, 'launchOptions')
+        && (this.#buildVersion < 10 || method !== METHODS.buildPrepareRun || !isBuildLaunchOptions(params.launchOptions))) {
+      this.#respond(id, undefined, { code: ERROR_CODES.invalidParams, message: 'Typed launch options require build protocol 10 and valid run preparation options.' });
+      return;
+    }
     if (Object.hasOwn(params ?? {}, 'modelInputs') && this.#buildVersion < 6) {
       this.#respond(id, undefined, { code: ERROR_CODES.invalidParams, message: 'Model inputs require build protocol 6.' });
       return;
