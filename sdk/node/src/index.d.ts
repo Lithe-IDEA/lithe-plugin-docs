@@ -128,6 +128,8 @@ export interface BuildLaunchOptions {
   environment: Record<string, string>;
   workingDirectory?: string;
   entrypoint?: string;
+  /** Version 11. Suspend the JVM on a host-selected loopback endpoint. */
+  debug?: { runtime: 'jvm'; port: number };
 }
 
 export interface BuildRunParams extends BuildRequestParams {

@@ -16,7 +16,7 @@ import java.util.regex.Pattern;
 public final class Protocol {
     /** Protocol versions this SDK can answer. */
     public static final int FUNCTIONS_VERSION = 1;
-    public static final int BUILD_VERSION = 10;
+    public static final int BUILD_VERSION = 11;
 
     public static final String INITIALIZE = "initialize";
     public static final String INITIALIZED = "initialized";
@@ -139,7 +139,7 @@ public final class Protocol {
     static boolean validBuildLaunchOptions(Object raw) {
         if (!(raw instanceof Map)) return false;
         Map<?, ?> value = (Map<?, ?>) raw;
-        List<String> allowed = Arrays.asList("execution", "runtimeArguments", "arguments", "environment", "workingDirectory", "entrypoint");
+        List<String> allowed = Arrays.asList("execution", "runtimeArguments", "arguments", "environment", "workingDirectory", "entrypoint", "debug");
         if (!allowed.containsAll(value.keySet()) || !Arrays.asList("application", "service", "task").contains(value.get("execution"))) return false;
         for (String name : Arrays.asList("runtimeArguments", "arguments")) {
             Object arguments = value.get(name);
@@ -150,6 +150,15 @@ public final class Protocol {
         if (!(environment instanceof Map) || ((Map<?, ?>) environment).size() > 64) return false;
         for (Map.Entry<?, ?> entry : ((Map<?, ?>) environment).entrySet()) {
             if (!(entry.getKey() instanceof String) || !((String) entry.getKey()).matches("[A-Za-z_][A-Za-z0-9_]{0,127}") || !launchText(entry.getValue(), 65536)) return false;
+        }
+        if (value.containsKey("debug")) {
+            Object rawDebug = value.get("debug");
+            if (!"service".equals(value.get("execution")) || !(rawDebug instanceof Map)) return false;
+            Map<?, ?> debug = (Map<?, ?>) rawDebug;
+            Object port = debug.get("port");
+            if (debug.size() != 2 || !"jvm".equals(debug.get("runtime")) || !(port instanceof Number)
+                    || ((Number) port).doubleValue() != ((Number) port).longValue()
+                    || ((Number) port).longValue() < 1 || ((Number) port).longValue() > 65535) return false;
         }
         if (value.containsKey("entrypoint") && (!launchText(value.get("entrypoint"), 4096) || ((String) value.get("entrypoint")).isEmpty())) return false;
         if (value.containsKey("workingDirectory")) {

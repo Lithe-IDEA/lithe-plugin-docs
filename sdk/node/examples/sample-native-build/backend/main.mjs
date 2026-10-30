@@ -60,7 +60,7 @@ async function prepare(params, context, debug) {
   const project = selected[0];
   const options = params.launchOptions;
   const execution = params.run === 'application' ? 'application' : params.run;
-  if ((options && (options.runtimeArguments.length || options.entrypoint || options.execution !== execution))
+  if ((options && (options.runtimeArguments.length || options.entrypoint || options.debug || options.execution !== execution))
       || (!['application', 'service', 'task'].includes(params.run)) || (params.run !== 'application' && !options)) {
     throw new PluginError('sample.launchOptions', 'This engine does not support the requested runtime or entrypoint options.');
   }

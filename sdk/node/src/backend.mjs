@@ -491,6 +491,10 @@ class Backend {
   }
 
   #invokeBuild(id, method, params, handler) {
+    if (Object.hasOwn(params?.launchOptions ?? {}, 'debug') && this.#buildVersion < 11) {
+      this.#respond(id, undefined, { code: ERROR_CODES.invalidParams, message: 'Runtime debug options require build protocol 11.' });
+      return;
+    }
     if (Object.hasOwn(params ?? {}, 'launchOptions')
         && (this.#buildVersion < 10 || method !== METHODS.buildPrepareRun || !isBuildLaunchOptions(params.launchOptions))) {
       this.#respond(id, undefined, { code: ERROR_CODES.invalidParams, message: 'Typed launch options require build protocol 10 and valid run preparation options.' });

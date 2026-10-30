@@ -6,7 +6,7 @@
 
 /** Protocol versions this SDK can answer. */
 export const FUNCTIONS_VERSION = 1;
-export const BUILD_VERSION = 10;
+export const BUILD_VERSION = 11;
 export const VCS_VERSION = 1;
 
 export const METHODS = Object.freeze({
@@ -162,7 +162,7 @@ export function isReservedMethod(method) {
 /** Version-10 user choices remain argv arrays until the owning tool consumes them. */
 export function isBuildLaunchOptions(value) {
   if (!value || typeof value !== 'object' || Array.isArray(value)) return false;
-  const allowed = ['execution', 'runtimeArguments', 'arguments', 'environment', 'workingDirectory', 'entrypoint'];
+  const allowed = ['execution', 'runtimeArguments', 'arguments', 'environment', 'workingDirectory', 'entrypoint', 'debug'];
   if (Object.keys(value).some(key => !allowed.includes(key))
       || !['application', 'service', 'task'].includes(value.execution)) return false;
   const text = (item, maximum) => typeof item === 'string' && Buffer.byteLength(item) <= maximum && !item.includes('\0');
@@ -173,6 +173,12 @@ export function isBuildLaunchOptions(value) {
   if (!environment || typeof environment !== 'object' || Array.isArray(environment)
       || Object.keys(environment).length > 64 || Object.entries(environment).some(([key, item]) =>
         !/^[A-Za-z_][A-Za-z0-9_]{0,127}$/.test(key) || !text(item, 65536))) return false;
+  if (Object.hasOwn(value, 'debug')) {
+    const debug = value.debug;
+    if (value.execution !== 'service' || !debug || typeof debug !== 'object' || Array.isArray(debug)
+        || Object.keys(debug).length !== 2 || debug.runtime !== 'jvm'
+        || !Number.isInteger(debug.port) || debug.port < 1 || debug.port > 65535) return false;
+  }
   if (Object.hasOwn(value, 'entrypoint') && (!text(value.entrypoint, 4096) || !value.entrypoint)) return false;
   if (Object.hasOwn(value, 'workingDirectory')) {
     const path = value.workingDirectory;

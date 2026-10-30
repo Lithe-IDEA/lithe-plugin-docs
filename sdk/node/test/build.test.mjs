@@ -16,7 +16,7 @@ const methods = [
   ['configuration', 7, { sources: [] }],
 ];
 
-for (const version of [1, 2, 3, 4, 5, 6, 7, 8, 9, 10]) {
+for (const version of [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11]) {
   test(`build protocol ${version} admits only its typed methods`, { timeout: 15000 }, async (t) => {
     const backend = createBackend();
     const invoked = [];
@@ -277,5 +277,30 @@ test('typed launch options preserve argv only after version 10 agreement', { tim
       assert.equal(seen, undefined);
     }
     assert.equal((await host.request('lithe/build/model', { launchOptions: options })).error.code, -32602);
+  }
+});
+
+
+test('JVM debug options require protocol 11 and an exact host-selected endpoint', { timeout: 15000 }, async t => {
+  for (const version of [10, 11]) {
+    let calls = 0;
+    const backend = createBackend();
+    backend.build.prepareRun(() => { calls++; return launch; });
+    const host = new TestHost(backend); t.after(() => host.close());
+    await host.initialize({ litheBuild: { versions: [version] } });
+    const options = { execution: 'service', runtimeArguments: [], arguments: [], environment: {}, debug: { runtime: 'jvm', port: 51235 } };
+    const request = launchOptions => host.request('lithe/build/prepareRun', { operationID: 'jvm-debug', launchOptions });
+    const response = await request(options);
+    if (version === 10) { assert.equal(response.error.code, -32602); assert.equal(calls, 0); }
+    else {
+      assert.deepEqual(response.result, launch);
+      for (const debug of [null, {}, { runtime: 'native', port: 51235 }, { runtime: 'jvm', port: 0 },
+        { runtime: 'jvm', port: 65536 }, { runtime: 'jvm', port: 1.5 }, { runtime: 'jvm', port: true },
+        { runtime: 'jvm', port: 51235, host: 'remote' }]) {
+        assert.equal((await request({ ...options, debug })).error.code, -32602);
+      }
+      assert.equal((await request({ ...options, execution: 'task' })).error.code, -32602);
+      assert.equal(calls, 1);
+    }
   }
 });

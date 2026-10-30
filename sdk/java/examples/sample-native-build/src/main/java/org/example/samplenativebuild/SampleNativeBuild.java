@@ -84,7 +84,7 @@ public final class SampleNativeBuild {
             String execution = String.valueOf(params.get("run"));
             if (!Arrays.asList("application", "service", "task").contains(execution)
                     || (!"application".equals(execution) && options == null)
-                    || (options != null && (!strings(options.get("runtimeArguments")).isEmpty() || options.containsKey("entrypoint") || !execution.equals(options.get("execution"))))) {
+                    || (options != null && (!strings(options.get("runtimeArguments")).isEmpty() || options.containsKey("entrypoint") || options.containsKey("debug") || !execution.equals(options.get("execution"))))) {
                 throw new PluginError("sample.launchOptions", "This engine does not support the requested runtime or entrypoint options.");
             }
             if (selected.size() != 1) throw new PluginError("sample.target", "Select one application.");

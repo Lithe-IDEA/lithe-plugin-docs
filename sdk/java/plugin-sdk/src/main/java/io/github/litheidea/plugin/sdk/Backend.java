@@ -700,6 +700,10 @@ public final class Backend {
             respond(id, null, error(Protocol.INVALID_PARAMS, "Inline test reports require build protocol 8 and a test request."));
             return;
         }
+        if (arguments.get("launchOptions") instanceof Map && Json.object(arguments.get("launchOptions")).containsKey("debug") && negotiated.buildVersion() < 11) {
+            respond(id, null, error(Protocol.INVALID_PARAMS, "Runtime debug options require build protocol 11."));
+            return;
+        }
         if (arguments.containsKey("launchOptions") && (negotiated.buildVersion() < 10 || !Protocol.BUILD_PREPARE_RUN.equals(method) || !Protocol.validBuildLaunchOptions(arguments.get("launchOptions")))) {
             respond(id, null, error(Protocol.INVALID_PARAMS, "Typed launch options require build protocol 10 and valid run preparation options."));
             return;

@@ -293,4 +293,32 @@ class BuildTest {
         }
     }
 
+
+    @Test
+    void jvmDebugRequiresVersionElevenAndAHostSelectedEndpoint() {
+        for (int version : new int[] {10, 11}) {
+            java.util.concurrent.atomic.AtomicInteger calls = new java.util.concurrent.atomic.AtomicInteger();
+            Backend backend = Backend.create(null, null).onPrepareRun((params, context) -> { calls.incrementAndGet(); return LAUNCH; });
+            TestHost host = new TestHost(backend);
+            try {
+                host.initialize(offered(version));
+                Map<String, Object> options = map("execution", "service", "runtimeArguments", Collections.emptyList(),
+                        "arguments", Collections.emptyList(), "environment", map(), "debug", map("runtime", "jvm", "port", 51235));
+                Map<String, Object> response = host.request(Protocol.BUILD_PREPARE_RUN, map("operationID", "jvm-debug", "launchOptions", options));
+                if (version == 10) { assertEquals(-32602L, errorCode(response)); assertEquals(0, calls.get()); }
+                else {
+                    assertEquals(LAUNCH, response.get("result"));
+                    for (Object debug : Arrays.asList(null, map(), map("runtime", "native", "port", 51235),
+                            map("runtime", "jvm", "port", 0), map("runtime", "jvm", "port", 65536),
+                            map("runtime", "jvm", "port", 1.5), map("runtime", "jvm", "port", true),
+                            map("runtime", "jvm", "port", 51235, "host", "remote"))) {
+                        options.put("debug", debug);
+                        assertEquals(-32602L, errorCode(host.request(Protocol.BUILD_PREPARE_RUN, map("operationID", "jvm-debug", "launchOptions", options))));
+                    }
+                    assertEquals(1, calls.get());
+                }
+            } finally { host.close(); }
+        }
+    }
+
 }

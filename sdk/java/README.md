@@ -242,3 +242,15 @@ Test an unmerged host with
 `node scripts/sdk-e2e.mjs --source <Lithe checkout> --working-tree --build-workflows --provider-run-options`.
 The contract mirror and released SDK remain pinned until the corresponding
 preview commit is merged and synchronized.
+
+
+## JVM service debug choices (development protocol 11)
+
+A service preparation may receive `launchOptions.debug = { runtime: 'jvm', port: 51235 }`.
+This is a host-selected loopback port, with a suspended JVM and exactly one agent;
+it is not permission to choose an endpoint, adapter or DAP arguments. Reject the
+choice if your engine cannot honor it. SDKs refuse it on protocol 10 or older.
+The portable process result is unchanged, and the host owns process lifetime,
+readiness, attachment and cleanup. The native-build examples explicitly reject
+this JVM choice rather than silently ignoring it. No release version or lock is
+changed by this development protocol increment.
