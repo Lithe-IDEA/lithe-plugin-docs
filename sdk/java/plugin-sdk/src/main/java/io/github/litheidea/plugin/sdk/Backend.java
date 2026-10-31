@@ -104,6 +104,7 @@ public final class Backend {
         formats.put(Protocol.BUILD_DEPENDENCIES, "litheDependencies");
         formats.put(Protocol.BUILD_DISCOVER_TESTS, "litheTestDiscovery");
         formats.put(Protocol.BUILD_CONFIGURATION, "litheBuildConfiguration");
+        formats.put(Protocol.BUILD_EDIT_CONFIGURATION, "litheConfigurationEdit");
         BUILD_FORMATS = Collections.unmodifiableMap(formats);
     }
 
@@ -184,9 +185,14 @@ public final class Backend {
         }
     }
 
-    /** Returns non-sensitive native source facts and generic XML edit bindings; protocol 7. */
+    /** Returns non-sensitive, format-independent native source facts; protocol 7. */
     public Backend onConfiguration(Handler handler) {
         return declareBuild(Protocol.BUILD_CONFIGURATION, handler);
+    }
+
+    /** Prepares native replacement bytes in an existing host staging file; returns only a receipt (v7). */
+    public Backend onEditConfiguration(Handler handler) {
+        return declareBuild(Protocol.BUILD_EDIT_CONFIGURATION, handler);
     }
 
     /** Answers {@code lithe/build/model} with a {@code litheBuildModel} document. */

@@ -1,8 +1,10 @@
 // A fictional build engine whose facts are supplied by lithe-sample.json.
 // Native IDE operations use typed handlers; this plugin needs no web page.
-import { readFile, realpath } from 'node:fs/promises';
+import { readFile, realpath, open } from 'node:fs/promises';
+import { constants } from 'node:fs';
 import { join, isAbsolute, resolve, sep, relative, posix } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { createHash } from 'node:crypto';
 import { createBackend, PluginError } from '../../../src/index.mjs';
 
 const backend = createBackend({ name: 'sample-native-build' });
@@ -21,6 +23,34 @@ backend.build.configuration(async ({ root }) => {
   const base = await inside(root);
   const configuration = JSON.parse(await readFile(join(base, 'lithe-sample.json'), 'utf8')).configuration;
   return configuration ?? { sources: [] };
+});
+
+// This fictional engine uses JSON, independently of Maven's XML format.
+backend.build.editConfiguration(async ({ snapshot, edits, outputFile }, context) => {
+  const source = snapshot.sources.find(source => source.id === edits.sourceID);
+  if (!source?.writable || source.revision !== edits.revision || Object.keys(edits.values).some(id => id !== 'cacheDirectory')) {
+    throw new PluginError('sample.configuration', 'Invalid native edit.');
+  }
+  const bytes = await readFile(fileURLToPath(source.uri));
+  const revision = 'sha256:' + createHash('sha256').update(bytes).digest('hex');
+  if (revision !== edits.revision) throw new PluginError('sample.configuration', 'Native source changed.');
+  let document;
+  try { document = JSON.parse(bytes.toString('utf8')); }
+  catch { throw new PluginError('sample.configuration', 'Native configuration could not be parsed.'); }
+  for (const [id, value] of Object.entries(edits.values)) {
+    if (value === null) delete document[id]; else document[id] = value;
+  }
+  context.signal.throwIfAborted();
+  const replacement = Buffer.from(JSON.stringify(document));
+  const output = await open(outputFile, constants.O_WRONLY | (constants.O_NOFOLLOW ?? 0));
+  try {
+    const metadata = await output.stat();
+    if (!metadata.isFile() || metadata.size !== 0 || metadata.nlink > 1) throw new PluginError('sample.configuration', 'Invalid staging file.');
+    context.signal.throwIfAborted();
+    await output.writeFile(replacement);
+  }
+  finally { await output.close(); }
+  return { sourceID: source.id, changed: true, revision: 'sha256:' + createHash('sha256').update(replacement).digest('hex') };
 });
 
 backend.build.execute(async (params, context) => {

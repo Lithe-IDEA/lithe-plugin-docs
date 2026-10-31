@@ -32,6 +32,7 @@ import {
 const BUILD_FORMATS = Object.freeze({
   [METHODS.buildModel]: 'litheBuildModel',
   [METHODS.buildConfiguration]: 'litheBuildConfiguration',
+  [METHODS.buildEditConfiguration]: 'litheConfigurationEdit',
   [METHODS.buildDependencies]: 'litheDependencies',
   [METHODS.buildDiscoverTests]: 'litheTestDiscovery',
 });
@@ -99,6 +100,7 @@ class Backend {
     this.build = Object.freeze({
       /** Returns non-sensitive native settings; no native document bytes cross RPC. */
       configuration: (handler) => this.#declareBuild(METHODS.buildConfiguration, handler),
+      editConfiguration: (handler) => this.#declareBuild(METHODS.buildEditConfiguration, handler),
       /** Answers `lithe/build/model` with a `litheBuildModel` document. */
       model: (handler) => this.#declareBuild(METHODS.buildModel, handler),
       /** Answers `lithe/build/dependencies` with a `litheDependencies` document. */

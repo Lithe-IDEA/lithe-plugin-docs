@@ -122,6 +122,7 @@ package. The SDK has no dependencies.
 | `backend.build.execute(handler)` | Protocol 2+: provider-owned bounded task, returning `{ exitCode, output }`. |
 | `backend.build.test(handler)`, `backend.build.discoverTests(handler)` | Protocol 3+: exact test execution and runnable selectors; discovery gets `format: "litheTestDiscovery"`, `version: 1`. |
 | `backend.build.configuration(handler)` | Protocol 7+: read-only non-sensitive raw/effective native configuration; stamps `litheBuildConfiguration`, version 1. The host owns explicit native-file saves. |
+| `backend.build.editConfiguration(handler)` | Protocol 7+: format-owned replacement to an existing private host output file; returns only source ID, SHA-256 and changed status, stamped `litheConfigurationEdit` v1. Never CREATE the output or write the original source. |
 | `backend.build.prepareRun(handler)` | Protocol 4: returns a portable launch plan after upstream synchronization/build; the host owns the application process. |
 | `backend.buildVersion` | Highest common negotiated build version (1–10), or `null`; methods newer than that version are refused before their handler runs. |
 | `backend.vcs(id, handlers, traits?)` | Implements the typed VCS requests; see [A VCS provider](#a-vcs-provider). `litheVcs` is answered only when the host offers it. |
@@ -307,3 +308,17 @@ The portable process result is unchanged, and the host owns process lifetime,
 readiness, attachment and cleanup. The native-build examples explicitly reject
 this JVM choice rather than silently ignoring it. No release version or lock is
 changed by this development protocol increment.
+
+### Native configuration editing (development protocol 7)
+
+Field IDs are opaque to the host; XML element bindings and host XML editing have
+been removed. The sample native engine uses JSON while Maven owns its XML reader
+and writer. Read only allowlisted non-sensitive facts, check the exact source
+revision, write replacement bytes to the existing host staging file without
+CREATE, and return a receipt only. Preserve unknown fields/comments supported by
+the native format and private values locally. The host verifies the output hash,
+rechecks operation/source ownership, publishes atomically and re-reads upstream.
+On cancellation the host removes staging; never recreate it or return document
+bytes. Protocols 8–10 retain their existing version numbers and handlers. Protocol
+7 is being revised in the unmerged development PR; contract mirrors are synced
+only after the host change merges. No SDK release or lock update is implied.

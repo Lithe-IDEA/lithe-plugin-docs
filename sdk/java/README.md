@@ -77,6 +77,7 @@ JAR it starts must hold everything it loads.
 | `onExecute(handler)` | Protocol 2+: a bounded provider-owned task, returning `{ exitCode, output }`. |
 | `onTest(handler)`, `onDiscoverTests(handler)` | Protocol 3+: exact execution and runnable selectors; discovery format/version are stamped. |
 | `onConfiguration(handler)` | Protocol 7+: read-only non-sensitive raw/effective native configuration; stamps `litheBuildConfiguration`, version 1. The host owns explicit native-file saves. |
+| `onEditConfiguration(handler)` | Protocol 7+: format-owned replacement to an existing private host output file; returns only source ID, SHA-256 and changed status, stamped `litheConfigurationEdit` v1. Never CREATE the output or write the original source. |
 | `onPrepareRun(handler)` | Protocol 4: prepare a portable plan; the host owns the application. |
 | `negotiated().buildVersion()` | Highest common build version (1–7), or zero; newer methods are refused before their handler runs. |
 | `function(id, handler)` | Declares a function offered in `initialize`. |
@@ -214,16 +215,18 @@ values and values exceeding 4096 UTF-8 bytes. An empty list selects the normal
 workspace/project scope. Preserve language-engine identities until mapping them
 to the upstream runner, and reject selections that cannot be represented exactly.
 
-## Java build preparation tasks (development convention)
+## Declarative build preparation (development buildSystems 4)
 
-A build provider can declare project tasks `java-prepare-run-main` and
-`java-prepare-run-test` and handle them with `onExecute`. The first prepares
-main resources, and the second main plus test resources. The language workflow
-uses current model source roles, awaits successful completion, then asks JDT for
-runtime paths. The backend owns upstream filtering and reactor semantics.
-These are ordinary public task IDs; no Java source parsing, private function or
-new backend method is involved. Per-run options/tools are ephemeral plan inputs;
-never overwrite saved build defaults while preparing an application.
+A provider task may declare `preparation: { "purpose": "run", "sourceRoles":
+["source", "generatedSource"] }` in its manifest and require `buildSystems: 4`.
+Declare a separate task for test source roles when needed. Task IDs are private
+to the provider; hosts find the purpose/role binding in the current model.
+`onExecute` receives the selected ID through the existing method, so no SDK
+handler or build RPC version changes. Missing roles/declarations fail explicitly.
+Preparation tasks must be project scoped, run without prompts and have unique
+purpose/role bindings. The provider owns filtering and upstream build semantics;
+the language workflow awaits completion before resolving launch paths.
+Per-run options/tools are ephemeral inputs and never overwrite saved defaults.
 
 
 ## Typed run choices (development protocol 10)
@@ -254,3 +257,17 @@ The portable process result is unchanged, and the host owns process lifetime,
 readiness, attachment and cleanup. The native-build examples explicitly reject
 this JVM choice rather than silently ignoring it. No release version or lock is
 changed by this development protocol increment.
+
+### Native configuration editing (development protocol 7)
+
+Field IDs are opaque to the host; XML element bindings and host XML editing have
+been removed. The sample native engine uses JSON while Maven owns its XML reader
+and writer. Read only allowlisted non-sensitive facts, check the exact source
+revision, write replacement bytes to the existing host staging file without
+CREATE, and return a receipt only. Preserve unknown fields/comments supported by
+the native format and private values locally. The host verifies the output hash,
+rechecks operation/source ownership, publishes atomically and re-reads upstream.
+On cancellation the host removes staging; never recreate it or return document
+bytes. Protocols 8–10 retain their existing version numbers and handlers. Protocol
+7 is being revised in the unmerged development PR; contract mirrors are synced
+only after the host change merges. No SDK release or lock update is implied.

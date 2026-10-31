@@ -56,11 +56,11 @@ class BuildTest {
 
     @Test
     void eachVersionAdmitsOnlyItsTypedMethods() {
-        List<String> methods = Arrays.asList("execute", "test", "discoverTests", "prepareRun", "prepareDebug", "configuration");
-        int[] minimum = {2, 3, 3, 4, 5, 7};
+        List<String> methods = Arrays.asList("execute", "test", "discoverTests", "prepareRun", "prepareDebug", "configuration", "editConfiguration");
+        int[] minimum = {2, 3, 3, 4, 5, 7, 7};
         List<Map<String, Object>> replies = Arrays.asList(map("exitCode", 0, "output", "built\n"),
                 map("exitCode", 2, "output", "test failed\n"),
-                map("tests", Arrays.asList(map("suite", "Suite", "case", "exact # [case]"))), LAUNCH, map("program", "app/bin/main", "arguments", Arrays.asList("a b"), "workingDirectory", "app", "environment", map()), map("sources", Collections.emptyList()));
+                map("tests", Arrays.asList(map("suite", "Suite", "case", "exact # [case]"))), LAUNCH, map("program", "app/bin/main", "arguments", Arrays.asList("a b"), "workingDirectory", "app", "environment", map()), map("sources", Collections.emptyList()), map("sourceID", "user", "revision", "missing", "changed", false));
         for (int version = 1; version <= 10; version++) {
             Backend backend = Backend.create(null, null)
                     .onExecute((params, context) -> replies.get(0))
@@ -68,7 +68,8 @@ class BuildTest {
                     .onDiscoverTests((params, context) -> replies.get(2))
                     .onPrepareRun((params, context) -> replies.get(3))
                     .onPrepareDebug((params, context) -> replies.get(4))
-                    .onConfiguration((params, context) -> replies.get(5));
+                    .onConfiguration((params, context) -> replies.get(5))
+                    .onEditConfiguration((params, context) -> replies.get(6));
             TestHost host = new TestHost(backend);
             try {
                 Map<String, Object> result = Json.object(host.initialize(offered(version, 99)).get("result"));
@@ -82,7 +83,7 @@ class BuildTest {
                     } else {
                         // Compare JSON-normalized numeric types, as seen on the wire.
                         Map<String, Object> expected = Json.object(Json.parse(Json.stringify(replies.get(index))));
-                        if (index == 2 || index == 5) { expected.put("format", index == 2 ? "litheTestDiscovery" : "litheBuildConfiguration"); expected.put("version", 1L); }
+                        if (index == 2 || index == 5 || index == 6) { expected.put("format", index == 2 ? "litheTestDiscovery" : index == 5 ? "litheBuildConfiguration" : "litheConfigurationEdit"); expected.put("version", 1L); }
                         assertEquals(expected, response.get("result"));
                     }
                 }

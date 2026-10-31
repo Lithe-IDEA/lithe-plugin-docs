@@ -36,15 +36,15 @@ pub fn run(sample: &Sample) {
          "run":{"command":"node","arguments":["-e","process.exit(99)"]}},
         {"name":"slow","path":"slow","build":[sample.node,"-e","require('fs').writeFileSync('started', String(process.pid)); setInterval(()=>{}, 1000)"],"run":{"command":"node","arguments":[],"debugProgram":"native-program"}}
     ]});
-    let native_document = "<settings><!--keep--><cacheDirectory>/raw/cache</cacheDirectory><password>sdk-native-secret-sentinel</password></settings>";
-    let native_file = instance.join("settings.xml");
+    let native_document = r#"{"cacheDirectory":"/raw/cache","_comment":"keep","password":"sdk-native-secret-sentinel"}"#;
+    let native_file = instance.join("settings.json");
     if std::env::var("LITHE_PLUGIN_SDK_CONFIGURATION_WORKFLOWS").as_deref() == Ok("1") {
         fs::write(&native_file, native_document).unwrap();
         config["configuration"] = json!({"sources":[{"id":"user","scope":"user",
             "uri":url::Url::from_file_path(&native_file).unwrap().as_str(),
             "revision":format!("sha256:{:x}", Sha256::digest(native_document.as_bytes())),"writable":true,
-            "rootElement":{"name":"settings","namespace":""},"fields":[{"id":"cacheDirectory","kind":"directory",
-                "value":"/raw/cache","effectiveValue":"/selected/cache","effectiveSource":"commandLine","path":["cacheDirectory"]}]}]});
+            "fields":[{"id":"cacheDirectory","kind":"directory",
+                "value":"/raw/cache","effectiveValue":"/selected/cache","effectiveSource":"commandLine"}]}]});
     }
     fs::write(instance.join("lithe-sample.json"), config.to_string()).unwrap();
     fs::write(instance.join("app/native-program"), "native debugger target fixture").unwrap();
@@ -91,15 +91,49 @@ pub fn run(sample: &Sample) {
         let decoded = request("build.decodeConfiguration", json!({"result":reply}));
         assert_eq!(decoded["status"], "ok", "{decoded}");
         assert_eq!(decoded["configuration"]["sources"][0]["fields"][0]["effectiveValue"], "/selected/cache");
-        let edited = request("build.editConfigurationDocument", json!({"snapshot":decoded["configuration"],
-            "edits":{"sourceID":"user","revision":reply["sources"][0]["revision"],"values":{"cacheDirectory":"/new/cache"}},
-            "document":native_document}));
+        let state = fixture.root.join("workspace-state");
+        fs::create_dir_all(&state).unwrap();
+        let output = state.join("native-edit.json");
+        fs::write(&output, b"").unwrap();
+        let edits = json!({"sourceID":"user","revision":reply["sources"][0]["revision"],"values":{"cacheDirectory":"/new/cache"}});
+        let planned = request("build.configurationEditPlan", json!({"root":root,"workspaceStateDirectory":state,"outputFile":output,
+            "snapshot":decoded["configuration"],"edits":edits}));
+        assert_eq!(planned["status"], "ok", "{planned}");
+        let receipt = session.build_request("native-edit", &planned["plan"]);
+        assert!(!receipt.to_string().contains("sdk-native-secret-sentinel"));
+        let edited = request("build.decodeConfigurationEdit", json!({"snapshot":decoded["configuration"],"edits":edits,"result":receipt}));
         assert_eq!(edited["status"], "ok", "{edited}");
-        let document = edited["edit"]["document"].as_str().unwrap();
-        assert!(document.contains("<cacheDirectory>/new/cache</cacheDirectory>"));
-        assert!(document.contains("<!--keep-->"));
-        assert!(document.contains("<password>sdk-native-secret-sentinel</password>"));
-        assert_eq!(fs::read_to_string(&native_file).unwrap(), native_document, "Core editing alone performs no native IO");
+        let replacement = fs::read(&output).unwrap();
+        let document: Value = serde_json::from_slice(&replacement).unwrap();
+        assert_eq!(document["cacheDirectory"], "/new/cache");
+        assert_eq!(document["_comment"], "keep");
+        assert_eq!(document["password"], "sdk-native-secret-sentinel");
+        assert_eq!(edited["edit"]["revision"], format!("sha256:{:x}", Sha256::digest(&replacement)));
+        assert_eq!(fs::read_to_string(&native_file).unwrap(), native_document, "Provider editing only writes the private staging file");
+        session.send_build_request("nonempty-output", &planned["plan"]);
+        let rejected = session.completion("nonempty-output");
+        assert!(rejected.get("error").is_some(), "Providers cannot truncate an existing nonempty file");
+        assert_eq!(fs::read(&output).unwrap(), replacement);
+        assert_eq!(fs::read_to_string(&native_file).unwrap(), native_document);
+        fs::remove_file(&output).unwrap();
+        session.send_build_request("cancelled-output", &planned["plan"]);
+        let rejected = session.completion("cancelled-output");
+        assert!(rejected.get("error").is_some(), "An absent host staging file cannot be recreated");
+        assert!(!output.exists());
+        let malformed = r#"{"password":"sdk-native-secret-sentinel","#;
+        fs::write(&native_file, malformed).unwrap();
+        fs::write(&output, b"").unwrap();
+        let revision = format!("sha256:{:x}", Sha256::digest(malformed.as_bytes()));
+        let mut broken = planned["plan"].clone();
+        broken["provider"]["params"]["snapshot"]["sources"][0]["revision"] = json!(revision);
+        broken["provider"]["params"]["edits"]["revision"] = json!(revision);
+        session.send_build_request("invalid-native-json", &broken);
+        let rejected = session.completion("invalid-native-json");
+        assert!(rejected.get("error").is_some());
+        assert!(!rejected.to_string().contains("sdk-native-secret-sentinel"));
+        assert_eq!(fs::read(&output).unwrap(), b"");
+        assert_eq!(fs::read_to_string(&native_file).unwrap(), malformed);
+        fs::remove_file(&output).unwrap();
     }
     let plan = build("build.modelPlan", json!({"root":root}))["plan"].clone();
     let result = session.build_request("model", &plan);

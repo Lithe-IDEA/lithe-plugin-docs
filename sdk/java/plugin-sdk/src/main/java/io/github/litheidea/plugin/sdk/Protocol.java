@@ -28,6 +28,7 @@ public final class Protocol {
     public static final String FUNCTION_UNREGISTER = "lithe/function/unregister";
     public static final String FUNCTION_PROGRESS = "lithe/function/progress";
     public static final String BUILD_CONFIGURATION = "lithe/build/configuration";
+    public static final String BUILD_EDIT_CONFIGURATION = "lithe/build/editConfiguration";
     public static final String BUILD_MODEL = "lithe/build/model";
     public static final String BUILD_DEPENDENCIES = "lithe/build/dependencies";
     public static final String BUILD_EXECUTE = "lithe/build/execute";
@@ -58,7 +59,7 @@ public final class Protocol {
 
     /** Minimum negotiated version; unknown methods can never pass admission. */
     static int buildMethodVersion(String method) {
-        if (BUILD_CONFIGURATION.equals(method)) return 7;
+        if (BUILD_CONFIGURATION.equals(method) || BUILD_EDIT_CONFIGURATION.equals(method)) return 7;
         if (BUILD_MODEL.equals(method) || BUILD_DEPENDENCIES.equals(method)) return 1;
         if (BUILD_EXECUTE.equals(method)) return 2;
         if (BUILD_TEST.equals(method) || BUILD_DISCOVER_TESTS.equals(method)) return 3;

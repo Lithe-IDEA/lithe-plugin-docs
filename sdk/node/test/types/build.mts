@@ -68,3 +68,16 @@ backend.build.model((params) => {
   }
   return { projects: [] };
 });
+
+backend.build.configuration(() => ({ sources: [] }));
+backend.build.editConfiguration((params, context) => {
+  context.throwIfCancelled();
+  const output: string = params.outputFile;
+  const values: Record<string, import('@lithe/plugin-sdk').BuildConfigurationValue> = params.edits.values;
+  void output; void values;
+  // @ts-expect-error Native bindings do not expose XML roots or native documents.
+  void params.snapshot.sources[0]!.rootElement;
+  return { sourceID: params.edits.sourceID, revision: params.edits.revision, changed: false };
+});
+// @ts-expect-error Edit receipts require a source identity and a revision.
+backend.build.editConfiguration(() => ({ changed: true }));

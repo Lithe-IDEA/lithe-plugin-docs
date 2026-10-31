@@ -21,6 +21,7 @@ export const METHODS = Object.freeze({
   functionProgress: 'lithe/function/progress',
   buildModel: 'lithe/build/model',
   buildConfiguration: 'lithe/build/configuration',
+  buildEditConfiguration: 'lithe/build/editConfiguration',
   buildDependencies: 'lithe/build/dependencies',
   buildExecute: 'lithe/build/execute',
   buildTest: 'lithe/build/test',
@@ -34,6 +35,7 @@ export const METHODS = Object.freeze({
 /** Minimum negotiated version of each typed build operation. */
 export const BUILD_METHOD_VERSIONS = Object.freeze({
   [METHODS.buildConfiguration]: 7,
+  [METHODS.buildEditConfiguration]: 7,
   [METHODS.buildModel]: 1,
   [METHODS.buildDependencies]: 1,
   [METHODS.buildExecute]: 2,

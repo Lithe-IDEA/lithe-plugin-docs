@@ -25,6 +25,11 @@ public final class SampleNativeBuild {
 
     public static void main(String[] arguments) { new SampleNativeBuild().serve(); }
 
+    private static String digest(byte[] bytes) throws Exception {
+        StringBuilder text = new StringBuilder("sha256:");
+        for (byte value : java.security.MessageDigest.getInstance("SHA-256").digest(bytes)) text.append(String.format("%02x", value & 255));
+        return text.toString();
+    }
     private void serve() {
         backend.onInitialize((params, negotiated) -> workspace = Paths.get(URI.create(Json.string(params, "rootUri"))).toRealPath());
         backend.onModel((params, context) -> {
@@ -58,6 +63,30 @@ public final class SampleNativeBuild {
                     Files.readAllBytes(base.resolve("lithe-sample.json")), StandardCharsets.UTF_8)));
             return engine.get("configuration") instanceof Map ? Json.object(engine.get("configuration"))
                     : object("sources", Collections.emptyList());
+        });
+        backend.onEditConfiguration((params, context) -> {
+            Map<String, Object> snapshot = Json.object(params.get("snapshot")), edits = Json.object(params.get("edits"));
+            Map<String, Object> source = null;
+            for (Object value : (List<?>) snapshot.get("sources")) if (Json.object(value).get("id").equals(edits.get("sourceID"))) source = Json.object(value);
+            if (source == null || !Boolean.TRUE.equals(source.get("writable")) || !source.get("revision").equals(edits.get("revision"))) throw new PluginError("sample.configuration", "Invalid native edit.");
+            byte[] bytes = Files.readAllBytes(Paths.get(new URI(Json.string(source, "uri"))));
+            if (!digest(bytes).equals(edits.get("revision"))) throw new PluginError("sample.configuration", "Native source changed.");
+            Map<String, Object> document;
+            try { document = Json.object(Json.parse(new String(bytes, StandardCharsets.UTF_8))); }
+            catch (Exception error) { throw new PluginError("sample.configuration", "Native configuration could not be parsed."); }
+            for (Map.Entry<String, Object> edit : Json.object(edits.get("values")).entrySet()) {
+                if (!"cacheDirectory".equals(edit.getKey())) throw new PluginError("sample.configuration", "Unknown field.");
+                if (edit.getValue() == null) document.remove(edit.getKey()); else document.put(edit.getKey(), edit.getValue());
+            }
+            context.cancellation().throwIfCancelled();
+            byte[] replacement = Json.stringify(document).getBytes(StandardCharsets.UTF_8);
+            try (java.nio.channels.SeekableByteChannel output = Files.newByteChannel(Paths.get(Json.string(params, "outputFile")),
+                    java.nio.file.StandardOpenOption.WRITE, java.nio.file.LinkOption.NOFOLLOW_LINKS)) {
+                if (output.size() != 0) throw new PluginError("sample.configuration", "Invalid staging file.");
+                java.nio.ByteBuffer buffer = java.nio.ByteBuffer.wrap(replacement);
+                while (buffer.hasRemaining()) { context.cancellation().throwIfCancelled(); output.write(buffer); }
+            }
+            return object("sourceID", source.get("id"), "changed", true, "revision", digest(replacement));
         });
         backend.onExecute((params, context) -> {
             if (!"build".equals(params.get("task"))) throw new PluginError("sample.task", "Unknown build task.");

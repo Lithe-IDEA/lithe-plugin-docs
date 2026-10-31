@@ -14,6 +14,7 @@ const methods = [
   ['prepareRun', 4, launch],
   ['prepareDebug', 5, { program: 'app/bin/main', arguments: [], workingDirectory: 'app', environment: {} }],
   ['configuration', 7, { sources: [] }],
+  ['editConfiguration', 7, { sourceID: 'user', revision: 'missing', changed: false }],
 ];
 
 for (const version of [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11]) {
@@ -34,7 +35,8 @@ for (const version of [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11]) {
       } else {
         assert.deepEqual(response.result, method === 'discoverTests'
           ? { ...reply, format: 'litheTestDiscovery', version: 1 } : method === 'configuration'
-            ? { ...reply, format: 'litheBuildConfiguration', version: 1 } : reply);
+            ? { ...reply, format: 'litheBuildConfiguration', version: 1 } : method === 'editConfiguration'
+              ? { ...reply, format: 'litheConfigurationEdit', version: 1 } : reply);
       }
     }
   });

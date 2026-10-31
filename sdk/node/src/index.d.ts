@@ -120,6 +120,29 @@ export interface BuildTestParams extends BuildRequestParams {
   operationID: string;
 }
 
+/** Protocol 7: non-sensitive native facts; bindings are private to the provider. */
+export type BuildConfigurationValue = string | boolean | string[] | null;
+export interface BuildConfigurationDocument {
+  format?: 'litheBuildConfiguration'; version?: 1;
+  sources: { id: string; scope: 'installation' | 'user' | 'workspace'; uri: string;
+    revision: string; writable: boolean;
+    fields: { id: string; kind: 'text' | 'file' | 'directory' | 'boolean' | 'stringList';
+      value: BuildConfigurationValue; effectiveValue: BuildConfigurationValue; effectiveSource: string }[];
+  }[];
+}
+export interface BuildConfigurationEditParams extends BuildRequestParams {
+  snapshot: BuildConfigurationDocument;
+  edits: { sourceID: string; revision: string; values: Record<string, BuildConfigurationValue> };
+  /** Existing private host file; open without CREATE and never write the source. */
+  outputFile: string;
+}
+export interface BuildConfigurationEditReceipt {
+  format?: 'litheConfigurationEdit'; version?: 1;
+  sourceID: string; revision: string; changed: boolean;
+}
+export type BuildConfigurationHandler = (params: BuildRequestParams, context: RequestContext) => BuildConfigurationDocument | Promise<BuildConfigurationDocument>;
+export type BuildConfigurationEditHandler = (params: BuildConfigurationEditParams, context: RequestContext) => BuildConfigurationEditReceipt | Promise<BuildConfigurationEditReceipt>;
+
 /** Version 10. These are resolved user choices, not shell command strings. */
 export interface BuildLaunchOptions {
   execution: 'application' | 'service' | 'task';
@@ -251,12 +274,14 @@ export interface ListenOptions {
 export interface Backend {
   readonly negotiated: Negotiated;
   readonly initializeParams: JsonObject | null;
-  /** Highest common version (1-8), or null before/without negotiation. */
+  /** Highest common version (1-11), or null before/without negotiation. */
   readonly buildVersion: number | null;
   readonly functionIDs: string[];
   readonly build: {
     /** Non-sensitive source-backed settings; requires build protocol 7. */
-    configuration(handler: BuildHandler): Backend;
+    configuration(handler: BuildConfigurationHandler): Backend;
+    /** Format-independent edit to a host-owned staging file; returns a receipt only (v7). */
+    editConfiguration(handler: BuildConfigurationEditHandler): Backend;
     model(handler: BuildHandler): Backend;
     dependencies(handler: BuildHandler): Backend;
     execute(handler: BuildExecutionHandler): Backend;
