@@ -144,6 +144,8 @@ SDK 的源码都在本仓库的 `sdk/` 下，发布在[本仓库的 Releases](ht
 | [`README.md`](contract/v1/README.md) | 字段、API 等级、能力版本、权限和错误码的完整说明 |
 | [`plugin-manifest.schema.json`](contract/v1/plugin-manifest.schema.json) | `plugin.json` 的 JSON Schema |
 | [`plugin-index.schema.json`](contract/v1/plugin-index.schema.json) | `lithe-plugin-index.json` 的 JSON Schema |
+| [`toolchains.md`](contract/v1/toolchains.md) | 插件提供的工具链：工具定义、版本管理器提供方、查询与回复校验、目录固定值和四层解析。目前只有 macOS 设置页以只读方式接入，构建、运行和语言服务器还不使用解析结果 |
+| [`proposals/toolchains/`](contract/v1/proposals/toolchains/README.md) | 工具链的完整设计草案，包括还没实现的部分；里面的示例只用于评审，不能直接安装 |
 | [`fixtures/`](contract/v1/fixtures) | 标准用例：合法和非法的清单、命令规划、构建规划、插件函数协议、市场索引，以及 Lithe 对每个用例的预期结果 |
 
 fixture 按演示的能力命名，例如 `build-command-stdout.plugin.json` 演示“解码命令的标准输出”。它们借 Cargo、Go、Gradle、Maven 等真实工具作为输入，但不是这些插件本身；要参考完整插件，看[示例插件](#示例插件)。

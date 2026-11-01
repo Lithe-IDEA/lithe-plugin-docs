@@ -3,12 +3,12 @@
   "source": {
     "repository": "https://github.com/1lck/Lithe-IDEA",
     "directory": "shared/contracts/plugins/v1",
-    "revision": "9175bd73431aec5086f1fe4c532be54fc49ba4e8"
+    "revision": "589116e30d3bdbf72c9695f8ff18a952c7da33ac"
   },
   "files": [
     {
       "path": "README.md",
-      "sha256": "b2864095465511324cfde17968184fb87ac9191711c18a68fd48c5db91149f35"
+      "sha256": "0f32eb07a05f6e929696b51c87052eab6c369489c89b47d1b3fc8dc82ac3f6e6"
     },
     {
       "path": "fixtures/backend-workspace.plugin.json",
@@ -119,8 +119,16 @@
       "sha256": "81038febbde31e0554451789106f8fc255e87038c8185602ce0c7e918f90ff78"
     },
     {
+      "path": "fixtures/editor-actions.plugin.json",
+      "sha256": "ca86471b63a15e6f12102777c59c300a6da7690ac13e02835e43abf41f26eb0b"
+    },
+    {
       "path": "fixtures/function-protocol.json",
-      "sha256": "c00b99c31f4c2b5d2cb7644d123cdec69d8bc439a5f043e5b655db6351545cff"
+      "sha256": "e880024b108b2d11c5c2b93c39ea642460989eaf530bc1f85254f404780dfc3b"
+    },
+    {
+      "path": "fixtures/grammars/http.monarch.json",
+      "sha256": "2fb9c325feb966d0d6569a77a2a8493b0e43e13b7cd64f9b30548ff826f9cdea"
     },
     {
       "path": "fixtures/hello-lithe.plugin.json",
@@ -128,7 +136,11 @@
     },
     {
       "path": "fixtures/invalid-manifests.json",
-      "sha256": "3bbd1ed851b916d1e006d0403bb9eb2d5cd122e65070da91890aa6b7154b0454"
+      "sha256": "3859c99928158e44fc1f9f25caff5289ed3c2f8e3af200108ab17051915246c2"
+    },
+    {
+      "path": "fixtures/language-grammar.plugin.json",
+      "sha256": "9c55a3ea5f075328fca87c845f04f680e35fb283a39283c742fb5d435be05faa"
     },
     {
       "path": "fixtures/language-host-integration.plugin.json",
@@ -215,6 +227,14 @@
       "sha256": "83d4c7faf7bfbb9c474639bfc0ef42dae8cd7d370d388f8527589f2afed12981"
     },
     {
+      "path": "fixtures/tool-definition.plugin.json",
+      "sha256": "06b94a1886edcaa8ade3ae1462d01aa6e54e7ec3104ae28d0b796f2a303fd90a"
+    },
+    {
+      "path": "fixtures/toolchain-provider.plugin.json",
+      "sha256": "87a7c83ecf5e1983953fd29705237ff9c1b9480d22416aec7e85293a2342600a"
+    },
+    {
       "path": "fixtures/vcs-provider.plugin.json",
       "sha256": "7d0c85b6e0531a28e877050c2da15470d0bfe5ccd4c98215e7824d4445d977a9"
     },
@@ -232,7 +252,63 @@
     },
     {
       "path": "plugin-manifest.schema.json",
-      "sha256": "3065b75d2a2e3913e6ac002acfe50f9da179e703603b06753c9bfd171ffe8905"
+      "sha256": "424d5e6a9f0c216eb79add116b90d75f6634f7b31c51629a730ec155ada27016"
+    },
+    {
+      "path": "proposals/toolchains/README.md",
+      "sha256": "eeec7c53075056649d103af78fa9c5b2e0a28bc60c8049d4ae2a9d3ec15e17e7"
+    },
+    {
+      "path": "proposals/toolchains/fixtures/java-tool-definition.json",
+      "sha256": "23408937de3c5d77712657e8753d23d7cd07d91e73d5c3d0788d3ae283f56134"
+    },
+    {
+      "path": "proposals/toolchains/fixtures/local.json",
+      "sha256": "0d24ed31d1b330cd45147274747206dada3dc660deae66eb72acdf359e2092ba"
+    },
+    {
+      "path": "proposals/toolchains/fixtures/manifest-rejections.json",
+      "sha256": "de2ebb472c31eb8e5ff3fd9217572311dc65df1bb62a17736e4192d105576674"
+    },
+    {
+      "path": "proposals/toolchains/fixtures/mise-provider.json",
+      "sha256": "55f9b992e8d4988afb3e8574025af2e593c71c799a98bd9b237b9d01c5fc474c"
+    },
+    {
+      "path": "proposals/toolchains/fixtures/query-cases.json",
+      "sha256": "d1a7c3e8b8df18cba3d40cca437b712a787b8935d6c8eb7b567e74736d42c203"
+    },
+    {
+      "path": "proposals/toolchains/fixtures/resolution-cases.json",
+      "sha256": "8292f41dc287e0d96638a3583324354f106cc0bd149c91ab76f80525893c5cab"
+    },
+    {
+      "path": "proposals/toolchains/local.schema.json",
+      "sha256": "a27683a7d4086af4e24cfae220af4d2089bb7c14cb0f9fbd7a83e3ba7a193a51"
+    },
+    {
+      "path": "proposals/toolchains/manifest-contributions.schema.json",
+      "sha256": "9b66f66bfeb5ad32b7415c084048f95ad54d7b1628bd89ce146dfcfc4c746ebf"
+    },
+    {
+      "path": "proposals/toolchains/manifest.md",
+      "sha256": "c8074693b61fa55cdecd8cda923e9c21a1be923093ef1f00acafb99844afec82"
+    },
+    {
+      "path": "proposals/toolchains/protocol.md",
+      "sha256": "5218ad632fcdc09b317dc2b248e68528fedc9afd030cd2e3d276f1c34b4a851d"
+    },
+    {
+      "path": "proposals/toolchains/query.schema.json",
+      "sha256": "4cb8093ee80d99527fb05d4cf7aa86a55f74711e9bf9e61139db3681d7361219"
+    },
+    {
+      "path": "proposals/toolchains/resolution.schema.json",
+      "sha256": "c0ce78a4df543e2bae06877ae9a49c425a4fb81f5af3ff4626b064c8063b288c"
+    },
+    {
+      "path": "toolchains.md",
+      "sha256": "0d9e19ea676836d469e3342f01d1e0eef60c6cd321f3671e1b5db1235690c39f"
     }
   ]
 }
