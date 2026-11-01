@@ -151,8 +151,8 @@ export interface BuildLaunchOptions {
   environment: Record<string, string>;
   workingDirectory?: string;
   entrypoint?: string;
-  /** Version 11. Suspend the JVM on a host-selected loopback endpoint. */
-  debug?: { runtime: 'jvm'; port: number };
+  /** Version 11. Suspend the service for a registry-selected connection attach. */
+  debug?: { adapterID: string; configurationType: string; target: { kind: 'connection'; host: '127.0.0.1'; port: number } };
 }
 
 export interface BuildRunParams extends BuildRequestParams {

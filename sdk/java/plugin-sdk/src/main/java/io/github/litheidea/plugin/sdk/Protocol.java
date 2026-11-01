@@ -156,9 +156,18 @@ public final class Protocol {
             Object rawDebug = value.get("debug");
             if (!"service".equals(value.get("execution")) || !(rawDebug instanceof Map)) return false;
             Map<?, ?> debug = (Map<?, ?>) rawDebug;
-            Object port = debug.get("port");
-            if (debug.size() != 2 || !"jvm".equals(debug.get("runtime")) || !(port instanceof Number)
-                    || ((Number) port).doubleValue() != ((Number) port).longValue()
+            if (debug.size() != 3 || !(debug.get("adapterID") instanceof String)
+                    || !((String) debug.get("adapterID")).matches("[a-z0-9.-]{1,128}/[a-z0-9-]{1,64}")
+                    || Arrays.asList(".", "..").contains(((String) debug.get("adapterID")).split("/")[0])
+                    || !(debug.get("configurationType") instanceof String)
+                    || ((String) debug.get("configurationType")).trim().isEmpty()
+                    || ((String) debug.get("configurationType")).getBytes(java.nio.charset.StandardCharsets.UTF_8).length > 256
+                    || ((String) debug.get("configurationType")).chars().anyMatch(Character::isISOControl)
+                    || !(debug.get("target") instanceof Map)) return false;
+            Map<?, ?> target = (Map<?, ?>) debug.get("target");
+            Object port = target.get("port");
+            if (target.size() != 3 || !"connection".equals(target.get("kind")) || !"127.0.0.1".equals(target.get("host"))
+                    || !(port instanceof Number) || ((Number) port).doubleValue() != ((Number) port).longValue()
                     || ((Number) port).longValue() < 1 || ((Number) port).longValue() > 65535) return false;
         }
         if (value.containsKey("entrypoint") && (!launchText(value.get("entrypoint"), 4096) || ((String) value.get("entrypoint")).isEmpty())) return false;

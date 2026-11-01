@@ -283,14 +283,14 @@ test('typed launch options preserve argv only after version 10 agreement', { tim
 });
 
 
-test('JVM debug options require protocol 11 and an exact host-selected endpoint', { timeout: 15000 }, async t => {
+test('Registry connection debug options require protocol 11 and an exact host-selected endpoint', { timeout: 15000 }, async t => {
   for (const version of [10, 11]) {
     let calls = 0;
     const backend = createBackend();
     backend.build.prepareRun(() => { calls++; return launch; });
     const host = new TestHost(backend); t.after(() => host.close());
     await host.initialize({ litheBuild: { versions: [version] } });
-    const options = { execution: 'service', runtimeArguments: [], arguments: [], environment: {}, debug: { runtime: 'jvm', port: 51235 } };
+    const options = { execution: 'service', runtimeArguments: [], arguments: [], environment: {}, debug: { adapterID: 'dev.example/debug', configurationType: 'example', target: { kind: 'connection', host: '127.0.0.1', port: 51235 } } };
     const request = launchOptions => host.request('lithe/build/prepareRun', { operationID: 'jvm-debug', launchOptions });
     const response = await request(options);
     if (version === 10) { assert.equal(response.error.code, -32602); assert.equal(calls, 0); }
@@ -298,7 +298,10 @@ test('JVM debug options require protocol 11 and an exact host-selected endpoint'
       assert.deepEqual(response.result, launch);
       for (const debug of [null, {}, { runtime: 'native', port: 51235 }, { runtime: 'jvm', port: 0 },
         { runtime: 'jvm', port: 65536 }, { runtime: 'jvm', port: 1.5 }, { runtime: 'jvm', port: true },
-        { runtime: 'jvm', port: 51235, host: 'remote' }]) {
+        { runtime: 'jvm', port: 51235, host: 'remote' },
+        ...[0, 65536, 1.5, true].map(port => ({ ...options.debug, target: { ...options.debug.target, port } })),
+        { ...options.debug, adapterID: 'java' },
+        { ...options.debug, target: { ...options.debug.target, host: 'remote' } }]) {
         assert.equal((await request({ ...options, debug })).error.code, -32602);
       }
       assert.equal((await request({ ...options, execution: 'task' })).error.code, -32602);

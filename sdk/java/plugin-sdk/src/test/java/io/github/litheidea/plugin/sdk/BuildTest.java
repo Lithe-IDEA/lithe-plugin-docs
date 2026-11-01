@@ -296,7 +296,7 @@ class BuildTest {
 
 
     @Test
-    void jvmDebugRequiresVersionElevenAndAHostSelectedEndpoint() {
+    void connectionDebugRequiresVersionElevenAndAHostSelectedEndpoint() {
         for (int version : new int[] {10, 11}) {
             java.util.concurrent.atomic.AtomicInteger calls = new java.util.concurrent.atomic.AtomicInteger();
             Backend backend = Backend.create(null, null).onPrepareRun((params, context) -> { calls.incrementAndGet(); return LAUNCH; });
@@ -304,7 +304,7 @@ class BuildTest {
             try {
                 host.initialize(offered(version));
                 Map<String, Object> options = map("execution", "service", "runtimeArguments", Collections.emptyList(),
-                        "arguments", Collections.emptyList(), "environment", map(), "debug", map("runtime", "jvm", "port", 51235));
+                        "arguments", Collections.emptyList(), "environment", map(), "debug", map("adapterID", "dev.example/debug", "configurationType", "example", "target", map("kind", "connection", "host", "127.0.0.1", "port", 51235)));
                 Map<String, Object> response = host.request(Protocol.BUILD_PREPARE_RUN, map("operationID", "jvm-debug", "launchOptions", options));
                 if (version == 10) { assertEquals(-32602L, errorCode(response)); assertEquals(0, calls.get()); }
                 else {
@@ -312,7 +312,10 @@ class BuildTest {
                     for (Object debug : Arrays.asList(null, map(), map("runtime", "native", "port", 51235),
                             map("runtime", "jvm", "port", 0), map("runtime", "jvm", "port", 65536),
                             map("runtime", "jvm", "port", 1.5), map("runtime", "jvm", "port", true),
-                            map("runtime", "jvm", "port", 51235, "host", "remote"))) {
+                            map("runtime", "jvm", "port", 51235, "host", "remote"),
+                            map("adapterID", "java", "configurationType", "java", "target", map("kind", "connection", "host", "127.0.0.1", "port", 51235)),
+                            map("adapterID", "dev.example/debug", "configurationType", "example", "target", map("kind", "connection", "host", "remote", "port", 51235)),
+                            map("adapterID", "dev.example/debug", "configurationType", "example", "target", map("kind", "connection", "host", "127.0.0.1", "port", 0)))) {
                         options.put("debug", debug);
                         assertEquals(-32602L, errorCode(host.request(Protocol.BUILD_PREPARE_RUN, map("operationID", "jvm-debug", "launchOptions", options))));
                     }

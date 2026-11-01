@@ -178,8 +178,13 @@ export function isBuildLaunchOptions(value) {
   if (Object.hasOwn(value, 'debug')) {
     const debug = value.debug;
     if (value.execution !== 'service' || !debug || typeof debug !== 'object' || Array.isArray(debug)
-        || Object.keys(debug).length !== 2 || debug.runtime !== 'jvm'
-        || !Number.isInteger(debug.port) || debug.port < 1 || debug.port > 65535) return false;
+        || Object.keys(debug).length !== 3
+        || typeof debug.adapterID !== 'string' || !/^[a-z0-9.-]{1,128}\/[a-z0-9-]{1,64}$/.test(debug.adapterID) || ['.', '..'].includes(debug.adapterID.split('/')[0])
+        || typeof debug.configurationType !== 'string' || !debug.configurationType.trim() || Buffer.byteLength(debug.configurationType) > 256 || /[\x00-\x1f\x7f-\x9f]/.test(debug.configurationType)) return false;
+    const target = debug.target;
+    if (!target || typeof target !== 'object' || Array.isArray(target) || Object.keys(target).length !== 3
+        || target.kind !== 'connection' || target.host !== '127.0.0.1'
+        || !Number.isInteger(target.port) || target.port < 1 || target.port > 65535) return false;
   }
   if (Object.hasOwn(value, 'entrypoint') && (!text(value.entrypoint, 4096) || !value.entrypoint)) return false;
   if (Object.hasOwn(value, 'workingDirectory')) {
