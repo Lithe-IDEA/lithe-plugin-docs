@@ -161,4 +161,6 @@ jobs:
         env:
           LITHE_PLUGIN_SDK_JAVA_RUNTIME: ${{ steps.java8.outputs.path }}/bin/java
           HOST_REF: ${{ inputs.host-ref }}
-        run: node scripts/sdk-e2e.mjs --ref "$HOST_REF" --build-workflows
+        run: >-
+          node scripts/sdk-e2e.mjs --ref "$HOST_REF" --build-workflows
+          --native-configuration --provider-reports --provider-run-options
