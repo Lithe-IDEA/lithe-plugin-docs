@@ -1,6 +1,7 @@
 package io.github.litheidea.plugin.sdk;
 
 import java.nio.charset.StandardCharsets;
+import java.util.Map;
 import java.util.regex.Pattern;
 
 /**
@@ -11,9 +12,14 @@ import java.util.regex.Pattern;
  * when registering a handler instead of as a refused session at runtime.
  */
 public final class Protocol {
-    /** Protocol versions this SDK can answer. */
-    public static final int FUNCTIONS_VERSION = 1;
+    /** Protocol versions this SDK can answer: the highest of each. */
+    public static final int FUNCTIONS_VERSION = 3;
     public static final int BUILD_VERSION = 6;
+
+    /** First plugin-function version with host services (credentials). */
+    public static final int HOST_SERVICES_VERSION = 2;
+    /** First plugin-function version with workspace contexts, discovery, and host notifications. */
+    public static final int CONTEXT_VERSION = 3;
 
     public static final String INITIALIZE = "initialize";
     public static final String INITIALIZED = "initialized";
@@ -33,6 +39,48 @@ public final class Protocol {
     public static final String BUILD_PREPARE_RUN = "lithe/build/prepareRun";
     public static final String BUILD_PROGRESS = "lithe/build/progress";
 
+    /**
+     * Backend-to-host requests of plugin-function protocols 2 and 3. From
+     * version 3 the host adds methods without a new version;
+     * {@link Host#request} sends any {@code lithe/host/*} method, and
+     * {@code getCapabilities} says which ones the session may call.
+     */
+    public static final String HOST_PREFIX = "lithe/host/";
+    public static final String HOST_CREDENTIALS_GET = "lithe/host/credentials/get";
+    public static final String HOST_CREDENTIALS_SET = "lithe/host/credentials/set";
+    public static final String HOST_CREDENTIALS_DELETE = "lithe/host/credentials/delete";
+    public static final String HOST_GET_CAPABILITIES = "lithe/host/getCapabilities";
+    public static final String HOST_SUBSCRIPTIONS_DISPOSE = "lithe/host/subscriptions/dispose";
+    public static final String HOST_WORKSPACE_LIST_CONTEXTS = "lithe/host/workspace/listContexts";
+    public static final String HOST_WORKSPACE_GET_CONTEXT = "lithe/host/workspace/getContext";
+    public static final String HOST_WORKSPACE_GET_FOLDERS = "lithe/host/workspace/getFolders";
+    public static final String HOST_WORKSPACE_READ_DIRECTORY = "lithe/host/workspace/readDirectory";
+    public static final String HOST_WORKSPACE_STAT = "lithe/host/workspace/stat";
+    public static final String HOST_WORKSPACE_READ_FILE = "lithe/host/workspace/readFile";
+    public static final String HOST_WORKSPACE_WATCH = "lithe/host/workspace/watch";
+    public static final String HOST_WORKSPACE_FIND_FILES = "lithe/host/workspace/findFiles";
+    public static final String HOST_WORKSPACE_FIND_TEXT = "lithe/host/workspace/findText";
+    public static final String HOST_DOCUMENTS_LIST = "lithe/host/documents/list";
+    public static final String HOST_DOCUMENTS_GET_SNAPSHOT = "lithe/host/documents/getSnapshot";
+    public static final String HOST_EDITOR_REGISTER_ACTIONS = "lithe/host/editor/registerActions";
+    public static final String HOST_EDITOR_GET_ACTIVE = "lithe/host/editor/getActive";
+    public static final String HOST_EDITOR_GET_SELECTIONS = "lithe/host/editor/getSelections";
+    public static final String HOST_EDITOR_APPLY_EDITS = "lithe/host/editor/applyEdits";
+    public static final String HOST_EDITOR_REPLACE_SELECTIONS = "lithe/host/editor/replaceSelections";
+    public static final String HOST_EDITOR_INSERT_TEXT = "lithe/host/editor/insertText";
+    public static final String HOST_EDITOR_OPEN = "lithe/host/editor/open";
+    public static final String HOST_EDITOR_REVEAL = "lithe/host/editor/reveal";
+    public static final String HOST_PREVIEW_OPEN_HTML = "lithe/host/preview/openHTML";
+    public static final String HOST_BROWSER_OPEN_EXTERNAL = "lithe/host/browser/openExternal";
+    public static final String HOST_WINDOW_SHOW_INFORMATION = "lithe/host/window/showInformation";
+    public static final String HOST_WINDOW_SHOW_WARNING = "lithe/host/window/showWarning";
+    public static final String HOST_WINDOW_SHOW_ERROR = "lithe/host/window/showError";
+
+    /** Host-to-backend notifications of plugin-function protocol 3. */
+    public static final String HOST_DID_CHANGE_CONTEXTS = "lithe/host/workspace/didChangeContexts";
+    public static final String HOST_SUBSCRIPTION_NOTIFY = "lithe/host/subscriptions/notify";
+    public static final String HOST_COMMAND_DID_RUN = "lithe/host/commands/didRun";
+
     /** JSON-RPC and LSP error codes the SDK answers with. */
     public static final int PARSE_ERROR = -32700;
     public static final int INVALID_REQUEST = -32600;
@@ -51,6 +99,9 @@ public final class Protocol {
     public static final int MAX_BUILD_RESULT_BYTES = 32 * 1024 * 1024;
     public static final int MAX_BUILD_MESSAGE_BYTES = 4096;
     public static final int MAX_BUILD_OUTPUT_BYTES = 65536;
+    /** Unanswered host requests Core allows a session; the SDK queues the rest. */
+    public static final int MAX_PENDING_HOST_REQUESTS = 16;
+    public static final int MAX_CREDENTIAL_SECRET_BYTES = 16 * 1024;
 
     /** Minimum negotiated version; unknown methods can never pass admission. */
     static int buildMethodVersion(String method) {
@@ -68,6 +119,9 @@ public final class Protocol {
 
     private static final Pattern FUNCTION_SEGMENT = Pattern.compile("[a-z][A-Za-z0-9]*");
     private static final Pattern PLUGIN_ERROR_CODE = Pattern.compile("[A-Za-z][A-Za-z0-9._-]*");
+    private static final Pattern KEY = Pattern.compile("[A-Za-z0-9._:-]{1,128}");
+    private static final Pattern COMMAND_ID = Pattern.compile("[a-z0-9.-]{1,128}");
+    private static final long MAX_SAFE_INTEGER = 9007199254740991L;
 
     private Protocol() {}
 
@@ -89,6 +143,43 @@ public final class Protocol {
         return value != null
                 && utf8Length(value) <= MAX_PLUGIN_ERROR_CODE_BYTES
                 && PLUGIN_ERROR_CODE.matcher(value).matches();
+    }
+
+    /**
+     * The key alphabet of protocols 2 and 3: 1-128 ASCII letters, digits,
+     * {@code .}, {@code _}, {@code :}, or {@code -}. Credential keys, context
+     * IDs, and subscription IDs use it.
+     */
+    public static boolean isCredentialKey(String value) {
+        return value != null && KEY.matcher(value).matches();
+    }
+
+    /** {@code { contextID, generation }}, exactly, naming one generation of one workspace context. */
+    public static boolean isContextReference(Object value) {
+        if (!(value instanceof Map) || ((Map<?, ?>) value).size() != 2) {
+            return false;
+        }
+        Map<?, ?> reference = (Map<?, ?>) value;
+        Object id = reference.get("contextID");
+        return id instanceof String && isCredentialKey((String) id) && isGeneration(reference.get("generation"));
+    }
+
+    /** A command ID from the plugin's manifest: 1-128 of {@code [a-z0-9.-]}. */
+    public static boolean isCommandId(String value) {
+        return value != null && COMMAND_ID.matcher(value).matches();
+    }
+
+    /** A positive integer JSON can carry exactly. */
+    static boolean isGeneration(Object value) {
+        if (value instanceof Long || value instanceof Integer || value instanceof Short || value instanceof Byte) {
+            long number = ((Number) value).longValue();
+            return number >= 1 && number <= MAX_SAFE_INTEGER;
+        }
+        if (value instanceof Double || value instanceof Float) {
+            double number = ((Number) value).doubleValue();
+            return number >= 1 && number <= MAX_SAFE_INTEGER && number == Math.rint(number);
+        }
+        return false;
     }
 
     /** Cuts {@code value} to {@link #MAX_MESSAGE_BYTES} UTF-8 bytes without splitting a character. */
