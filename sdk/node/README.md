@@ -6,12 +6,16 @@ JavaScript: the process a plugin starts through a `runtime` launch
 on stdio and implements Lithe's backend protocols from
 [plugin contract v1](../../contract/v1/README.md):
 
-- **`litheBuild` 1**: typed `lithe/build/model` and `lithe/build/dependencies`
-  requests, for a build system whose `model` or `dependencies` source is
-  `provider`.
-- **`litheFunctions` 1**: plugin functions, which are plugin-private actions
+- **`litheBuild` 1–6**: typed `lithe/build/*` requests, for a build system
+  whose `model` or `dependencies` source is `provider`: models and dependency
+  trees (1), bounded task execution (2), tests (3), run (4) and debug (5)
+  preparation, and read-only model inputs (6).
+- **`litheFunctions` 1–3**: plugin functions, which are plugin-private actions
   that Lithe invokes for the same plugin, with progress, cancellation, and
-  registration at runtime.
+  registration at runtime (1); host services such as credentials (2); and
+  workspace contexts, capability discovery, host notifications, and the
+  public document, file, editor, and window methods (3). See
+  [Host services](#host-services).
 - **`litheVcs` 1**: typed `lithe/vcs/*` requests, for a plugin's
   `vcsProviders` entry, from the
   [VCS provider contract](https://github.com/1lck/Lithe-IDEA/blob/preview/shared/contracts/vcs-provider-v1.md).
@@ -123,6 +127,11 @@ package. The SDK has no dependencies.
 | `backend.build.test(handler)`, `backend.build.discoverTests(handler)` | Protocol 3+: exact test execution and runnable selectors; discovery gets `format: "litheTestDiscovery"`, `version: 1`. |
 | `backend.build.prepareRun(handler)` | Protocol 4: returns a portable launch plan after upstream synchronization/build; the host owns the application process. |
 | `backend.buildVersion` | Highest common negotiated build version (1–6), or `null`; methods newer than that version are refused before their handler runs. |
+| `backend.functionsVersion` | Highest common negotiated plugin-function version (1–3), or `null`. |
+| `backend.host` | [Host services](#host-services) (`lithe/host/*`), usable once the session is ready. |
+| `backend.onCommand(commandID, handler)` | Protocol 3: one of the plugin's commands ran; the handler gets `{ commandID, workspaceContext }`. |
+| `backend.onContextsChanged(handler)` | Protocol 3: workspace contexts opened, closed, or changed; the handler gets `{ revision }`. |
+| `backend.onHostNotification(method, handler)` | Protocol 3: a `lithe/host/*` notification a later host adds. Unknown ones are ignored. |
 | `backend.vcs(id, handlers, traits?)` | Implements the typed VCS requests; see [A VCS provider](#a-vcs-provider). `litheVcs` is answered only when the host offers it. |
 | `backend.function(id, handler)` | Declares a function offered in `initialize`. |
 | `backend.registerFunction(id, handler)`, `backend.unregisterFunction(id)` | Adds or withdraws a function. Called before the `initialize` answer (for example from `onInitialize`), they change the initial list; later they send `lithe/function/register` / `unregister`. Withdrawing revokes running calls. |
@@ -132,6 +141,7 @@ package. The SDK has no dependencies.
 | `backend.log(...)` | Writes a line to stderr, which the host keeps in its log. |
 | `backend.listen()` | Serves stdio until `exit` or the end of input. |
 | `PluginError(code, message)` | A failure meant for your own UI, or with a `VCS_ERRORS` code, for the host's. |
+| `HostError` | The host refused or failed a host request: `code` (`error.data.code`), `rpcCode`, and protocol 3 `details`. `HOST_ERRORS` maps each code to its number. |
 | `runProcess(command, args, options)` | Runs a process without a shell, as one cancellable process tree. |
 | `openStateStore(directory)` | A small atomic JSON store in a host-provided directory. |
 
@@ -143,13 +153,15 @@ Every handler receives a context:
 | `throwIfCancelled()` | Throws the cancellation if `signal` is aborted. |
 | `run(command, args, options)` | `runProcess` bound to the call: cancelling or ending the call ends the whole process tree. In VCS handlers it also reports the finished command unless `options.report` is `false`. |
 | `log(...)` | Same as `backend.log`. |
+| `host` | `backend.host` bound to the call: host requests it left unanswered are cancelled when the call ends. |
 | `functionID` | Functions only. |
+| `workspaceContext` | Functions only, protocol 3: `{ contextID, generation }` of the page's window, or `null`. |
 | `operationID` | Functions and bounded build/test/run-preparation calls. Opaque wire identity chosen by Core; never derive anything from it. |
 | `progress({ message?, percentage?, output? })` | Functions use messages up to 1024 UTF-8 bytes. Build/test/run preparation use messages up to 4096 bytes and output up to 64 KiB per report. Percentages are clamped to 0–100; cancelled or settled build calls cannot report. Model/dependency/discovery contexts have no progress. |
 
-## Native build workflows (development)
+## Native build workflows
 
-The new typed handlers are source changes, not a published SDK release. They
+The typed handlers of build protocols 2–6 ship from SDK 0.2.0. They
 require the corresponding host capability (`buildProviders` 2/3/4); the manifest
 requirement and runtime negotiation are both checked. A version 1 agreement
 never permits execute/test/prepareRun, even when those handlers are registered.
@@ -159,6 +171,76 @@ See [the native workflow guide](../../guides/native-build-workflows.md) and the
 workspace containment and upstream selections; the SDK does not implement a
 second build engine. Build tool failures return their exit code, while a thrown
 error fails preparation and cannot start an application.
+
+## Host services
+
+From plugin-function protocol 2 a backend may ask the host for services;
+each is granted by a manifest permission and refused otherwise. The SDK
+negotiates the highest version both sides offer, so a backend written for
+protocol 1 keeps working unchanged.
+
+```js
+backend.function('query.run', async (params, context) => {
+  // Protocol 2, permission credentials.store: the platform's secret store, per plugin.
+  const password = await context.host.credentials.get('connection.prod:password');
+  if (password === null) throw new PluginError('query.noPassword', 'Sign in first.');
+
+  // Protocol 3: the window the page runs in.
+  const workspace = context.workspaceContext;
+  if (workspace && await context.host.supports('lithe/host/workspace/getFolders')) {
+    const { folders } = await context.host.workspace.getFolders(workspace);
+    // ...
+  }
+  return runQuery(params, password);
+});
+
+backend.onCommand('db.refresh', async ({ workspaceContext }) => {
+  if (!workspaceContext) return;
+  await backend.host.window.showInformation(workspaceContext, { text: 'Refreshed.' });
+});
+```
+
+| `backend.host` member | Version | Purpose |
+| --- | --- | --- |
+| `credentials.get(key)`, `.set(key, secret)`, `.delete(key)` | 2 | Secrets in the platform's store. `get` returns `null` when nothing is stored. A key is 1–128 of `[A-Za-z0-9._:-]`, a secret at most 16 KiB; others fail locally. |
+| `capabilities()`, `supports(method)` | 3 | What this session may call, from `lithe/host/getCapabilities` (asked once). Under protocol 2, which has no discovery, `supports` reports the credential methods. |
+| `workspace.listContexts()`, `.getContext(context)`, `.getFolders(context)` | 3 | Workspace contexts; only `getContext` returns, and creates, the context's `stateDirectory`. |
+| `workspace.readDirectory`, `.stat`, `.readFile`, `.findFiles`, `.findText`, `.watch` | 3 | Files of a local context, addressed as `{ rootID, path }` from `getFolders`. |
+| `documents.list`, `.getSnapshot`; `editor.getActive`, `.getSelections`, `.applyEdits`, `.replaceSelections`, `.insertText`, `.open`, `.reveal`, `.registerActions` | 3 | Live documents and editors. Edits name the `expectedVersion` they were computed against. |
+| `preview.openHTML`, `browser.openExternal`, `window.showInformation`, `.showWarning`, `.showError` | 3 | Preview, browser, and messages. |
+| `request(method, params?)`, `subscribe(method, params, onEvent?)` | 2 / 3 | Any `lithe/host/*` method, including ones a later host adds. |
+| `subscriptions.dispose(id)` | 3 | Ends a subscription; `Subscription.dispose()` does the same. |
+
+Methods taking a workspace context accept `{ contextID, generation }` or a
+whole context from `listContexts`; their params are the contract's, without
+`context`. Every method takes `{ signal }` as its last argument. The full
+params and results are in
+[the contract](../../contract/v1/README.md#public-document-file-and-window-methods-protocol-version-3)
+and in `src/index.d.ts`.
+
+What the SDK does for you, and what it leaves to you:
+
+- **Refusals are `HostError`.** Branch on `error.code`, such as
+  `plugin.host.contextExpired`; a code this SDK does not know is still a
+  `HostError`. On `versionConflict` reread and recompute; on `contextExpired`
+  resolve the original target again, never the focused window; retry `busy`
+  and `rateLimited` (after `details.retryAfterMilliseconds`) with a bound;
+  `permissionDenied` and `readOnly` need the user. From protocol 3 an
+  unknown param is `plugin.host.unsupportedOption` naming it in
+  `details.option`, so you can retry without it.
+- **Cancellation has no rollback.** Aborting a request's signal, or ending
+  the call that sent it, rejects it at once; from protocol 3 the SDK also
+  sends `$/cancelRequest` so the host stops. An edit or an external open may
+  already have taken effect, and the SDK never sends a request again.
+- **At most 16 host requests are unanswered.** Further ones wait in the SDK
+  for a free slot instead of being refused.
+- **Subscriptions route by ID.** `workspace.watch` and `subscribe` call
+  `onEvent(event, { subscriptionID, sequence, gap })` in order; `gap` is
+  true when events were missed, so rescan. Nothing arrives after `dispose()`
+  or the end of the session.
+- **Commands are events.** `onCommand` runs when the user runs one of the
+  plugin's commands; the host waits for no result. A stopped backend is
+  started for it only when the manifest declares `onCommand:<commandID>`.
 
 ## Results and errors
 
@@ -192,9 +274,10 @@ lifecycle unified. The SDK enforces the ones it can.
 2. **No calls back into Lithe's dispatch.** A backend never sends
    `lithe/function/invoke` or `lithe/build/*`; Lithe would route it back to the
    same process, which would then wait for itself. Lithe refuses these with
-   `plugin.function.recursiveCall`, and the SDK refuses to send any `lithe/*`
-   method. The only `lithe/vcs/*` message a provider sends is the execution
-   report, which `context.run` writes for you.
+   `plugin.function.recursiveCall`, and `sendRequest` refuses every `lithe/*`
+   method. Host services go through `backend.host`, which sends only
+   `lithe/host/*`. The only `lithe/vcs/*` message a provider sends is the
+   execution report, which `context.run` writes for you.
 3. **stdout belongs to the protocol.** When serving stdio, the SDK moves
    `console.log`, `console.info`, and `console.debug` to stderr. Never write to
    `process.stdout` yourself.
@@ -250,5 +333,4 @@ producer changes. Protocol 1–5 handlers reject requests containing model input
 
 The two native workflow samples demonstrate independent producer and consumer
 backends in the Core end-to-end tests. Their engine is fictional; this does not
-migrate Maven, JDT, LLDB or existing plugin business logic. The contract mirror
-must be synced from the merged Lithe revision before these changes are released.
+migrate Maven, JDT, LLDB or existing plugin business logic.

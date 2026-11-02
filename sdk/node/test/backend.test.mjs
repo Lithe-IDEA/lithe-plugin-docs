@@ -34,7 +34,7 @@ test('a host that offers nothing gets no Lithe capabilities, and a backend witho
   await quiet.close();
 
   const other = new TestHost(functionBackend());
-  const answer = (await other.initialize({ litheBuild: { versions: [1] }, litheFunctions: { versions: [2] } })).result;
+  const answer = (await other.initialize({ litheBuild: { versions: [1] }, litheFunctions: { versions: [99] } })).result;
   assert.deepEqual(answer.capabilities.experimental, {});
   await other.close();
 });

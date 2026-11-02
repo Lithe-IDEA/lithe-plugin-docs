@@ -2,10 +2,12 @@ package io.github.litheidea.plugin.sdk;
 
 import java.io.IOException;
 import java.util.List;
+import java.util.Map;
 
 /**
- * What a handler gets besides its params: the call's cancellation, tools that
- * end with the call, the backend's log, and progress for plugin functions or bounded build operations.
+ * What a handler gets besides its params: the call's cancellation, tools and
+ * host requests that end with the call, the backend's log, and progress for
+ * plugin functions or bounded build operations.
  */
 public final class CallContext {
     /** Sends one progress report; absent for model, dependency and discovery requests. */
@@ -19,13 +21,18 @@ public final class CallContext {
     private final String functionId;
     private final String operationId;
     private final ProgressSink progress;
+    private final Host host;
+    private final Map<String, Object> workspaceContext;
 
-    CallContext(Cancellation cancellation, Backend backend, String functionId, String operationId, ProgressSink progress) {
+    CallContext(Cancellation cancellation, Backend backend, String functionId, String operationId, ProgressSink progress,
+            Host host, Map<String, Object> workspaceContext) {
         this.cancellation = cancellation;
         this.backend = backend;
         this.functionId = functionId;
         this.operationId = operationId;
         this.progress = progress;
+        this.host = host;
+        this.workspaceContext = workspaceContext;
     }
 
     /**
@@ -86,5 +93,25 @@ public final class CallContext {
     /** The wire operation ID of a function or bounded build call, otherwise null. */
     public String operationId() {
         return operationId;
+    }
+
+    /**
+     * Host services that belong to this call: requests still unanswered when
+     * the call is cancelled or ends fail with {@link CancelledException} and,
+     * from protocol 3, are cancelled on the wire. A subscription created here
+     * outlives the call until it is disposed.
+     */
+    public Host host() {
+        return host;
+    }
+
+    /**
+     * The {@code { contextID, generation }} of the workspace a function was
+     * invoked for (protocol 3), or null: for other calls, before protocol 3,
+     * and for an invocation outside a workspace. Pass it to the
+     * {@link Host} methods that name a context.
+     */
+    public Map<String, Object> workspaceContext() {
+        return workspaceContext;
     }
 }

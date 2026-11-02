@@ -36,6 +36,247 @@ export interface RequestContext {
   run(command: string, args?: string[], options?: RunProcessOptions): Promise<ProcessResult>;
   /** Writes a line to stderr, which the host keeps in its log. */
   log(...parts: unknown[]): void;
+  /** `backend.host` bound to this call: its unanswered host requests are cancelled when the call ends. */
+  host: Host;
+}
+
+/** `{ contextID, generation }`: one generation of one workspace context (protocol 3). */
+export interface ContextReference {
+  contextID: string;
+  generation: number;
+}
+
+export interface WorkspaceFolder {
+  /** Stable per plugin and location; reveals nothing about the path. */
+  rootID: string;
+  name: string;
+  /** Present only for a local authority. */
+  path?: string;
+}
+
+/** One open workspace in one window. */
+export interface WorkspaceContext extends ContextReference {
+  name: string;
+  authority: { kind: 'local' | 'remote'; id?: string };
+  folders: WorkspaceFolder[];
+  /** Private to the plugin and the workspace; only `getContext` returns, and creates, it. */
+  stateDirectory?: string;
+  [key: string]: unknown;
+}
+
+export interface HostCapabilities {
+  protocolVersion: number;
+  backendAuthority: 'local';
+  /** Each service this session may use, with the requests it may send and the notifications it may receive. */
+  services: Record<string, { methods: string[]; notifications: string[] }>;
+  limits: {
+    pendingHostRequests: number;
+    functionResultBytes: number;
+    hostRequestBytes: number;
+    hostResultBytes: number;
+    errorMessageBytes: number;
+    errorDetailsBytes: number;
+    notificationBytes: number;
+    [key: string]: number;
+  };
+  [key: string]: unknown;
+}
+
+export interface HostRequestOptions {
+  /** Aborting it rejects with its reason; from protocol 3 the host is also told to stop. Never retried. */
+  signal?: AbortSignal;
+}
+
+export interface SubscriptionEventInfo {
+  subscriptionID: string;
+  sequence: number;
+  /** True when `sequence` does not follow the previous event: events were missed. */
+  gap: boolean;
+}
+
+export type SubscriptionHandler = (event: JsonObject, info: SubscriptionEventInfo) => unknown;
+
+export interface Subscription {
+  readonly subscriptionID: string;
+  readonly disposed: boolean;
+  /** Stops routing events at once and asks the host to dispose the subscription. */
+  dispose(): Promise<void>;
+}
+
+/** A file or folder under a root of `getFolders`; `path` uses `/` and is relative to the root. */
+export interface WorkspaceResource {
+  rootID: string;
+  path: string;
+}
+
+/** One-based UTF-16 position. */
+export interface TextPosition {
+  line: number;
+  column: number;
+}
+
+/** Half-open range. */
+export interface TextRange {
+  start: TextPosition;
+  end: TextPosition;
+}
+
+export interface TextSelection {
+  anchor: TextPosition;
+  active: TextPosition;
+}
+
+export interface DocumentSummary {
+  documentID: string;
+  version: number;
+  /** Workspace-relative, or null outside the root. */
+  path: string | null;
+  languageID: string | null;
+  isReadOnly: boolean;
+  isDirty: boolean;
+  encoding: string;
+  lineEnding: string;
+  [key: string]: unknown;
+}
+
+export interface EditResult {
+  documentID: string;
+  version: number;
+  applied: boolean;
+  [key: string]: unknown;
+}
+
+export interface OpenParams {
+  resource: WorkspaceResource;
+  activation?: 'select' | 'background';
+  range?: TextRange;
+  tab?: 'regular';
+}
+
+export interface FindPage<T> {
+  matches: T[];
+  nextCursor: string | null;
+  isTruncated: boolean;
+  source: 'disk';
+  [key: string]: unknown;
+}
+
+type Scoped<P, R> = (context: ContextReference, params: P, options?: HostRequestOptions) => Promise<R>;
+type ScopedOptional<P, R> = (context: ContextReference, params?: P, options?: HostRequestOptions) => Promise<R>;
+
+/**
+ * Host services of plugin-function protocols 2 and 3. Every method rejects
+ * with `HostError` when the host refuses; from protocol 3 check
+ * `supports(method)` instead of assuming a method from the version.
+ * A full `WorkspaceContext` may be passed wherever a reference is expected.
+ */
+export interface Host {
+  /** The negotiated plugin-function version, or 0 before or without one. */
+  readonly version: number;
+  /** Sends any `lithe/host/*` request, including ones a later host adds. */
+  request<T = unknown>(method: string, params?: JsonObject, options?: HostRequestOptions): Promise<T>;
+  /** Sends a request answering `{ subscriptionID }` and routes that subscription's events. */
+  subscribe(method: string, params: JsonObject, onEvent?: SubscriptionHandler, options?: HostRequestOptions): Promise<Subscription>;
+  /** The session's capabilities; protocol 3, cached. */
+  capabilities(): Promise<HostCapabilities>;
+  /** Whether this session may call `method`. Under protocol 2, which has no discovery, the methods it defines. */
+  supports(method: string): Promise<boolean>;
+  /** Protocol 2; permission `credentials.store`. Kept in the platform's secret store, per plugin. */
+  readonly credentials: {
+    /** The stored secret, or null. */
+    get(key: string, options?: HostRequestOptions): Promise<string | null>;
+    set(key: string, secret: string, options?: HostRequestOptions): Promise<void>;
+    delete(key: string, options?: HostRequestOptions): Promise<void>;
+  };
+  readonly subscriptions: {
+    dispose(subscriptionID: string): Promise<void>;
+  };
+  readonly workspace: {
+    /** Permission `workspace.metadata`. Entries carry no `stateDirectory`. */
+    listContexts(options?: HostRequestOptions): Promise<{ revision: number; contexts: WorkspaceContext[] }>;
+    getContext(context: ContextReference, options?: HostRequestOptions): Promise<WorkspaceContext>;
+    getFolders(context: ContextReference, options?: HostRequestOptions): Promise<{ folders: WorkspaceFolder[] }>;
+    /** Permission `workspace.files.read`. */
+    readDirectory: Scoped<{ resource: WorkspaceResource; cursor?: string; limit?: number }, {
+      entries: { name: string; resource: WorkspaceResource; kind: string }[];
+      nextCursor: string | null;
+    }>;
+    stat: Scoped<{ resource: WorkspaceResource }, { resource: WorkspaceResource; kind: string; size: number; modifiedMilliseconds: number }>;
+    readFile: Scoped<{ resource: WorkspaceResource; maximumBytes?: number }, {
+      resource: WorkspaceResource;
+      source: 'disk';
+      byteCount: number;
+      isTruncated: boolean;
+      identity: JsonValue;
+      text?: string;
+      encoding?: string;
+      base64?: string;
+    }>;
+    /** Permission `workspace.files.watch`. Events carry `{ rootID, changedPaths, requiresRescan }`. */
+    watch(
+      context: ContextReference,
+      params: { resource: WorkspaceResource; recursive?: boolean },
+      onEvent: SubscriptionHandler,
+      options?: HostRequestOptions,
+    ): Promise<Subscription>;
+    /** Permission `workspace.search`; `resource` names the root (`path: ""`). */
+    findFiles: Scoped<{ resource: WorkspaceResource; query: string; fileMask?: string; cursor?: string; limit?: number }, FindPage<WorkspaceResource>>;
+    findText: Scoped<{
+      resource: WorkspaceResource;
+      pattern: string;
+      fileMask?: string;
+      caseSensitive?: boolean;
+      wholeWords?: boolean;
+      regularExpression?: boolean;
+      cursor?: string;
+      limit?: number;
+    }, FindPage<{ resource: WorkspaceResource; line: number; preview: string; range: TextRange | null }>>;
+  };
+  /** Permission `documents.read`. */
+  readonly documents: {
+    list: ScopedOptional<JsonObject, { documents: DocumentSummary[] }>;
+    getSnapshot: Scoped<{ documentID: string }, { document: DocumentSummary; text: string }>;
+  };
+  readonly editor: {
+    getActive: ScopedOptional<JsonObject, DocumentSummary | null>;
+    getSelections: Scoped<{ documentID: string }, { documentID: string; version: number; selections: TextSelection[]; primaryIndex: number }>;
+    /** Permission `editor.edit`. Not replayed on cancellation or timeout: the edit may have committed. */
+    applyEdits: Scoped<{ documentID: string; expectedVersion: number; edits: { range: TextRange; text: string }[] }, EditResult>;
+    replaceSelections: Scoped<{ documentID: string; expectedVersion: number; selections: TextSelection[]; replacements: string[] }, EditResult>;
+    insertText: Scoped<{ documentID: string; expectedVersion: number; at: TextPosition; text: string }, EditResult>;
+    /** Permission `editor.open`. */
+    open: Scoped<OpenParams, JsonObject>;
+    reveal: Scoped<OpenParams, JsonObject>;
+    /** Permission `editor.actions`; the host later calls `function` to collect actions. */
+    registerActions(
+      context: ContextReference,
+      params: { id: string; function: string; selector: { fileExtensions?: string[]; fileNames?: string[] } },
+      options?: HostRequestOptions,
+    ): Promise<Subscription>;
+  };
+  /** Permission `preview.open`. */
+  readonly preview: {
+    openHTML: Scoped<{ resource: WorkspaceResource; presentation?: 'editorAndPreview' | 'previewOnly'; range?: TextRange }, JsonObject>;
+  };
+  /** Permission `browser.open`; exactly one of `url` or `resource`. */
+  readonly browser: {
+    openExternal: Scoped<
+      { url: string } | { resource: WorkspaceResource; unsaved?: 'openSavedFile' | 'requireSaved' },
+      { opened: true; source: 'web' | 'disk'; hasUnsavedChanges?: boolean }
+    >;
+  };
+  /** Permission `window.messages`. `selectedIndex` is zero-based, or null on dismissal. */
+  readonly window: {
+    showInformation: Scoped<{ text: string; actions?: string[] }, { selectedIndex: number | null }>;
+    showWarning: Scoped<{ text: string; actions?: string[] }, { selectedIndex: number | null }>;
+    showError: Scoped<{ text: string; actions?: string[] }, { selectedIndex: number | null }>;
+  };
+}
+
+export interface CommandEvent {
+  commandID: string;
+  /** The context of the window the command ran in, or null. */
+  workspaceContext: ContextReference | null;
 }
 
 export interface ProgressReport {
@@ -49,6 +290,8 @@ export interface FunctionContext extends RequestContext {
   functionID: string;
   /** Opaque per-call ID chosen by Lithe. */
   operationID: string;
+  /** The context of the page's window (protocol 3), or null. */
+  workspaceContext: ContextReference | null;
   /** Reports progress; ignored once the call has ended. */
   progress(report: ProgressReport): void;
 }
@@ -225,9 +468,13 @@ export interface ListenOptions {
 export interface Backend {
   readonly negotiated: Negotiated;
   readonly initializeParams: JsonObject | null;
-  /** Highest common version (1-4), or null before/without negotiation. */
+  /** Highest common version (1-6), or null before/without negotiation. */
   readonly buildVersion: number | null;
+  /** Highest common plugin-function version (1-3), or null before/without negotiation. */
+  readonly functionsVersion: number | null;
   readonly functionIDs: string[];
+  /** Host services; usable once the session is ready. */
+  readonly host: Host;
   readonly build: {
     model(handler: BuildHandler): Backend;
     dependencies(handler: BuildHandler): Backend;
@@ -243,6 +490,12 @@ export interface Backend {
   unregisterFunction(id: string): Promise<void>;
   onRequest(method: string, handler: (params: unknown, context: RequestContext) => unknown): Backend;
   onNotification(method: string, handler: (params: unknown) => unknown): Backend;
+  /** Handles `lithe/host/commands/didRun` for one of the plugin's commands (protocol 3). */
+  onCommand(commandID: string, handler: (event: CommandEvent) => unknown): Backend;
+  /** Handles `lithe/host/workspace/didChangeContexts` (protocol 3). */
+  onContextsChanged(handler: (event: { revision: number }) => unknown): Backend;
+  /** Handles a `lithe/host/*` notification a later host adds. */
+  onHostNotification(method: string, handler: (params: JsonObject) => unknown): Backend;
   onInitialize(hook: (event: { params: JsonObject; negotiated: Negotiated }) => unknown): Backend;
   onShutdown(hook: () => unknown): Backend;
   sendRequest(method: string, params?: unknown): Promise<unknown>;
@@ -262,6 +515,17 @@ export class PluginSdkError extends Error {
   readonly code: string;
 }
 
+/** The host refused or failed a request this backend sent. */
+export class HostError extends PluginSdkError {
+  /** `error.data.code`, such as `plugin.host.contextExpired`. */
+  readonly code: string;
+  /** The JSON-RPC error number. */
+  readonly rpcCode: number | undefined;
+  /** Protocol 3 details, such as `{ option }` or `{ retryAfterMilliseconds }`. */
+  readonly details: JsonObject | undefined;
+  readonly method: string | undefined;
+}
+
 export function runProcess(command: string, args?: string[], options?: RunProcessOptions): Promise<ProcessResult>;
 
 export interface StateStore {
@@ -274,6 +538,38 @@ export interface StateStore {
 export function openStateStore(directory: string, options?: { packageDirectory?: string | null }): StateStore;
 
 export function isFunctionId(value: unknown): boolean;
+
+/** Host failure codes and the JSON-RPC number each has from protocol 3. */
+export const HOST_ERRORS: Readonly<{
+  'plugin.host.unavailable': -32601;
+  'plugin.host.invalidParams': -32602;
+  'plugin.host.failed': -32603;
+  'plugin.host.cancelled': -32800;
+  'plugin.host.permissionDenied': -32010;
+  'plugin.host.contextExpired': -32011;
+  'plugin.host.authorityUnsupported': -32012;
+  'plugin.host.versionConflict': -32013;
+  'plugin.host.limitExceeded': -32014;
+  'plugin.host.timeout': -32015;
+  'plugin.host.notFound': -32016;
+  'plugin.host.readOnly': -32017;
+  'plugin.host.unsupportedOption': -32018;
+  'plugin.host.preconditionFailed': -32019;
+  'plugin.host.busy': -32020;
+  'plugin.host.rateLimited': -32021;
+}>;
+
+/** Host request method names of protocols 2 and 3. */
+export const HOST_METHODS: Readonly<Record<
+  | 'credentialsGet' | 'credentialsSet' | 'credentialsDelete' | 'getCapabilities' | 'subscriptionsDispose'
+  | 'workspaceListContexts' | 'workspaceGetContext' | 'workspaceGetFolders' | 'workspaceReadDirectory'
+  | 'workspaceStat' | 'workspaceReadFile' | 'workspaceWatch' | 'workspaceFindFiles' | 'workspaceFindText'
+  | 'documentsList' | 'documentsGetSnapshot' | 'editorRegisterActions' | 'editorGetActive'
+  | 'editorGetSelections' | 'editorApplyEdits' | 'editorReplaceSelections' | 'editorInsertText'
+  | 'editorOpen' | 'editorReveal' | 'previewOpenHTML' | 'browserOpenExternal'
+  | 'windowShowInformation' | 'windowShowWarning' | 'windowShowError',
+  string
+>>;
 
 export function isVcsId(value: unknown): boolean;
 
@@ -298,4 +594,7 @@ export const LIMITS: Readonly<{
   maxBuildOutputBytes: number;
   maxVcsIdBytes: number;
   maxExecutionErrorOutputBytes: number;
+  maxCredentialKeyBytes: number;
+  maxCredentialSecretBytes: number;
+  maxPendingHostRequests: number;
 }>;

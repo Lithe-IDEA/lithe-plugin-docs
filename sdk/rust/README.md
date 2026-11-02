@@ -8,18 +8,21 @@ The backend is a packaged executable, so a plugin ships one archive per
 platform. It speaks the LSP base protocol on stdio and implements, from
 [plugin contract v1](../../contract/v1/README.md):
 
-- **`litheFunctions` 1 and 2**: plugin functions with progress,
+- **`litheFunctions` 1 to 3**: plugin functions with progress,
   cancellation, and registration at runtime. The SDK answers the newest
   version the host offers.
-- **Host services** of version 2: the plugin's own credentials, kept by the
-  host in the platform's secret store (the Keychain on macOS).
+- **Host services** of versions 2 and 3: the plugin's own credentials, kept
+  by the host in the platform's secret store (the Keychain on macOS), and
+  from version 3 workspace contexts, files, documents, editors, preview,
+  the browser, window messages, commands, and subscriptions.
 
 The SDK owns the wire format, negotiation, cancellation, and error mapping.
 Your code supplies only handlers. It depends only on `serde_json`, runs
 every call on a thread of its own, and needs Rust 1.87 or newer.
 
-Build providers and VCS providers are not part of this SDK yet; write those
-with the [Node.js](../node/README.md) or [Java](../java/README.md) SDK.
+Build providers and VCS providers are not part of this SDK yet; write build
+providers with the [Node.js](../node/README.md) or [Java](../java/README.md)
+SDK, and VCS providers with the Node.js SDK.
 
 ## A minimal backend
 
@@ -98,7 +101,10 @@ exact contents:
 | `backend.serve(input, output)` | The same on other streams, for tests. |
 | `handle.register_function(id, handler)`, `handle.unregister_function(id)` | Adds or withdraws a function after `initialize` and waits until the host accepted it. Withdrawing revokes and cancels running calls; a handler must not withdraw its own function. |
 | `handle.function_ids()`, `handle.functions_version()` | What the backend serves and negotiated. |
-| `handle.credentials()`, `context.credentials()` | The credentials service: `get(key)`, `set(key, secret)`, `delete(key)`. |
+| `backend.on_command(id, handler)` | Runs `Fn(&str, Option<WorkspaceContext>)` when the user runs one of the plugin's commands (protocol 3). |
+| `backend.on_contexts_changed(handler)`, `backend.on_host_notification(method, handler)` | Handle `lithe/host/workspace/didChangeContexts` and any other `lithe/host/*` notification a later host adds. |
+| `handle.host()`, `context.host()` | The [host services](#host-services). `handle.host()` is bound to no call. |
+| `handle.credentials()`, `context.credentials()` | Shorthand for `host().credentials()`. |
 | `PluginError::new(code, message)` | A failure meant for your own UI. |
 
 A handler is `Fn(Value, &Context) -> Result<Value, FunctionError>`. Its
@@ -109,24 +115,120 @@ context offers:
 | `cancellation()` | A `Cancellation`, fired when Lithe cancels the call, its deadline passes, the function is withdrawn, or the session ends: `is_cancelled()`, `check()`, `wait_timeout(duration)` (use it instead of `thread::sleep`), and `on_cancel(callback)`, for example to cancel a running database query from the driver. |
 | `check_cancelled()` | `Err(Cancelled)` once cancelled, for `?`. |
 | `progress(message, percentage)` | The message is cut to 1024 bytes and the percentage to 100; reports after the call ended are dropped. |
-| `credentials()` | Credentials bound to the call: a request still waiting for the host when the call is cancelled ends at once. |
+| `host()` | Host services bound to the call: a request still waiting for the host when the call is cancelled ends at once. `credentials()` is `host().credentials()`. |
+| `workspace_context()` | From protocol 3, the `WorkspaceContext` of the window whose page made the call; `None` under older protocols or when no window made it. |
 | `backend()`, `function_id()`, `log(message)` | The handle, the function's ID, and a line on stderr. |
 
-## Credentials
+## Host services
+
+From plugin-function protocol 2 a backend may ask the host for services;
+each is granted by a manifest permission and refused otherwise. The SDK
+negotiates the highest version both sides offer, so a backend written for
+protocol 1 keeps working unchanged. Every method blocks its thread until the
+host answers and returns `Result<_, SdkError>`; wrong arguments fail locally
+and send nothing.
+
+```rust
+backend
+    .function("query.run", |params, context| {
+        // Protocol 2, permission credentials.store: the platform's secret store, per plugin.
+        let password = context
+            .host()
+            .credentials()
+            .get("connection.prod:password")?
+            .ok_or_else(|| PluginError::new("query.noPassword", "Sign in first."))?;
+        // Protocol 3: the window the page runs in.
+        let mut folders = None;
+        if let Some(workspace) = context.workspace_context() {
+            if context.host().supports("lithe/host/workspace/getFolders")? {
+                folders = Some(context.host().workspace().get_folders(workspace)?);
+            }
+        }
+        run_query(&params, &password, folders)
+    })
+    .expect("a valid function ID");
+
+let host = backend.handle().host();
+backend
+    .on_command("db.refresh", move |_command_id, workspace| {
+        if let Some(workspace) = workspace {
+            host.window()
+                .show_information(&workspace, json!({ "text": "Refreshed." }))?;
+        }
+        Ok(())
+    })
+    .expect("a valid command ID");
+```
+
+| `Host` member | Version | Purpose |
+| --- | --- | --- |
+| `credentials().get(key)`, `.set(key, secret)`, `.delete(key)` | 2 | Secrets in the platform's store; see [Credentials](#credentials). |
+| `capabilities()`, `supports(method)` | 3 | What this session may call, from `lithe/host/getCapabilities` (asked once). Under protocol 2, which has no discovery, `supports` reports the credential methods. |
+| `workspace().list_contexts()`, `.get_context(&context)`, `.get_folders(&context)` | 3 | Workspace contexts; only `get_context` returns, and creates, the context's `stateDirectory`. |
+| `workspace().read_directory`, `.stat`, `.read_file`, `.find_files`, `.find_text`, `.watch` | 3 | Files of a local context, addressed as `{ rootID, path }` from `get_folders`. |
+| `documents().list`, `.get_snapshot`; `editor().get_active`, `.get_selections`, `.apply_edits`, `.replace_selections`, `.insert_text`, `.open`, `.reveal`, `.register_actions` | 3 | Live documents and editors. Edits name the `expectedVersion` they were computed against. |
+| `preview().open_html`, `browser().open_external`, `window().show_information`, `.show_warning`, `.show_error` | 3 | Preview, browser, and messages. |
+| `request(method, params)`, `subscribe(method, params)` | 2 / 3 | Any `lithe/host/*` method, including ones a later host adds. |
+| `subscriptions().dispose(id)` | 3 | Ends a subscription; `Subscription::dispose()` does the same. |
+| `with_cancellation(&cancellation)` | 2 | The same services, cancelled together with `cancellation`. |
+| `version()` | | The negotiated plugin-function version; `None` before `initialize`. |
+
+Methods taking a workspace context take a `&WorkspaceContext`: one from
+`context.workspace_context()`, `WorkspaceContext::new(id, generation)`, or
+`WorkspaceContext::from_value` on a whole context from `list_contexts`. Their
+`params` are the contract's, without `context`, and they return the
+contract's result as a `Value`. The full params and results are in
+[the contract](../../contract/v1/README.md#public-document-file-and-window-methods-protocol-version-3).
+
+What the SDK does for you, and what it leaves to you:
+
+- **Refusals keep the host's code.** Branch on `code()`, such as
+  `plugin.host.contextExpired`; `rpc_code()` is the JSON-RPC number and
+  `details()` the host's object, if any. A code this SDK does not know is
+  kept as sent. On `versionConflict` reread and recompute; on
+  `contextExpired` resolve the original target again, never the focused
+  window; retry `busy` and `rateLimited` (after the `retryAfterMilliseconds` detail) with a
+  bound; `permissionDenied` and `readOnly` need the user. From protocol 3 an
+  unknown param is `plugin.host.unsupportedOption` naming it in the
+  `option` detail, so you can retry without it.
+- **Cancellation has no rollback.** Cancelling the token given to
+  `with_cancellation`, or ending the call whose `context.host()` sent a
+  request, fails it at once with `sdk.call.cancelled`; from protocol 3 the
+  SDK also sends `$/cancelRequest` so the host stops. An edit or an external
+  open may already have taken effect, and the SDK never sends a request
+  again.
+- **At most 16 host requests are unanswered.** Further ones wait in the SDK
+  for a free slot instead of being refused.
+- **Subscriptions route by ID.** `workspace().watch`,
+  `editor().register_actions`, and `subscribe` return a `Subscription`;
+  `recv()` and `recv_timeout(duration)` give each `Event` in order, with
+  `sequence()`, `event()`, and `gap()`, which is true when events were
+  missed, so rescan. Events the host sends before its answer are kept. No
+  event is delivered after `dispose()` or the end of the session; once the
+  queued ones are read, `recv()` returns `None`.
+- **Commands are events.** `on_command` runs on a thread of its own when the
+  user runs one of the plugin's commands, with the window's
+  `WorkspaceContext` when the host sent one. The host waits for no result,
+  and a failure is only logged. A stopped backend is started for it only
+  when the manifest declares `onCommand:<commandID>`. Host notifications
+  without a handler are ignored.
+
+### Credentials
 
 A key is 1–128 ASCII letters, digits, `.`, `_`, `:`, or `-`; a secret is at
 most 16 KiB. Credentials are private to your plugin ID, survive disabling and
 updating the plugin, and are deleted when it is uninstalled. They are never
-written to `${stateDir}` or the package.
+written to `${stateDir}` or the package. `get` returns `Ok(None)` when
+nothing is stored.
 
 | Failure (`SdkError::code()`) | Meaning |
 | --- | --- |
-| `sdk.protocol.notNegotiated` | The host offered only protocol 1, so it has no host services. Nothing was sent. |
+| `plugin.host.unavailable` | The host offered only protocol 1, so it has no host services. Nothing was sent. |
 | `plugin.host.permissionDenied` | The plugin lacks the `credentials.store` permission. |
 | `plugin.host.invalidParams`, `sdk.credentials.invalidKey`, `sdk.credentials.invalidSecret` | A malformed key or secret. |
 | `plugin.host.failed` | The host's secret store failed, for example a locked Keychain; the message says why and never contains the secret. |
 | `sdk.call.cancelled` | The call was cancelled while waiting; `?` answers as cancelled. |
-| `sdk.session.closed` | The session ended while waiting. |
+| `sdk.session.notReady`, `sdk.session.closed` | The session has not finished `initialize`, or it ended while waiting. |
 
 ## Results and errors
 
@@ -162,16 +264,19 @@ panics on any other code.
    the SDK answers `requestCancelled` whatever the handler returns.
 5. **No calls back into Lithe's dispatch.** The SDK never sends
    `lithe/function/invoke` or `lithe/build/*`; Lithe would refuse them as
-   `plugin.function.recursiveCall`.
+   `plugin.function.recursiveCall`. `Host::request` sends only
+   `lithe/host/*` and refuses anything else as `sdk.host.method`.
 
 ## Testing
 
 ```sh
 cargo test --locked --manifest-path sdk/rust/Cargo.toml
+cargo fmt --manifest-path sdk/rust/Cargo.toml --all -- --check
 cargo clippy --locked --manifest-path sdk/rust/Cargo.toml --all-targets -- -D warnings
 node scripts/sdk-e2e.mjs
 ```
 
 The unit tests drive a session through in-process pipes with a scripted
-host. The end-to-end check builds the sample, installs it as a package, and
-runs it through a real Core session.
+host; `tests/host_services.rs` checks the host services against the
+contract's fixture. The end-to-end check builds the sample, installs it as a
+package, and runs it through a real Core session.
