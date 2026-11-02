@@ -20,15 +20,11 @@ use std::time::Instant;
 /// Runs the scenario against the installed package at `package`, whose
 /// `plugin.json` declares the sample backend.
 pub fn run_backend_scenario(package: &Path) {
-    let mut manifest: Value =
+    let manifest: Value =
         serde_json::from_slice(&fs::read(package.join("plugin.json")).expect("sample manifest"))
             .expect("sample manifest JSON");
     let plugin_id = manifest["id"].as_str().expect("plugin ID").to_string();
     let package_before = listing(package);
-    // Opt in against the terminal host branch before its contract is published.
-    // Default CI must still work against the pinned older Core.
-    let terminals = std::env::var_os("LITHE_PLUGIN_SDK_TERMINAL_E2E").is_some();
-    if terminals { manifest["permissions"].as_array_mut().unwrap().push(json!("terminal.create")); }
     let validated = core(
         "plugins.declarative.validate",
         json!({ "manifest": manifest }),
@@ -38,14 +34,23 @@ pub fn run_backend_scenario(package: &Path) {
     let fixture = Fixture::new("backend");
     let state = fixture.root.join("state");
     let plan = launch_plan(&manifest, package, &state);
-    let mut grants = vec!["credentials", "lithe/host/window/showError", "lithe/host/window/showInformation",
-        "lithe/host/window/showWarning", "lithe/host/workspace/watch", "workspace"];
-    if terminals {
-        grants.extend(["lithe/host/terminal/close", "lithe/host/terminal/create", "lithe/host/terminal/dispose",
-            "lithe/host/terminal/onExit", "lithe/host/terminal/reopen", "lithe/host/terminal/show"]);
-    }
-    grants.sort();
-    assert_eq!(plan["backend"]["hostServices"], json!(grants));
+    assert_eq!(
+        plan["backend"]["hostServices"],
+        json!([
+            "credentials",
+            "lithe/host/terminal/close",
+            "lithe/host/terminal/create",
+            "lithe/host/terminal/dispose",
+            "lithe/host/terminal/onExit",
+            "lithe/host/terminal/reopen",
+            "lithe/host/terminal/show",
+            "lithe/host/window/showError",
+            "lithe/host/window/showInformation",
+            "lithe/host/window/showWarning",
+            "lithe/host/workspace/watch",
+            "workspace"
+        ])
+    );
     assert_eq!(plan["requiredDirectories"], json!(["state"]));
     fs::create_dir_all(&state).expect("host state directory");
 
@@ -173,7 +178,7 @@ pub fn run_backend_scenario(package: &Path) {
     wait_for_file(&mut session, &state.join("cancelled"));
 
     run_host_services(&mut session);
-    if terminals { run_terminal_services(&mut session); }
+    run_terminal_services(&mut session);
 
     // State survives a restart. Without credentials.store the host grants no
     // host service, and Core refuses the request before the host sees it.
@@ -389,19 +394,38 @@ fn run_terminal_services(session: &mut Session) {
     invoke_in(session, "terminal-cycle", "terminal.cycle", &workspace());
     let create = take_host_request(session, "lithe/host/terminal/create");
     assert_eq!(create["result"]["params"]["retainedContextBytes"], 4096);
-    assert_eq!(create["result"]["params"]["arguments"], json!(["--interactive"]));
-    respond(session, &create, Ok(json!({ "terminalID":"terminal-1", "generation":1 })));
+    assert_eq!(
+        create["result"]["params"]["arguments"],
+        json!(["--interactive"])
+    );
+    respond(
+        session,
+        &create,
+        Ok(json!({ "terminalID":"terminal-1", "generation":1 })),
+    );
     let listen = take_host_request(session, "lithe/host/terminal/onExit");
-    respond(session, &listen, Ok(json!({ "subscriptionID":"terminal-sub" })));
+    respond(
+        session,
+        &listen,
+        Ok(json!({ "subscriptionID":"terminal-sub" })),
+    );
     let close = take_host_request(session, "lithe/host/terminal/close");
     respond(session, &close, Ok(json!({ "retainedContextBytes":1024 })));
-    assert!(notify(session, "lithe/host/subscriptions/notify", json!({
-        "subscriptionID":"terminal-sub", "sequence":1,
-        "event": { "type":"exit", "terminalID":"terminal-1", "generation":1, "exitCode":null, "reason":"closed" }
-    })));
+    assert!(notify(
+        session,
+        "lithe/host/subscriptions/notify",
+        json!({
+            "subscriptionID":"terminal-sub", "sequence":1,
+            "event": { "type":"exit", "terminalID":"terminal-1", "generation":1, "exitCode":null, "reason":"closed" }
+        })
+    ));
     let reopen = take_host_request(session, "lithe/host/terminal/reopen");
     assert_eq!(reopen["result"]["params"]["terminalID"], "terminal-1");
-    respond(session, &reopen, Ok(json!({ "terminalID":"terminal-1", "generation":2, "restoredContextBytes":1024 })));
+    respond(
+        session,
+        &reopen,
+        Ok(json!({ "terminalID":"terminal-1", "generation":2, "restoredContextBytes":1024 })),
+    );
     let dispose = take_host_request(session, "lithe/host/terminal/dispose");
     respond(session, &dispose, Ok(Value::Null));
     let subscription = take_host_request(session, "lithe/host/subscriptions/dispose");

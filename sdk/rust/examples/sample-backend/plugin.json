@@ -12,6 +12,7 @@
   },
   "permissions": [
     "backend.launch",
+    "terminal.create",
     "credentials.store",
     "ui.contribute",
     "ui.web",
