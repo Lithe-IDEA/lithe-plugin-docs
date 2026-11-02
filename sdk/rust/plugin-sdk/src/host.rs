@@ -494,6 +494,10 @@ impl Host {
         Browser { host: self.clone() }
     }
 
+    pub fn terminal(&self) -> Terminal {
+        Terminal { host: self.clone() }
+    }
+
     pub fn window(&self) -> Window {
         Window { host: self.clone() }
     }
@@ -1012,6 +1016,81 @@ impl Window {
     pub fn show_error(&self, context: &WorkspaceContext, params: Value) -> Result<Value, SdkError> {
         self.host
             .scoped(methods::WINDOW_SHOW_ERROR, context, params)
+    }
+}
+
+/// Integrated native terminals owned by this backend session and workspace.
+/// Permission `terminal.create`; discover each method with `Host::supports`.
+/// Input and output stay in the host terminal, not in the plugin's web page.
+pub struct Terminal {
+    host: Host,
+}
+
+impl Terminal {
+    /// Launches executable and arguments directly. Params: `executable`, optional
+    /// `arguments`, `title`, `cwd` resource, `environment`, and `show` (true).
+    pub fn create(&self, context: &WorkspaceContext, params: Value) -> Result<Value, SdkError> {
+        self.host.scoped(methods::TERMINAL_CREATE, context, params)
+    }
+
+    /// Shows an owned terminal in its original window without raising the window.
+    pub fn show(&self, context: &WorkspaceContext, terminal_id: &str) -> Result<Value, SdkError> {
+        self.host.scoped(
+            methods::TERMINAL_SHOW,
+            context,
+            json!({ "terminalID": terminal_id }),
+        )
+    }
+
+    /// Stops the native process, keeping a bounded display suffix for reopen.
+    /// `retained_context_bytes` overrides the create-time choice (0..=262144).
+    pub fn close(
+        &self,
+        context: &WorkspaceContext,
+        terminal_id: &str,
+        retained_context_bytes: Option<usize>,
+    ) -> Result<Value, SdkError> {
+        let mut params = json!({ "terminalID": terminal_id });
+        if let Some(bytes) = retained_context_bytes {
+            params["retainedContextBytes"] = json!(bytes);
+        }
+        self.host.scoped(methods::TERMINAL_CLOSE, context, params)
+    }
+
+    /// Starts the saved argv again and restores plain display history, never input.
+    pub fn reopen(&self, context: &WorkspaceContext, terminal_id: &str) -> Result<Value, SdkError> {
+        self.host.scoped(
+            methods::TERMINAL_REOPEN,
+            context,
+            json!({ "terminalID": terminal_id }),
+        )
+    }
+
+    /// Permanently forgets an owned handle and its history, also closing it if live.
+    pub fn dispose(
+        &self,
+        context: &WorkspaceContext,
+        terminal_id: &str,
+    ) -> Result<Value, SdkError> {
+        self.host.scoped(
+            methods::TERMINAL_DISPOSE,
+            context,
+            json!({ "terminalID": terminal_id }),
+        )
+    }
+
+    /// One exit event per process generation, including the latest recorded
+    /// outcome when subscribing after exit.
+    /// Disposing the subscription stops notifications, not the terminal itself.
+    pub fn on_exit(
+        &self,
+        context: &WorkspaceContext,
+        terminal_id: &str,
+    ) -> Result<Subscription, SdkError> {
+        self.host.subscribe(
+            methods::TERMINAL_ON_EXIT,
+            with_context(context, json!({ "terminalID": terminal_id }))?,
+        )
     }
 }
 

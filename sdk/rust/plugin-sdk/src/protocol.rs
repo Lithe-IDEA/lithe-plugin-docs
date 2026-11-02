@@ -24,6 +24,12 @@ pub(crate) mod methods {
     pub const FUNCTION_REGISTER: &str = "lithe/function/register";
     pub const FUNCTION_UNREGISTER: &str = "lithe/function/unregister";
     pub const FUNCTION_PROGRESS: &str = "lithe/function/progress";
+    pub const TERMINAL_CREATE: &str = "lithe/host/terminal/create";
+    pub const TERMINAL_SHOW: &str = "lithe/host/terminal/show";
+    pub const TERMINAL_CLOSE: &str = "lithe/host/terminal/close";
+    pub const TERMINAL_REOPEN: &str = "lithe/host/terminal/reopen";
+    pub const TERMINAL_DISPOSE: &str = "lithe/host/terminal/dispose";
+    pub const TERMINAL_ON_EXIT: &str = "lithe/host/terminal/onExit";
     pub const HOST_PREFIX: &str = "lithe/host/";
     pub const CREDENTIALS_GET: &str = "lithe/host/credentials/get";
     pub const CREDENTIALS_SET: &str = "lithe/host/credentials/set";

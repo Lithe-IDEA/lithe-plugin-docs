@@ -45,6 +45,12 @@ public final class Protocol {
      * {@link Host#request} sends any {@code lithe/host/*} method, and
      * {@code getCapabilities} says which ones the session may call.
      */
+    public static final String HOST_TERMINAL_CREATE = "lithe/host/terminal/create";
+    public static final String HOST_TERMINAL_SHOW = "lithe/host/terminal/show";
+    public static final String HOST_TERMINAL_CLOSE = "lithe/host/terminal/close";
+    public static final String HOST_TERMINAL_REOPEN = "lithe/host/terminal/reopen";
+    public static final String HOST_TERMINAL_DISPOSE = "lithe/host/terminal/dispose";
+    public static final String HOST_TERMINAL_ON_EXIT = "lithe/host/terminal/onExit";
     public static final String HOST_PREFIX = "lithe/host/";
     public static final String HOST_CREDENTIALS_GET = "lithe/host/credentials/get";
     public static final String HOST_CREDENTIALS_SET = "lithe/host/credentials/set";

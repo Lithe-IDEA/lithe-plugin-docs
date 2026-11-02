@@ -65,3 +65,20 @@ async function edit(context: ContextReference) {
   await backend.host.credentials.set('key', 42);
 }
 void edit;
+
+async function nativeTerminal(context: ContextReference) {
+  const created = await backend.host.terminal.create(context, {
+    executable: 'example-client', arguments: ['--interactive'], environment: { MODE: 'dev', OLD_MODE: null },
+  });
+  await backend.host.terminal.show(context, { terminalID: created.terminalID });
+  const subscription = await backend.host.terminal.onExit(context, created.terminalID, (event, info) => {
+    const code: number | null = event.exitCode;
+    const reason: 'exited' | 'closed' = event.reason;
+    void code; void reason; void info;
+  });
+  await subscription.dispose();
+  await backend.host.terminal.close(context, { terminalID: created.terminalID, retainedContextBytes: 4096 });
+  await backend.host.terminal.reopen(context, { terminalID: created.terminalID });
+  await backend.host.terminal.dispose(context, { terminalID: created.terminalID });
+}
+void nativeTerminal;

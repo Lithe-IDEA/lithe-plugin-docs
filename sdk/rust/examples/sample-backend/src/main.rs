@@ -140,6 +140,43 @@ fn main() {
         .function("files.nextChange", |_, context| next_change(context))
         .expect("valid function");
 
+    // Terminal APIs are additive protocol-3 host methods. The lifecycle
+    // sample deliberately uses a harmless interactive client and display-only
+    // history; it never executes retained text as input.
+    backend
+        .function("terminal.cycle", |_, context| {
+            let workspace = context
+                .workspace_context()
+                .ok_or_else(|| PluginError::new("sample.noWorkspace", "Open a workspace first."))?;
+            let host = context.host();
+            if !host.supports("lithe/host/terminal/reopen")? {
+                return Err(PluginError::new(
+                    "sample.terminalUnavailable",
+                    "The host has no native terminal API.",
+                )
+                .into());
+            }
+            let terminal = host.terminal();
+            let created = terminal.create(
+                workspace,
+                json!({ "executable": "example-client", "arguments": ["--interactive"],
+            "retainedContextBytes": 4096, "show": true }),
+            )?;
+            let id = created["terminalID"]
+                .as_str()
+                .ok_or_else(|| FunctionError::internal("missing terminalID"))?;
+            let subscription = terminal.on_exit(workspace, id)?;
+            let closed = terminal.close(workspace, id, Some(4096))?;
+            let event = subscription
+                .recv_timeout(Duration::from_secs(5))
+                .map_err(|_| FunctionError::internal("terminal exit did not arrive"))?;
+            let reopened = terminal.reopen(workspace, id)?;
+            terminal.dispose(workspace, id)?;
+            subscription.dispose()?;
+            Ok(json!({ "closed": closed, "reopened": reopened, "event": event.event() }))
+        })
+        .expect("valid function");
+
     // Notifications are events: each handler runs on a thread of its own and
     // may ask the host for more, outside any call.
     let handle = backend.handle();

@@ -320,3 +320,37 @@ test('commands, context changes, and later host notifications reach their handle
   assert.deepEqual(seen, expected);
   await host.close();
 });
+
+test('native terminal wrappers keep argv and context, and subscribe to one owned exit', { timeout: 5000 }, async () => {
+  const { backend, host } = await session(3);
+  try {
+    const params = { executable: 'example-client', arguments: ['literal;$(value)', 'space value'], show: true };
+    const creating = backend.host.terminal.create(CONTEXT, params);
+    const create = await nextRequest(host, 'lithe/host/terminal/create');
+    assert.deepEqual(create.params, { ...params, context: CONTEXT });
+    host.send({ id: create.id, result: { terminalID: 'owned', generation: 1 } });
+    assert.deepEqual(await creating, { terminalID: 'owned', generation: 1 });
+    const seen = gate();
+    let event;
+    const listening = backend.host.terminal.onExit(CONTEXT, 'owned', value => { event = value; seen.open(); });
+    const listen = await nextRequest(host, 'lithe/host/terminal/onExit');
+    host.send({ id: listen.id, result: { subscriptionID: 'terminal-exit' } });
+    const subscription = await listening;
+    host.notify('lithe/host/subscriptions/notify', { subscriptionID: 'terminal-exit', sequence: 1,
+      event: { type: 'exit', terminalID: 'owned', exitCode: 0, reason: 'exited' } });
+    await withTimeout(seen.opened, 'terminal exit event');
+    assert.equal(event.exitCode, 0);
+    const closing = backend.host.terminal.close(CONTEXT, { terminalID: 'owned' });
+    const close = await nextRequest(host, 'lithe/host/terminal/close');
+    host.send({ id: close.id, result: { retainedContextBytes: 0 } });
+    assert.deepEqual(await closing, { retainedContextBytes: 0 });
+    const reopening = backend.host.terminal.reopen(CONTEXT, { terminalID: 'owned' });
+    const reopen = await nextRequest(host, 'lithe/host/terminal/reopen');
+    host.send({ id: reopen.id, result: { terminalID: 'owned', generation: 2, restoredContextBytes: 0 } });
+    assert.equal((await reopening).generation, 2);
+    const disposing = subscription.dispose();
+    const dispose = await nextRequest(host, 'lithe/host/subscriptions/dispose');
+    host.send({ id: dispose.id, result: null });
+    await disposing;
+  } finally { await host.close(); }
+});
