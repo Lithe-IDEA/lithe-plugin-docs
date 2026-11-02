@@ -724,3 +724,41 @@ fn commands_context_changes_and_later_host_notifications_reach_their_handlers() 
     session.host.assert_quiet();
     session.close();
 }
+
+#[test]
+fn native_terminal_methods_keep_context_and_literal_arguments() {
+    let backend = Backend::new("terminal-test");
+    let handle = backend.handle();
+    let mut session = Session::start(3, backend);
+    let host = handle.host();
+    let creating = background(move || {
+        host.terminal().create(
+            &context(),
+            json!({
+                "executable": "example-client", "arguments": ["literal;$(value)", "space value"]
+            }),
+        )
+    });
+    let create = session.take("lithe/host/terminal/create");
+    assert_eq!(create["params"]["context"], context().to_value());
+    assert_eq!(
+        create["params"]["arguments"],
+        json!(["literal;$(value)", "space value"])
+    );
+    session.reply(&create, json!({ "terminalID": "owned" }));
+    assert_eq!(done(&creating).unwrap()["terminalID"], "owned");
+    for method in ["show", "close", "reopen", "dispose"] {
+        let host = handle.host();
+        let operation = background(move || match method {
+            "show" => host.terminal().show(&context(), "owned"),
+            "close" => host.terminal().close(&context(), "owned", Some(4096)),
+            "reopen" => host.terminal().reopen(&context(), "owned"),
+            _ => host.terminal().dispose(&context(), "owned"),
+        });
+        let request = session.take(&format!("lithe/host/terminal/{method}"));
+        assert_eq!(request["params"]["terminalID"], "owned");
+        session.reply(&request, Value::Null);
+        assert_eq!(done(&operation).unwrap(), Value::Null);
+    }
+    session.close();
+}

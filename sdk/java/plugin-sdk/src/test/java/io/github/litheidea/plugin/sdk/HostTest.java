@@ -109,6 +109,29 @@ class HostTest {
     }
 
     @Test
+    void nativeTerminalMethodsKeepContextAndLiteralArguments() {
+        Backend backend = Backend.create(null, null);
+        TestHost host = session(3, backend);
+        try {
+            CompletableFuture<Map<String, Object>> creating = backend.host().terminal().create(CONTEXT,
+                    map("executable", "example-client", "arguments", Arrays.asList("literal;$(value)", "space value")));
+            Map<String, Object> request = nextRequest(host, Protocol.HOST_TERMINAL_CREATE);
+            assertEquals(CONTEXT, object(request.get("params")).get("context"));
+            assertEquals(Arrays.asList("literal;$(value)", "space value"), object(request.get("params")).get("arguments"));
+            host.send(map("id", request.get("id"), "result", map("terminalID", "owned")));
+            assertEquals("owned", value(creating).get("terminalID"));
+            CompletableFuture<Map<String, Object>> closing = backend.host().terminal().close(CONTEXT, map("terminalID", "owned"));
+            Map<String, Object> close = nextRequest(host, Protocol.HOST_TERMINAL_CLOSE);
+            host.send(map("id", close.get("id"), "result", map("retainedContextBytes", 4096L)));
+            assertEquals(4096L, value(closing).get("retainedContextBytes"));
+            CompletableFuture<Map<String, Object>> reopening = backend.host().terminal().reopen(CONTEXT, map("terminalID", "owned"));
+            Map<String, Object> reopen = nextRequest(host, Protocol.HOST_TERMINAL_REOPEN);
+            host.send(map("id", reopen.get("id"), "result", map("terminalID", "owned", "generation", 2L, "restoredContextBytes", 4096L)));
+            assertEquals(2L, value(reopening).get("generation"));
+        } finally { host.close(); }
+    }
+
+    @Test
     void theSdkAnswersTheHighestPluginFunctionVersionTheHostOffers() {
         Object offer = object(FIXTURE.get("offer")).get("versions");
         Object[][] cases = {{offer, 3}, {Arrays.asList(1L, 2L), 2}, {Arrays.asList(1L), 1}, {Arrays.asList(2L, 99L), 2}};

@@ -71,6 +71,12 @@ export const HOST_METHODS = Object.freeze({
   windowShowInformation: 'lithe/host/window/showInformation',
   windowShowWarning: 'lithe/host/window/showWarning',
   windowShowError: 'lithe/host/window/showError',
+  terminalCreate: 'lithe/host/terminal/create',
+  terminalShow: 'lithe/host/terminal/show',
+  terminalClose: 'lithe/host/terminal/close',
+  terminalReopen: 'lithe/host/terminal/reopen',
+  terminalDispose: 'lithe/host/terminal/dispose',
+  terminalOnExit: 'lithe/host/terminal/onExit',
 });
 
 /** Host-to-backend notifications of protocol 3. */

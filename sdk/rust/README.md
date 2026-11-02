@@ -282,3 +282,11 @@ The unit tests drive a session through in-process pipes with a scripted
 host; `tests/host_services.rs` checks the host services against the
 contract's fixture. The end-to-end check builds the sample, installs it as a
 package, and runs it through a real Core session.
+
+## Native terminal API (unreleased)
+
+The SDK includes wrappers for plugin-owned native terminal create/show/close,
+reopen with bounded display history, disposal and exit subscriptions. These
+methods are discovered within protocol 3; they require a newer host and
+`terminal.create`, not a new protocol version. See
+[the native terminal guide](../../guides/native-terminals.md).

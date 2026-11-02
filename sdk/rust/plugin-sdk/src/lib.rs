@@ -34,7 +34,7 @@ pub use backend::{Backend, BackendHandle, Cancellation, Context, Initialize};
 pub use error::{sdk_codes, Cancelled, FunctionError, PluginError, SdkError, HOST_ERROR_CODES};
 pub use host::{
     Browser, Credentials, Documents, Editor, Event, Host, Preview, Subscription, Subscriptions,
-    Window, Workspace, WorkspaceContext,
+    Terminal, Window, Workspace, WorkspaceContext,
 };
 pub use protocol::{is_command_id, is_credential_key, is_function_id, is_plugin_error_code};
 pub use serde_json::Value;

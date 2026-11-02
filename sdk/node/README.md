@@ -334,3 +334,11 @@ producer changes. Protocol 1–5 handlers reject requests containing model input
 The two native workflow samples demonstrate independent producer and consumer
 backends in the Core end-to-end tests. Their engine is fictional; this does not
 migrate Maven, JDT, LLDB or existing plugin business logic.
+
+## Native terminal API (unreleased)
+
+The SDK includes wrappers for plugin-owned native terminal create/show/close,
+reopen with bounded display history, disposal and exit subscriptions. These
+methods are discovered within protocol 3; they require a newer host and
+`terminal.create`, not a new protocol version. See
+[the native terminal guide](../../guides/native-terminals.md).
