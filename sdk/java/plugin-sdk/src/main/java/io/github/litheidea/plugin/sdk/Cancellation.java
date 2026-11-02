@@ -91,6 +91,11 @@ public final class Cancellation {
         }
     }
 
+    /** The reason it was cancelled with, or the default text before that. */
+    String reason() {
+        return reasonOrDefault();
+    }
+
     private String reasonOrDefault() {
         synchronized (lock) {
             return reason == null ? "The request was cancelled." : reason;

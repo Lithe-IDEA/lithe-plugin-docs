@@ -72,11 +72,11 @@ class BackendTest {
         assertEquals(map(), object(object(quiet.initialize(map()).get("result")).get("capabilities")).get("experimental"));
         quiet.close();
 
-        // No build handler: litheBuild is never claimed. Version 2 only: no functions.
+        // No build handler: litheBuild is never claimed. Only an unknown version: no functions.
         TestHost other = new TestHost(functionBackend());
         Map<String, Object> answer = object(other.initialize(map(
                 "litheBuild", map("versions", Arrays.asList(1L)),
-                "litheFunctions", map("versions", Arrays.asList(2L)))).get("result"));
+                "litheFunctions", map("versions", Arrays.asList(99L)))).get("result"));
         assertEquals(map(), object(answer.get("capabilities")).get("experimental"));
         other.close();
     }

@@ -1,22 +1,31 @@
 //! Sample plugin backend for the Rust SDK: the `backend` process of the
 //! sample plugin in this directory. Lithe starts it when the plugin's web
-//! page first calls a function, with `--state ${stateDir}`. It:
+//! page first calls a function or the user runs its command, with
+//! `--state ${stateDir}`. It:
 //!
 //! - keeps notes in its state directory, with progress (`note.save`,
 //!   `note.read`), and registers `note.clear` once there is a note to clear;
 //! - keeps a secret in the host's credential store, never in its state
 //!   (`secret.remember`, `secret.check`, `secret.forget`);
 //! - waits until it is cancelled (`work.wait`), and fails unexpectedly
-//!   without leaking details to the page (`fail.unexpectedly`).
+//!   without leaking details to the page (`fail.unexpectedly`);
+//! - watches the files of the page's workspace through the host
+//!   (`files.nextChange`), answers its command with a message in the window
+//!   it ran in, and lists the open workspaces when they change (protocol 3).
 
 use lithe_plugin_sdk::{
-    sdk_codes, BackendHandle, Cancelled, Context, FunctionError, PluginError, SdkError, Value,
+    BackendHandle, Cancelled, Context, FunctionError, PluginError, SdkError, Value,
 };
 use serde_json::json;
 use std::fs;
 use std::path::{Path, PathBuf};
+use std::sync::mpsc::RecvTimeoutError;
 use std::sync::Arc;
 use std::time::Duration;
+
+/// The command `plugin.json` declares.
+const GREET: &str = "org.example.sample-backend.greet";
+const WATCH: &str = "lithe/host/workspace/watch";
 
 fn main() {
     let state = match state_directory() {
@@ -127,6 +136,46 @@ fn main() {
         })
         .expect("valid function");
 
+    backend
+        .function("files.nextChange", |_, context| next_change(context))
+        .expect("valid function");
+
+    // Notifications are events: each handler runs on a thread of its own and
+    // may ask the host for more, outside any call.
+    let handle = backend.handle();
+    backend
+        .on_command(GREET, move |_, context| {
+            let Some(context) = context else {
+                return Ok(());
+            };
+            let host = handle.host();
+            let folders = host.workspace().get_folders(&context)?;
+            let names: Vec<&str> = folders["folders"]
+                .as_array()
+                .into_iter()
+                .flatten()
+                .filter_map(|folder| folder["name"].as_str())
+                .collect();
+            let text = if names.is_empty() {
+                "Sample Backend sees no folders.".to_string()
+            } else {
+                format!("Sample Backend sees {}.", names.join(", "))
+            };
+            host.window()
+                .show_information(&context, json!({ "text": text }))?;
+            Ok(())
+        })
+        .expect("valid command");
+
+    // A backend that keeps state per workspace would refresh it here.
+    let handle = backend.handle();
+    backend.on_contexts_changed(move |_| {
+        let listed = handle.host().workspace().list_contexts()?;
+        let open = listed["contexts"].as_array().map_or(0, Vec::len);
+        handle.log(format_args!("{open} workspace(s) open"));
+        Ok(())
+    });
+
     let notes = Arc::clone(&state);
     backend.on_initialize(move |initialize| {
         if has_notes(&notes) {
@@ -168,6 +217,68 @@ fn clear(state: &Path, context: &Context) -> Result<Value, FunctionError> {
     }
 }
 
+/// Waits for the next change under the first folder of the page's
+/// workspace, through a host file watch.
+fn next_change(context: &Context) -> Result<Value, FunctionError> {
+    let Some(workspace) = context.workspace_context() else {
+        return Err(PluginError::new("sample.noWorkspace", "Open a workspace first.").into());
+    };
+    let host = context.host();
+    // Core answers capability discovery itself, from the plugin's permissions.
+    if !host.supports(WATCH)? {
+        return Err(PluginError::new(
+            "sample.watchUnavailable",
+            "Lithe does not let this plugin watch files.",
+        )
+        .into());
+    }
+    let folders = host
+        .workspace()
+        .get_folders(workspace)
+        .map_err(workspace_failure)?;
+    let Some(root) = folders["folders"][0]["rootID"].as_str() else {
+        return Err(PluginError::new("sample.noWorkspace", "The workspace has no folders.").into());
+    };
+    let watch = host
+        .workspace()
+        .watch(
+            workspace,
+            json!({ "resource": { "rootID": root, "path": "" }, "recursive": true }),
+        )
+        .map_err(workspace_failure)?;
+    let outcome = loop {
+        if context.cancellation().is_cancelled() {
+            break Err(Cancelled.into());
+        }
+        match watch.recv_timeout(Duration::from_millis(200)) {
+            Ok(event) => break Ok(json!({ "changedPaths": event.event()["changedPaths"] })),
+            Err(RecvTimeoutError::Timeout) => {}
+            Err(RecvTimeoutError::Disconnected) => {
+                break Err(FunctionError::internal("the watch ended"))
+            }
+        }
+    };
+    // A subscription outlives the call until it is disposed.
+    if let Err(error) = watch.dispose() {
+        context.log(format_args!("could not dispose the watch: {error}"));
+    }
+    outcome
+}
+
+/// A window that switched folders makes the page's context stale
+/// (`plugin.host.contextExpired`), which the page can recover from.
+fn workspace_failure(error: SdkError) -> FunctionError {
+    if error.code() == "plugin.host.contextExpired" {
+        PluginError::new(
+            "sample.workspaceChanged",
+            "The workspace changed; try again.",
+        )
+        .into()
+    } else {
+        error.into()
+    }
+}
+
 fn has_notes(state: &Path) -> bool {
     fs::read_dir(state.join("notes")).is_ok_and(|mut entries| entries.next().is_some())
 }
@@ -204,11 +315,11 @@ fn secret(params: &Value) -> Result<&str, PluginError> {
         .ok_or_else(|| PluginError::new("sample.invalidParams", "\"secret\" must be a string."))
 }
 
-/// A host that offers no credential store, or a plugin installed without the
-/// `credentials.store` permission, is a state the page can explain; other
-/// failures stay internal.
+/// A host that offers no credential store (`plugin.host.unavailable`), or a
+/// plugin installed without the `credentials.store` permission, is a state
+/// the page can explain; other failures stay internal.
 fn credentials_failure(error: SdkError) -> FunctionError {
-    if error.code() == sdk_codes::NOT_NEGOTIATED || error.code().starts_with("plugin.host.") {
+    if error.code().starts_with("plugin.host.") {
         PluginError::new(
             "sample.credentialsUnavailable",
             "Lithe cannot store credentials for this plugin.",

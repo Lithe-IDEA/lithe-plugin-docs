@@ -9,7 +9,7 @@
 mod plugin_sdk;
 
 #[test]
-fn the_rust_sdk_sample_backend_serves_functions_and_host_credentials() {
+fn the_rust_sdk_sample_backend_serves_functions_and_host_services() {
     let Some(executable) = std::env::var_os("LITHE_PLUGIN_SDK_RUST_SAMPLE") else {
         eprintln!("skipped: set LITHE_PLUGIN_SDK_RUST_SAMPLE to run the Rust SDK end-to-end check");
         return;

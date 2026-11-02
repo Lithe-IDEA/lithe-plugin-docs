@@ -11,9 +11,11 @@ same rules and error mapping:
 - **`litheBuild` 1**: typed `lithe/build/model` and `lithe/build/dependencies`
   requests, for a build system whose `model` or `dependencies` source is
   `provider`.
-- **`litheFunctions` 1**: plugin functions, which are plugin-private actions
+- **`litheFunctions` 1–3**: plugin functions, which are plugin-private actions
   that Lithe invokes for the same plugin. They support progress,
-  cancellation, and registration at runtime.
+  cancellation, and registration at runtime. From version 2 a backend may
+  call [host services](#host-services); version 3 adds workspace, document,
+  editor, and window services, command events, and workspace contexts.
 
 The SDK requires Java 8 or newer and has no runtime dependencies. JSON values
 are plain `Map<String, Object>`, `List<Object>`, `String`, `Long`, `Double`,
@@ -54,7 +56,8 @@ the same one the Node.js sample answers.
 ## Getting the SDK
 
 Releases are published on [this repository's Releases page](https://github.com/Lithe-IDEA/lithe-plugin-docs/releases) and
-tagged `sdk-java-v<version>`. Version 0.1.0 was released from the Lithe
+tagged `sdk-java-v<version>`. Version 0.2.0 adds plugin-function protocols 2
+and 3. Version 0.1.0 was released from the Lithe
 repository before the SDK moved here; its
 [release](https://github.com/1lck/Lithe-IDEA/releases/tag/sdk-java-v0.1.0)
 stays available. A release ships
@@ -82,6 +85,11 @@ JAR it starts must hold everything it loads.
 | `negotiated().buildVersion()` | Highest common build version (1–7), or zero; newer methods are refused before their handler runs. |
 | `function(id, handler)` | Declares a function offered in `initialize`. |
 | `registerFunction(id, handler)`, `unregisterFunction(id)` | Add or withdraw a function. Called before the `initialize` answer (for example from `onInitialize`), they change the initial list. Later calls send `lithe/function/register` or `lithe/function/unregister`, in order. Both return a `CompletableFuture`. Withdrawing a function revokes its running calls. |
+| `negotiated().functionsVersion()` | Highest common plugin-function version (1–3), or zero. |
+| `host()` | [Host services](#host-services) for work outside a call, such as a command handler. |
+| `onCommand(commandId, handler)` | Protocol 3: runs `handler.handle(commandId, workspaceContext)` when the user runs one of the plugin's commands. |
+| `onContextsChanged(handler)` | Protocol 3: `lithe/host/workspace/didChangeContexts` with its `{ revision }`. |
+| `onHostNotification(method, handler)` | A `lithe/host/*` notification a later host adds. The three this SDK routes itself are reserved. |
 | `onInitialize(hook)`, `onShutdown(hook)` | Lifecycle hooks. `onInitialize` receives the `initialize` params and what was negotiated. |
 | `onRequest(method, handler)`, `onNotification(method, handler)` | Ordinary LSP methods. Lifecycle and `lithe/*` methods are reserved. |
 | `sendRequest`, `sendNotification` | Ordinary LSP messages to the host. `lithe/*` methods are reserved. |
@@ -100,11 +108,12 @@ Handlers run on their own threads. Every handler receives a `CallContext`:
 | `run(command[, options])` | `Processes.run` bound to the call: cancelling or ending the call stops the process. |
 | `log(message)` | Same as `Backend.log`. |
 | `functionId()` | Functions only. |
+| `host()` | [Host services](#host-services) bound to the call: ending the call cancels the requests it left unanswered. |
+| `workspaceContext()` | Protocol 3 functions: the `{ contextID, generation }` of the window that invoked the call, or null. |
 | `operationId()` | Opaque wire identity for functions and bounded build/test/run-preparation calls; null for other requests. |
 | `progress(message, percentage[, output])` | Functions use 1024-byte messages. Build/test/run preparation use 4096-byte messages and optional output up to 64 KiB. Percentages are clamped to 0–100. Cancelled or settled calls cannot report. Model/dependency/discovery reports are ignored. |
 
-The new build handlers are under development and are not in a published SDK
-release. See [native build workflows](../../guides/native-build-workflows.md)
+The typed handlers of build protocols 2–6 ship from SDK 0.2.0. See [native build workflows](../../guides/native-build-workflows.md)
 and the [no-page Java sample](examples/sample-native-build/src/main/java/org/example/samplenativebuild/SampleNativeBuild.java).
 Manifest `buildProviders` requirements and the negotiated protocol both apply;
 registering a handler never bypasses either boundary. Build tool failure is an
@@ -121,6 +130,81 @@ build operations follow their domain contract:
 - `CancelledException` ends the call as cancelled.
 - A result larger than 1 MiB of JSON fails like an unexpected error.
 
+## Host services
+
+From plugin-function protocol 2 a backend may ask the host for services;
+each is granted by a manifest permission and refused otherwise. The SDK
+negotiates the highest version both sides offer, so a backend written for
+protocol 1 keeps working unchanged. Every method returns a
+`CompletableFuture`; wrong arguments fail it rather than throwing.
+
+```java
+backend.function("query.run", (params, context) -> {
+    // Protocol 2, permission credentials.store: the platform's secret store, per plugin.
+    String password = context.host().credentials().get("connection.prod:password").get();
+    if (password == null) {
+        throw new PluginError("query.noPassword", "Sign in first.");
+    }
+    // Protocol 3: the window the page runs in.
+    Map<String, Object> workspace = context.workspaceContext();
+    if (workspace != null && context.host().supports("lithe/host/workspace/getFolders").get()) {
+        Object folders = context.host().workspace().getFolders(workspace).get().get("folders");
+        // ...
+    }
+    return runQuery(params, password);
+});
+
+backend.onCommand("db.refresh", (commandId, workspaceContext) -> {
+    if (workspaceContext != null) {
+        backend.host().window().showInformation(workspaceContext, Collections.singletonMap("text", "Refreshed."));
+    }
+});
+```
+
+| `Host` member | Version | Purpose |
+| --- | --- | --- |
+| `credentials().get(key)`, `.set(key, secret)`, `.delete(key)` | 2 | Secrets in the platform's store. `get` completes with null when nothing is stored. A key is 1–128 of `[A-Za-z0-9._:-]`, a secret at most 16 KiB; others fail locally. |
+| `capabilities()`, `supports(method)` | 3 | What this session may call, from `lithe/host/getCapabilities` (asked once). Under protocol 2, which has no discovery, `supports` reports the credential methods. |
+| `workspace().listContexts()`, `.getContext(context)`, `.getFolders(context)` | 3 | Workspace contexts; only `getContext` returns, and creates, the context's `stateDirectory`. |
+| `workspace().readDirectory`, `.stat`, `.readFile`, `.findFiles`, `.findText`, `.watch` | 3 | Files of a local context, addressed as `{ rootID, path }` from `getFolders`. |
+| `documents().list`, `.getSnapshot`; `editor().getActive`, `.getSelections`, `.applyEdits`, `.replaceSelections`, `.insertText`, `.open`, `.reveal`, `.registerActions` | 3 | Live documents and editors. Edits name the `expectedVersion` they were computed against. |
+| `preview().openHtml`, `browser().openExternal`, `window().showInformation`, `.showWarning`, `.showError` | 3 | Preview, browser, and messages. |
+| `request(method, params)`, `subscribe(method, params, listener)` | 2 / 3 | Any `lithe/host/*` method, including ones a later host adds. |
+| `subscriptions().dispose(id)` | 3 | Ends a subscription; `Subscription.dispose()` does the same. |
+| `withCancellation(cancellation)` | 2 | The same services, cancelled together with `cancellation`. |
+
+Methods taking a workspace context accept `{ contextID, generation }` or a
+whole context from `listContexts`; their `params` are the contract's, without
+`context`. The full params and results are in
+[the contract](../../contract/v1/README.md#public-document-file-and-window-methods-protocol-version-3).
+
+What the SDK does for you, and what it leaves to you:
+
+- **Refusals are `HostError`.** Branch on `code()`, such as
+  `plugin.host.contextExpired`; a code this SDK does not know is still a
+  `HostError`, and `details()` holds the host's object. On `versionConflict`
+  reread and recompute; on `contextExpired` resolve the original target
+  again, never the focused window; retry `busy` and `rateLimited` (after
+  `details().get("retryAfterMilliseconds")`) with a bound; `permissionDenied`
+  and `readOnly` need the user. From protocol 3 an unknown param is
+  `plugin.host.unsupportedOption` naming it in `details().get("option")`, so
+  you can retry without it.
+- **Cancellation has no rollback.** Cancelling the token given to
+  `withCancellation`, or ending the call that sent a request, fails it at
+  once with `CancelledException`; from protocol 3 the SDK also sends
+  `$/cancelRequest` so the host stops. An edit or an external open may
+  already have taken effect, and the SDK never sends a request again.
+  Cancelling the returned future itself does not reach the host.
+- **At most 16 host requests are unanswered.** Further ones wait in the SDK
+  for a free slot instead of being refused.
+- **Subscriptions route by ID.** `workspace().watch` and `subscribe` call
+  the `Listener` with each `Host.Event` in order, one at a time; `gap()` is
+  true when events were missed, so rescan. Nothing arrives after `dispose()`
+  or the end of the session.
+- **Commands are events.** `onCommand` runs when the user runs one of the
+  plugin's commands; the host waits for no result. A stopped backend is
+  started for it only when the manifest declares `onCommand:<commandID>`.
+
 ## Rules that keep Lithe in charge
 
 These are the [Node.js SDK's rules](../node/README.md#rules-that-keep-lithe-in-charge).
@@ -128,8 +212,9 @@ In Java:
 
 1. **Domain capabilities stay typed.** Build models and dependency trees go
    through `onModel` and `onDependencies`, never through a function.
-2. **No calls back into Lithe's dispatch.** The SDK refuses to send any
-   `lithe/*` method.
+2. **No calls back into Lithe's dispatch.** `sendRequest` and
+   `sendNotification` refuse any `lithe/*` method. Host services go through
+   `host()`, which sends only `lithe/host/*`.
 3. **stdout belongs to the protocol.** `listen()` keeps the real stdout for
    protocol frames and points `System.out` at stderr. Never write to
    `FileDescriptor.out`.

@@ -3,12 +3,12 @@
   "source": {
     "repository": "https://github.com/1lck/Lithe-IDEA",
     "directory": "shared/contracts/plugins/v1",
-    "revision": "589116e30d3bdbf72c9695f8ff18a952c7da33ac"
+    "revision": "04b1fb848f8f593d51e998b0cc0f487bc8c56f40"
   },
   "files": [
     {
       "path": "README.md",
-      "sha256": "0f32eb07a05f6e929696b51c87052eab6c369489c89b47d1b3fc8dc82ac3f6e6"
+      "sha256": "02f8480592dba210e6e5d78d2eb14d9cf6d4dbd4ee8eef0339982f67eecf9696"
     },
     {
       "path": "fixtures/backend-workspace.plugin.json",
@@ -252,7 +252,7 @@
     },
     {
       "path": "plugin-manifest.schema.json",
-      "sha256": "424d5e6a9f0c216eb79add116b90d75f6634f7b31c51629a730ec155ada27016"
+      "sha256": "a308c44479fd2f1f3a51f54f75831f1052ec02aa18e7f294187946bd30ea3a6c"
     },
     {
       "path": "proposals/toolchains/README.md",

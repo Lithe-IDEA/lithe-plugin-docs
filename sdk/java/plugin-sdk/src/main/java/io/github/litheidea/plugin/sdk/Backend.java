@@ -15,6 +15,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CompletionException;
+import java.util.concurrent.ExecutionException;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.atomic.AtomicBoolean;
@@ -30,6 +31,9 @@ import java.util.function.Supplier;
  * and leaves the plugin free to decide what its handlers do. Declare handlers,
  * then call {@link #listen()}. Handlers run on their own threads, so several
  * calls can be in flight at once; shared plugin state needs its own locking.
+ *
+ * <p>Host services ({@code lithe/host/*}) of plugin-function protocols 2 and 3
+ * are in {@link #host()}, or a handler's {@link CallContext#host()}.
  *
  * <p>Contract: {@code contract/v1/README.md} ("Build providers"
  * and "Plugin functions"). Behaviour and error codes match the Node.js SDK.
@@ -53,6 +57,16 @@ public final class Backend {
         void handle(Object params) throws Exception;
     }
 
+    /**
+     * Handles {@code lithe/host/commands/didRun} for one of the plugin's
+     * commands. {@code workspaceContext} is the {@code { contextID, generation }}
+     * of the window the command ran in, or null.
+     */
+    @FunctionalInterface
+    public interface CommandHandler {
+        void handle(String commandId, Map<String, Object> workspaceContext) throws Exception;
+    }
+
     /** Runs before the {@code initialize} answer. */
     @FunctionalInterface
     public interface InitializeHook {
@@ -67,19 +81,28 @@ public final class Backend {
 
     /** Protocols the host agreed to in {@code initialize}. */
     public static final class Negotiated {
-        static final Negotiated NONE = new Negotiated(false, 0);
+        static final Negotiated NONE = new Negotiated(0, 0);
 
-        private final boolean functions;
+        private final int functionsVersion;
         private final int buildVersion;
 
-        Negotiated(boolean functions, int buildVersion) {
-            this.functions = functions;
+        Negotiated(int functionsVersion, int buildVersion) {
+            this.functionsVersion = functionsVersion;
             this.buildVersion = buildVersion;
         }
 
-        /** Plugin functions, {@code litheFunctions} version 1. */
+        /** Whether the host negotiated plugin functions ({@code litheFunctions}). */
         public boolean functions() {
-            return functions;
+            return functionsVersion > 0;
+        }
+
+        /**
+         * Selected plugin-function version (1-3), or zero when unavailable.
+         * Version 2 adds host credentials; version 3 workspace contexts, the
+         * other host services, and host notifications.
+         */
+        public int functionsVersion() {
+            return functionsVersion;
         }
 
         /** Whether the host negotiated typed build requests. */
@@ -117,6 +140,9 @@ public final class Backend {
     private final Map<String, Handler> buildHandlers = new HashMap<>();
     private final Map<String, RequestHandler> requestHandlers = new HashMap<>();
     private final Map<String, NotificationHandler> notificationHandlers = new HashMap<>();
+    private final Map<String, CommandHandler> commandHandlers = new HashMap<>();
+    private final Map<String, NotificationHandler> hostNotificationHandlers = new HashMap<>();
+    private NotificationHandler contextsHandler;
     private final List<InitializeHook> initializeHooks = new ArrayList<>();
     private final List<ShutdownHook> shutdownHooks = new ArrayList<>();
     /** Host requests being handled, by JSON-RPC ID. */
@@ -125,6 +151,8 @@ public final class Backend {
     private final Map<String, Pending> outgoing = new HashMap<>();
     private final AtomicInteger nextRequestId = new AtomicInteger(1);
     private final ExecutorService executor = Executors.newCachedThreadPool(new ThreadNamer());
+    private final HostChannel channel = new HostChannel(new Wire());
+    private final Host host = new Host(channel, Collections.<Cancellation>emptyList());
     /** Serializes register/unregister so the host sees them in call order. */
     private CompletableFuture<Void> registrations = CompletableFuture.completedFuture(null);
     private volatile Phase phase = Phase.IDLE;
@@ -169,6 +197,15 @@ public final class Backend {
     /** Protocols the host agreed to in {@code initialize}; both false before it. */
     public Negotiated negotiated() {
         return negotiated;
+    }
+
+    /**
+     * Host services of plugin-function protocols 2 and 3, usable once the
+     * session is ready. Prefer a handler's {@link CallContext#host()}, whose
+     * requests end with the call.
+     */
+    public Host host() {
+        return host;
     }
 
     /** The host's {@code initialize} params, or null before it arrives. */
@@ -262,6 +299,62 @@ public final class Backend {
         checkDeclared(method, handler);
         synchronized (lock) {
             notificationHandlers.put(method, handler);
+        }
+        return this;
+    }
+
+    /**
+     * Handles {@code lithe/host/commands/didRun} for one of the plugin's
+     * commands (protocol 3). It is an event: the host waits for no result.
+     *
+     * @param commandId the command's ID from the manifest, 1-128 of {@code [a-z0-9.-]}
+     */
+    public Backend onCommand(String commandId, CommandHandler handler) {
+        if (!Protocol.isCommandId(commandId)) {
+            throw new PluginSdkError("sdk.command.invalidID", "Command ID \"" + commandId + "\" must be 1-128 of [a-z0-9.-].");
+        }
+        if (handler == null) {
+            throw new IllegalArgumentException("A command handler must not be null.");
+        }
+        synchronized (lock) {
+            commandHandlers.put(commandId, handler);
+        }
+        return this;
+    }
+
+    /**
+     * Handles {@code lithe/host/workspace/didChangeContexts} (protocol 3) with
+     * {@code { revision }}; call {@code host().workspace().listContexts()} for
+     * the contexts.
+     */
+    public Backend onContextsChanged(NotificationHandler handler) {
+        if (handler == null) {
+            throw new IllegalArgumentException("A handler must not be null.");
+        }
+        synchronized (lock) {
+            contextsHandler = handler;
+        }
+        return this;
+    }
+
+    /**
+     * Handles a {@code lithe/host/*} notification a later host adds. Commands,
+     * context changes, and subscription events have their own APIs.
+     */
+    public Backend onHostNotification(String method, NotificationHandler handler) {
+        if (method == null || !method.startsWith(Protocol.HOST_PREFIX)) {
+            throw new PluginSdkError("sdk.method.invalid", method + " is not a host notification.");
+        }
+        if (method.equals(Protocol.HOST_DID_CHANGE_CONTEXTS) || method.equals(Protocol.HOST_SUBSCRIPTION_NOTIFY)
+                || method.equals(Protocol.HOST_COMMAND_DID_RUN)) {
+            throw new PluginSdkError("sdk.method.reserved",
+                    method + " is routed by the SDK; use onCommand, onContextsChanged, or Host.subscribe.");
+        }
+        if (handler == null) {
+            throw new IllegalArgumentException("A handler must not be null.");
+        }
+        synchronized (lock) {
+            hostNotificationHandlers.put(method, handler);
         }
         return this;
     }
@@ -538,6 +631,10 @@ public final class Backend {
         if (phase != Phase.READY || method.equals(Protocol.INITIALIZED)) {
             return;
         }
+        if (method.startsWith(Protocol.HOST_PREFIX)) {
+            hostNotification(method, params);
+            return;
+        }
         NotificationHandler handler;
         synchronized (lock) {
             handler = notificationHandlers.get(method);
@@ -545,9 +642,54 @@ public final class Backend {
         if (handler == null) {
             return;
         }
+        notifyHandler(method, () -> handler.handle(params));
+    }
+
+    /**
+     * Routes a host notification. Core checked its shape and the session's
+     * grant; one this SDK does not know is ignored, as the contract asks.
+     */
+    private void hostNotification(String method, Object raw) {
+        if (negotiated.functionsVersion() < Protocol.CONTEXT_VERSION || !(raw instanceof Map)) {
+            return;
+        }
+        Map<String, Object> params = Json.object(raw);
+        if (method.equals(Protocol.HOST_SUBSCRIPTION_NOTIFY)) {
+            channel.deliver(params);
+            return;
+        }
+        if (method.equals(Protocol.HOST_COMMAND_DID_RUN)) {
+            Object commandId = params.get("commandID");
+            CommandHandler handler;
+            synchronized (lock) {
+                handler = commandId instanceof String ? commandHandlers.get(commandId) : null;
+            }
+            if (handler == null) {
+                log("No handler for command " + commandId + ".");
+                return;
+            }
+            Map<String, Object> context = workspaceContext(params.get("context"));
+            notifyHandler(method, () -> handler.handle((String) commandId, context));
+            return;
+        }
+        NotificationHandler handler;
+        synchronized (lock) {
+            handler = method.equals(Protocol.HOST_DID_CHANGE_CONTEXTS) ? contextsHandler : hostNotificationHandlers.get(method);
+        }
+        if (handler != null) {
+            notifyHandler(method, () -> handler.handle(params));
+        }
+    }
+
+    private interface Notified {
+        void run() throws Exception;
+    }
+
+    /** Runs a notification handler off the reader thread; a failure is logged. */
+    private void notifyHandler(String method, Notified handler) {
         executor.execute(() -> {
             try {
-                handler.handle(params);
+                handler.run();
             } catch (Throwable error) {
                 log("Notification " + method + " failed:", error);
             }
@@ -574,8 +716,14 @@ public final class Backend {
                     }
                 }
             }
-            agreed = new Negotiated(
-                    offers(offered.get("litheFunctions"), Protocol.FUNCTIONS_VERSION), buildVersion);
+            int functionsVersion = 0;
+            for (int version = Protocol.FUNCTIONS_VERSION; version > 0; version--) {
+                if (offers(offered.get("litheFunctions"), version)) {
+                    functionsVersion = version;
+                    break;
+                }
+            }
+            agreed = new Negotiated(functionsVersion, buildVersion);
             negotiated = agreed;
             hooks = new ArrayList<>(initializeHooks);
         }
@@ -602,7 +750,8 @@ public final class Backend {
                     return;
                 }
                 if (!agreed.functions() && !functions.isEmpty()) {
-                    log("The host did not offer litheFunctions version 1; functions stay unavailable.");
+                    log("The host did not offer a litheFunctions version from 1 to " + Protocol.FUNCTIONS_VERSION
+                            + "; functions stay unavailable.");
                 }
                 Map<String, Object> experimental = new LinkedHashMap<>(experimental(capabilities));
                 if (agreed.build()) {
@@ -613,7 +762,7 @@ public final class Backend {
                     for (String functionId : functionIds()) {
                         offered.add(singleton("id", functionId));
                     }
-                    Map<String, Object> entry = singleton("version", Protocol.FUNCTIONS_VERSION);
+                    Map<String, Object> entry = singleton("version", agreed.functionsVersion());
                     entry.put("functions", offered);
                     experimental.put("litheFunctions", entry);
                 }
@@ -660,6 +809,7 @@ public final class Backend {
         Object functionId = invocation.get("functionID");
         Object operationId = invocation.get("operationID");
         Object params = invocation.get("params");
+        Map<String, Object> workspaceContext = workspaceContext(invocation.get("context"));
         Handler handler;
         synchronized (lock) {
             handler = negotiated.functions() && functionId instanceof String ? functions.get(functionId) : null;
@@ -692,8 +842,8 @@ public final class Backend {
             notification.put("params", report);
             write(notification);
         };
-        run(id, function, operation, context -> handler.handle(arguments, context), Backend::functionResult,
-                () -> reporting.set(false), progress);
+        run(id, function, operation, workspaceContext, context -> handler.handle(arguments, context),
+                Backend::functionResult, () -> reporting.set(false), progress);
     }
 
     private void invokeBuild(Object id, String method, Map<String, Object> arguments, Handler handler) {
@@ -757,7 +907,7 @@ public final class Backend {
                 write(notification);
             }
         };
-        run(id, null, (String) wireId, context -> handler.handle(arguments, context),
+        run(id, null, (String) wireId, null, context -> handler.handle(arguments, context),
                 result -> buildResult(method, result, negotiated.buildVersion()), () -> reporting.set(false), progress);
     }
 
@@ -770,18 +920,19 @@ public final class Backend {
     }
 
     private void run(Object id, String functionId, String operationId, Invocation invoke, Shape shape, Runnable onSettled) {
-        run(id, functionId, operationId, invoke, shape, onSettled, null);
+        run(id, functionId, operationId, null, invoke, shape, onSettled, null);
     }
 
     /** Runs one handler with its own cancellation and answers exactly once. */
-    private void run(Object id, String functionId, String operationId, Invocation invoke, Shape shape,
-            Runnable onSettled, CallContext.ProgressSink progress) {
+    private void run(Object id, String functionId, String operationId, Map<String, Object> workspaceContext,
+            Invocation invoke, Shape shape, Runnable onSettled, CallContext.ProgressSink progress) {
         Cancellation cancellation = new Cancellation();
         String key = requestKey(id);
         synchronized (lock) {
             incoming.put(key, new Call(cancellation, functionId));
         }
-        CallContext context = new CallContext(cancellation, this, functionId, operationId, progress);
+        CallContext context = new CallContext(cancellation, this, functionId, operationId, progress,
+                new Host(channel, Collections.singletonList(cancellation)), workspaceContext);
         executor.execute(() -> {
             Object result = null;
             Map<String, Object> error = null;
@@ -892,21 +1043,27 @@ public final class Backend {
     }
 
     private CompletableFuture<Object> request(String method, Object params) {
+        return send(method, params).response;
+    }
+
+    /** Writes a request; params JSON cannot encode throw before anything is registered. */
+    private HostChannel.Sent send(String method, Object params) {
         String id = "sdk-" + nextRequestId.getAndIncrement();
         CompletableFuture<Object> future = new CompletableFuture<>();
-        synchronized (lock) {
-            if (phase == Phase.EXITED) {
-                future.completeExceptionally(new PluginSdkError("sdk.session.closed", "The session ended."));
-                return future;
-            }
-            outgoing.put(id, new Pending(future, method));
-        }
         Map<String, Object> message = message(id, method);
         if (params != null) {
             message.put("params", params);
         }
-        write(message);
-        return future;
+        byte[] frame = Framing.encode(message);
+        synchronized (lock) {
+            if (phase == Phase.EXITED) {
+                future.completeExceptionally(new PluginSdkError("sdk.session.closed", "The session ended."));
+                return new HostChannel.Sent(id, future);
+            }
+            outgoing.put(id, new Pending(future, method));
+        }
+        writeEncoded(frame);
+        return new HostChannel.Sent(id, future);
     }
 
     private void settleOutgoing(Map<String, Object> message) {
@@ -921,15 +1078,7 @@ public final class Backend {
         Object error = message.get("error");
         // Completed on a handler thread: the reader thread never runs plugin code.
         if (error instanceof Map) {
-            Map<String, Object> failure = Json.object(error);
-            Object data = failure.get("data");
-            String code = data instanceof Map ? Json.string(Json.object(data), "code") : null;
-            String text = Json.string(failure, "message");
-            Object rpcCode = failure.get("code");
-            PluginSdkError rejection = new PluginSdkError(
-                    code == null ? "sdk.host.error" : code,
-                    text == null ? pending.method + " failed." : text,
-                    rpcCode instanceof Number ? ((Number) rpcCode).intValue() : null);
+            HostError rejection = HostError.fromResponse(pending.method, Json.object(error));
             executor.execute(() -> pending.future.completeExceptionally(rejection));
         } else {
             Object result = message.get("result");
@@ -958,6 +1107,7 @@ public final class Backend {
             pending = new ArrayList<>(outgoing.values());
             outgoing.clear();
         }
+        channel.close();
         cancelAll("The session ended.");
         Processes.killAll();
         for (Pending request : pending) {
@@ -1186,9 +1336,10 @@ public final class Backend {
         return map;
     }
 
-    private static Throwable unwrap(Throwable error) {
+    /** The failure inside {@code CompletableFuture}'s wrappers, from {@code join()} or {@code get()}. */
+    static Throwable unwrap(Throwable error) {
         Throwable current = error;
-        while (current instanceof CompletionException && current.getCause() != null) {
+        while ((current instanceof CompletionException || current instanceof ExecutionException) && current.getCause() != null) {
             current = current.getCause();
         }
         return current;
@@ -1198,6 +1349,51 @@ public final class Backend {
         CompletableFuture<T> future = new CompletableFuture<>();
         future.completeExceptionally(error);
         return future;
+    }
+
+    /** The {@code { contextID, generation }} the host sent, or null. */
+    private static Map<String, Object> workspaceContext(Object value) {
+        return Protocol.isContextReference(value) ? Host.contextReference(Json.object(value)) : null;
+    }
+
+    /** The session's wire, for host services. */
+    private final class Wire implements HostChannel.Transport {
+        @Override
+        public int version() {
+            return negotiated.functionsVersion();
+        }
+
+        @Override
+        public boolean ready() {
+            return phase == Phase.READY;
+        }
+
+        @Override
+        public HostChannel.Sent send(String method, Object params) {
+            return Backend.this.send(method, params);
+        }
+
+        @Override
+        public void notify(String method, Object params) {
+            Map<String, Object> notification = message(null, method);
+            notification.put("params", params);
+            write(notification);
+        }
+
+        @Override
+        public void log(String message) {
+            Backend.this.log(message);
+        }
+
+        @Override
+        public void log(String message, Throwable error) {
+            Backend.this.log(message, error);
+        }
+
+        @Override
+        public void execute(Runnable task) {
+            executor.execute(task);
+        }
     }
 
     /** One host request being handled. */

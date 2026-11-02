@@ -1,7 +1,9 @@
 //! The three ways a call can fail, and the JSON-RPC error each becomes.
 
-use crate::protocol::{bounded_text, error_codes, is_plugin_error_code, MAX_MESSAGE_BYTES};
-use serde_json::{json, Value};
+use crate::protocol::{
+    bounded_text, error_codes, is_plugin_error_code, methods, MAX_MESSAGE_BYTES,
+};
+use serde_json::{json, Map, Value};
 use std::fmt;
 
 /// A failure a handler reports on purpose. Core ends the call with the stable
@@ -67,24 +69,46 @@ impl fmt::Display for Cancelled {
 impl std::error::Error for Cancelled {}
 
 /// An SDK usage error, or a host request that failed. `code` is the host's
-/// `error.data.code` (such as `plugin.host.permissionDenied`) or one of the
+/// `error.data.code` (such as `plugin.host.contextExpired`) or one of the
 /// SDK's own `sdk.*` codes.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct SdkError {
     code: String,
     message: String,
     rpc_code: Option<i64>,
+    details: Option<Map<String, Value>>,
 }
 
 /// SDK error codes a backend may want to tell apart.
 pub mod sdk_codes {
-    /// The call that made the host request was cancelled first.
+    /// The call that made the host request, or a token passed to
+    /// [`Host::with_cancellation`](crate::Host::with_cancellation), was
+    /// cancelled first.
     pub const CALL_CANCELLED: &str = "sdk.call.cancelled";
     /// The session ended before the host answered.
     pub const SESSION_CLOSED: &str = "sdk.session.closed";
-    /// The session did not negotiate the protocol version that offers this.
-    pub const NOT_NEGOTIATED: &str = "sdk.protocol.notNegotiated";
 }
+
+/// Stable host failure codes of plugin-function protocol 3 and their
+/// JSON-RPC numbers. A later host adds codes after `-32021`.
+pub const HOST_ERROR_CODES: [(&str, i64); 16] = [
+    ("plugin.host.unavailable", -32601),
+    ("plugin.host.invalidParams", -32602),
+    ("plugin.host.failed", -32603),
+    ("plugin.host.cancelled", -32800),
+    ("plugin.host.permissionDenied", -32010),
+    ("plugin.host.contextExpired", -32011),
+    ("plugin.host.authorityUnsupported", -32012),
+    ("plugin.host.versionConflict", -32013),
+    ("plugin.host.limitExceeded", -32014),
+    ("plugin.host.timeout", -32015),
+    ("plugin.host.notFound", -32016),
+    ("plugin.host.readOnly", -32017),
+    ("plugin.host.unsupportedOption", -32018),
+    ("plugin.host.preconditionFailed", -32019),
+    ("plugin.host.busy", -32020),
+    ("plugin.host.rateLimited", -32021),
+];
 
 impl SdkError {
     pub(crate) fn new(code: impl Into<String>, message: impl Into<String>) -> Self {
@@ -92,19 +116,38 @@ impl SdkError {
             code: code.into(),
             message: message.into(),
             rpc_code: None,
+            details: None,
         }
     }
 
-    pub(crate) fn from_response(method: &str, error: &Value) -> Self {
+    /// The answer Core gives a host request it does not offer.
+    pub(crate) fn unavailable(message: impl Into<String>) -> Self {
         Self {
-            code: error["data"]["code"]
-                .as_str()
-                .unwrap_or("sdk.host.error")
-                .to_string(),
+            rpc_code: Some(-32601),
+            ..Self::new("plugin.host.unavailable", message)
+        }
+    }
+
+    /// The failure for a JSON-RPC error answer. A host method without a
+    /// known code is a host failure: from version 3 a number names one code,
+    /// and an unknown number is `plugin.host.failed`.
+    pub(crate) fn from_response(method: &str, error: &Value) -> Self {
+        let rpc_code = error["code"].as_i64();
+        let code = match error["data"]["code"].as_str() {
+            Some(code) => code,
+            None if method.starts_with(methods::HOST_PREFIX) => HOST_ERROR_CODES
+                .iter()
+                .find(|(_, number)| Some(*number) == rpc_code)
+                .map_or("plugin.host.failed", |(code, _)| code),
+            None => "sdk.host.error",
+        };
+        Self {
+            code: code.to_string(),
             message: error["message"]
                 .as_str()
                 .map_or_else(|| format!("{method} failed."), str::to_string),
-            rpc_code: error["code"].as_i64(),
+            rpc_code,
+            details: error["data"]["details"].as_object().cloned(),
         }
     }
 
@@ -119,6 +162,12 @@ impl SdkError {
     /// The JSON-RPC error code of a host response, such as `-32601`.
     pub fn rpc_code(&self) -> Option<i64> {
         self.rpc_code
+    }
+
+    /// The `error.data.details` object a version 3 host may add, such as
+    /// `{ "option": … }` or `{ "retryAfterMilliseconds": … }`.
+    pub fn details(&self) -> Option<&Map<String, Value>> {
+        self.details.as_ref()
     }
 }
 
@@ -230,6 +279,31 @@ mod tests {
         assert_eq!(response_error(&Cancelled.into())["code"], -32800);
         let cut_short: FunctionError = SdkError::new(sdk_codes::CALL_CANCELLED, "x").into();
         assert!(matches!(cut_short, FunctionError::Cancelled));
+    }
+
+    #[test]
+    fn host_failures_keep_their_code_or_take_it_from_the_number() {
+        let coded = SdkError::from_response(
+            methods::CREDENTIALS_GET,
+            &json!({ "code": -32010, "message": "No.", "data": { "code": "plugin.host.permissionDenied", "details": { "a": 1 } } }),
+        );
+        assert_eq!(coded.code(), "plugin.host.permissionDenied");
+        assert_eq!(coded.rpc_code(), Some(-32010));
+        assert_eq!(coded.details(), json!({ "a": 1 }).as_object());
+        for (code, number) in HOST_ERROR_CODES {
+            let error =
+                SdkError::from_response(methods::CREDENTIALS_GET, &json!({ "code": number }));
+            assert_eq!(error.code(), code);
+            assert_eq!(error.message(), "lithe/host/credentials/get failed.");
+        }
+        let later = SdkError::from_response(
+            methods::CREDENTIALS_GET,
+            &json!({ "code": -32050, "message": "x", "data": { "details": ["not", "an", "object"] } }),
+        );
+        assert_eq!(later.code(), "plugin.host.failed");
+        assert_eq!(later.details(), None);
+        let other = SdkError::from_response(methods::FUNCTION_REGISTER, &json!({ "code": -32602 }));
+        assert_eq!(other.code(), "sdk.host.error");
     }
 
     #[test]
