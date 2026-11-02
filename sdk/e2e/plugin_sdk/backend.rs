@@ -38,6 +38,12 @@ pub fn run_backend_scenario(package: &Path) {
         plan["backend"]["hostServices"],
         json!([
             "credentials",
+            "lithe/host/terminal/close",
+            "lithe/host/terminal/create",
+            "lithe/host/terminal/dispose",
+            "lithe/host/terminal/onExit",
+            "lithe/host/terminal/reopen",
+            "lithe/host/terminal/show",
             "lithe/host/window/showError",
             "lithe/host/window/showInformation",
             "lithe/host/window/showWarning",
@@ -59,6 +65,7 @@ pub fn run_backend_scenario(package: &Path) {
             "secret.check",
             "secret.forget",
             "secret.remember",
+            "terminal.cycle",
             "work.wait"
         ]
     );
@@ -171,6 +178,7 @@ pub fn run_backend_scenario(package: &Path) {
     wait_for_file(&mut session, &state.join("cancelled"));
 
     run_host_services(&mut session);
+    run_terminal_services(&mut session);
 
     // State survives a restart. Without credentials.store the host grants no
     // host service, and Core refuses the request before the host sees it.
@@ -378,6 +386,53 @@ fn run_host_services(session: &mut Session) {
                 && event["method"] == "lithe/host/getCapabilities"),
         "the host was asked for capabilities"
     );
+}
+
+/// This scenario plays the native host at the protocol boundary. Real PTY
+/// rendering and history restoration are covered by Lithe's native tests.
+fn run_terminal_services(session: &mut Session) {
+    invoke_in(session, "terminal-cycle", "terminal.cycle", &workspace());
+    let create = take_host_request(session, "lithe/host/terminal/create");
+    assert_eq!(create["result"]["params"]["retainedContextBytes"], 4096);
+    assert_eq!(
+        create["result"]["params"]["arguments"],
+        json!(["--interactive"])
+    );
+    respond(
+        session,
+        &create,
+        Ok(json!({ "terminalID":"terminal-1", "generation":1 })),
+    );
+    let listen = take_host_request(session, "lithe/host/terminal/onExit");
+    respond(
+        session,
+        &listen,
+        Ok(json!({ "subscriptionID":"terminal-sub" })),
+    );
+    let close = take_host_request(session, "lithe/host/terminal/close");
+    respond(session, &close, Ok(json!({ "retainedContextBytes":1024 })));
+    assert!(notify(
+        session,
+        "lithe/host/subscriptions/notify",
+        json!({
+            "subscriptionID":"terminal-sub", "sequence":1,
+            "event": { "type":"exit", "terminalID":"terminal-1", "generation":1, "exitCode":null, "reason":"closed" }
+        })
+    ));
+    let reopen = take_host_request(session, "lithe/host/terminal/reopen");
+    assert_eq!(reopen["result"]["params"]["terminalID"], "terminal-1");
+    respond(
+        session,
+        &reopen,
+        Ok(json!({ "terminalID":"terminal-1", "generation":2, "restoredContextBytes":1024 })),
+    );
+    let dispose = take_host_request(session, "lithe/host/terminal/dispose");
+    respond(session, &dispose, Ok(Value::Null));
+    let subscription = take_host_request(session, "lithe/host/subscriptions/dispose");
+    respond(session, &subscription, Ok(Value::Null));
+    let result = session.completion("terminal-cycle");
+    assert!(result.get("error").is_none(), "{result}");
+    assert_eq!(result["result"]["value"]["reopened"]["generation"], 2);
 }
 
 /// Invokes `function` as a page of the window showing `context` does.

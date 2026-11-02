@@ -327,6 +327,15 @@ export function createHost(channel, callSignal) {
     browser: Object.freeze({
       openExternal: scoped(HOST_METHODS.browserOpenExternal),
     }),
+    terminal: Object.freeze({
+      create: scoped(HOST_METHODS.terminalCreate),
+      show: scoped(HOST_METHODS.terminalShow),
+      close: scoped(HOST_METHODS.terminalClose),
+      reopen: scoped(HOST_METHODS.terminalReopen),
+      dispose: scoped(HOST_METHODS.terminalDispose),
+      onExit: async (context, terminalID, onEvent, options) =>
+        subscribe(HOST_METHODS.terminalOnExit, { context: contextReference(context), terminalID }, onEvent, options),
+    }),
     window: Object.freeze({
       showInformation: scoped(HOST_METHODS.windowShowInformation),
       showWarning: scoped(HOST_METHODS.windowShowWarning),

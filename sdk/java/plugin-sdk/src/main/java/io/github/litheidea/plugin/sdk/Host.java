@@ -189,6 +189,10 @@ public final class Host {
         return browser;
     }
 
+    public Terminal terminal() {
+        return new Terminal();
+    }
+
     public Window window() {
         return window;
     }
@@ -414,6 +418,36 @@ public final class Host {
         /** {@code params}: exactly one of an HTTP(S) {@code url} or an HTML {@code resource}. */
         public CompletableFuture<Map<String, Object>> openExternal(Map<String, ?> context, Map<String, ?> params) {
             return scoped(Protocol.HOST_BROWSER_OPEN_EXTERNAL, context, params);
+        }
+    }
+
+    /** Native terminals private to the backend session and workspace (protocol 3). */
+    public final class Terminal {
+        private Terminal() {}
+        /** Params: executable, arguments?, title?, cwd?, environment?, show?. */
+        public CompletableFuture<Map<String, Object>> create(Map<String, ?> context, Map<String, ?> params) {
+            return scoped(Protocol.HOST_TERMINAL_CREATE, context, params);
+        }
+        public CompletableFuture<Map<String, Object>> show(Map<String, ?> context, Map<String, ?> params) {
+            return scoped(Protocol.HOST_TERMINAL_SHOW, context, params);
+        }
+        public CompletableFuture<Map<String, Object>> close(Map<String, ?> context, Map<String, ?> params) {
+            return scoped(Protocol.HOST_TERMINAL_CLOSE, context, params);
+        }
+        /** Restarts the saved argv, restoring only the chosen plain display suffix. */
+        public CompletableFuture<Map<String, Object>> reopen(Map<String, ?> context, Map<String, ?> params) {
+            return scoped(Protocol.HOST_TERMINAL_REOPEN, context, params);
+        }
+        /** Forgets the handle and its retained display history. */
+        public CompletableFuture<Map<String, Object>> dispose(Map<String, ?> context, Map<String, ?> params) {
+            return scoped(Protocol.HOST_TERMINAL_DISPOSE, context, params);
+        }
+        /** Params: terminalID; disposing the subscription does not close the terminal. */
+        public CompletableFuture<Subscription> onExit(Map<String, ?> context, Map<String, ?> params) {
+            Map<String, Object> message;
+            try { message = withContext(context, params); }
+            catch (PluginSdkError error) { return failed(error); }
+            return channel.subscribe(Protocol.HOST_TERMINAL_ON_EXIT, message, null, scope);
         }
     }
 

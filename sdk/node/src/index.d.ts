@@ -265,6 +265,18 @@ export interface Host {
       { opened: true; source: 'web' | 'disk'; hasUnsavedChanges?: boolean }
     >;
   };
+  /** Permission `terminal.create`; only terminals owned by this backend session and context. */
+  readonly terminal: {
+    create: Scoped<{ executable: string; arguments?: string[]; title?: string; cwd?: WorkspaceResource;
+      environment?: Record<string, string | null>; show?: boolean; retainedContextBytes?: number }, { terminalID: string; generation: number }>;
+    show: Scoped<{ terminalID: string }, null>;
+    close: Scoped<{ terminalID: string; retainedContextBytes?: number }, { retainedContextBytes: number }>;
+    reopen: Scoped<{ terminalID: string; show?: boolean }, { terminalID: string; generation: number; restoredContextBytes: number }>;
+    dispose: Scoped<{ terminalID: string }, null>;
+    onExit(context: ContextReference, terminalID: string,
+      onEvent: (event: { type: 'exit'; terminalID: string; exitCode: number | null; reason: 'exited' | 'closed'; generation: number }, metadata: SubscriptionEventInfo) => void,
+      options?: HostRequestOptions): Promise<Subscription>;
+  };
   /** Permission `window.messages`. `selectedIndex` is zero-based, or null on dismissal. */
   readonly window: {
     showInformation: Scoped<{ text: string; actions?: string[] }, { selectedIndex: number | null }>;

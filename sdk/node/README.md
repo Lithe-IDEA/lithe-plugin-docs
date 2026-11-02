@@ -405,3 +405,11 @@ On cancellation the host removes staging; never recreate it or return document
 bytes. Protocols 8–10 retain their existing version numbers and handlers. Protocol
 7 is being revised in the unmerged development PR; contract mirrors are synced
 only after the host change merges. No SDK release or lock update is implied.
+
+## Native terminal API (unreleased)
+
+The SDK includes wrappers for plugin-owned native terminal create/show/close,
+reopen with bounded display history, disposal and exit subscriptions. These
+methods are discovered within protocol 3; they require a newer host and
+`terminal.create`, not a new protocol version. See
+[the native terminal guide](../../guides/native-terminals.md).
