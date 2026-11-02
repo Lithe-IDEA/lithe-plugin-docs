@@ -4,12 +4,14 @@
 // cancellation, error codes, and the `lithe/*` namespace -- and leaves the
 // plugin free to decide what its handlers do.
 //
-// Contracts: contract/v1/README.md ("Build providers", "Plugin functions"
-// and "VCS providers"), and Lithe's shared/contracts/vcs-provider-v1.md.
+// Contracts: contract/v1/README.md ("Build providers", "Plugin functions",
+// "Host services" and "VCS providers"), and Lithe's
+// shared/contracts/vcs-provider-v1.md.
 
 import { format } from 'node:util';
 import { encodeFrame, FrameDecoder, FramingError, MALFORMED } from './framing.mjs';
-import { PluginSdkError, toResponseError } from './errors.mjs';
+import { HostError, PluginSdkError, toResponseError } from './errors.mjs';
+import { createHost, HostChannel } from './host.mjs';
 import { killAllProcesses, runProcess } from './process.mjs';
 import {
   BUILD_VERSION,
@@ -17,6 +19,8 @@ import {
   boundedText,
   ERROR_CODES,
   FUNCTIONS_VERSION,
+  HOST_NOTIFICATIONS,
+  isContextReference,
   isFunctionId,
   isReservedMethod,
   isVcsId,
@@ -33,6 +37,9 @@ const BUILD_FORMATS = Object.freeze({
   [METHODS.buildDependencies]: 'litheDependencies',
   [METHODS.buildDiscoverTests]: 'litheTestDiscovery',
 });
+
+/** Host notifications the SDK routes itself; see `onCommand`, `onContextsChanged`, and `host.subscribe`. */
+const ROUTED_NOTIFICATIONS = Object.freeze(Object.values(HOST_NOTIFICATIONS));
 
 /** VCS capabilities that describe the VCS rather than a request it answers. */
 const VCS_TRAITS = Object.freeze(['push', 'staging']);
@@ -59,10 +66,15 @@ class Backend {
   #functions = new Map();
   #buildHandlers = new Map();
   #buildVersion = null;
+  #functionsVersion = null;
   /** The declared VCS provider: `{ id, handlers: Map<method, handler>, capabilities }`. */
   #vcs = null;
   #requestHandlers = new Map();
   #notificationHandlers = new Map();
+  #commandHandlers = new Map();
+  #contextsHandler = null;
+  #hostNotificationHandlers = new Map();
+  #channel;
   #initializeHooks = [];
   #shutdownHooks = [];
   /** `idle` → `listening` → `initializing` → `ready` → `shuttingDown` → `exited`. */
@@ -82,6 +94,13 @@ class Backend {
 
   /** Typed build-provider handlers (`lithe/build/*`). */
   build;
+
+  /**
+   * Host services (`lithe/host/*`) of plugin-function protocols 2 and 3,
+   * usable once the session is ready. A handler's `context.host` is the
+   * same object bound to its call.
+   */
+  host;
 
   constructor({ name = 'lithe-plugin-backend', version, capabilities = {} } = {}) {
     const experimental = capabilities.experimental ?? {};
@@ -107,6 +126,14 @@ class Backend {
       prepareRun: (handler) => this.#declareBuild(METHODS.buildPrepareRun, handler),
       prepareDebug: (handler) => this.#declareBuild(METHODS.buildPrepareDebug, handler),
     });
+    this.#channel = new HostChannel({
+      version: () => this.#functionsVersion ?? 0,
+      ready: () => this.#phase === 'ready',
+      send: (method, params) => this.#send(method, params),
+      notify: (method, params) => this.#write({ jsonrpc: '2.0', method, params }),
+      log: (...parts) => this.log(...parts),
+    });
+    this.host = createHost(this.#channel);
   }
 
   /** Protocols the host agreed to in `initialize`; all false before it. */
@@ -116,6 +143,9 @@ class Backend {
 
   /** Selected build protocol version, or null when unavailable. */
   get buildVersion() { return this.#buildVersion; }
+
+  /** Selected plugin-function protocol version (1-3), or null when unavailable. */
+  get functionsVersion() { return this.#functionsVersion; }
 
   /** The host's `initialize` params, or null before it arrives. */
   get initializeParams() {
@@ -199,6 +229,47 @@ class Backend {
   /** Handles a standard LSP notification. */
   onNotification(method, handler) {
     this.#declareHandler(this.#notificationHandlers, method, handler);
+    return this;
+  }
+
+  /**
+   * Handles `lithe/host/commands/didRun` for one of the plugin's commands
+   * (protocol 3). The handler gets `{ commandID, workspaceContext }`, the
+   * context of the window it ran in or null. It is an event: the host waits
+   * for no result.
+   */
+  onCommand(commandID, handler) {
+    if (typeof commandID !== 'string' || !/^[a-z0-9.-]{1,128}$/.test(commandID)) {
+      throw new PluginSdkError('sdk.command.invalidID', `Command ID ${JSON.stringify(commandID)} must be 1-128 of [a-z0-9.-].`);
+    }
+    if (typeof handler !== 'function') throw new TypeError('A command handler must be a function.');
+    this.#commandHandlers.set(commandID, handler);
+    return this;
+  }
+
+  /**
+   * Handles `lithe/host/workspace/didChangeContexts` (protocol 3) with
+   * `{ revision }`; call `host.workspace.listContexts()` for the contexts.
+   */
+  onContextsChanged(handler) {
+    if (typeof handler !== 'function') throw new TypeError('A handler must be a function.');
+    this.#contextsHandler = handler;
+    return this;
+  }
+
+  /**
+   * Handles a `lithe/host/*` notification a later host adds. Commands,
+   * context changes, and subscription events have their own APIs.
+   */
+  onHostNotification(method, handler) {
+    if (typeof method !== 'string' || !method.startsWith('lithe/host/')) {
+      throw new PluginSdkError('sdk.method.invalid', `${method} is not a host notification.`);
+    }
+    if (ROUTED_NOTIFICATIONS.includes(method)) {
+      throw new PluginSdkError('sdk.method.reserved', `${method} is routed by the SDK; use onCommand, onContextsChanged, or host.subscribe.`);
+    }
+    if (typeof handler !== 'function') throw new TypeError('A handler must be a function.');
+    this.#hostNotificationHandlers.set(method, handler);
     return this;
   }
 
@@ -306,6 +377,8 @@ class Backend {
         this.#phase = 'exited';
         this.#abortAll();
         killAllProcesses();
+        // Before the pending requests fail, so a freed slot starts nothing.
+        this.#channel.close();
         for (const pending of this.#outgoing.values()) {
           pending.reject(new PluginSdkError('sdk.session.closed', 'The session ended.'));
         }
@@ -404,10 +477,44 @@ class Backend {
       return;
     }
     if (this.#phase !== 'ready' || method === METHODS.initialized) return;
+    if (typeof method === 'string' && method.startsWith('lithe/host/')) {
+      this.#hostNotification(method, params);
+      return;
+    }
     const handler = this.#notificationHandlers.get(method);
     if (!handler) return;
     Promise.resolve()
       .then(() => handler(params))
+      .catch((error) => this.log(`Notification ${method} failed:`, error));
+  }
+
+  /**
+   * Routes a host notification. Core checked its shape and the session's
+   * grant; one this SDK does not know is ignored, as the contract asks.
+   */
+  #hostNotification(method, params) {
+    if ((this.#functionsVersion ?? 0) < 3 || !isObject(params)) return;
+    if (method === HOST_NOTIFICATIONS.subscriptionNotify) {
+      this.#channel.deliver(params);
+      return;
+    }
+    let handler;
+    let event = params;
+    if (method === HOST_NOTIFICATIONS.commandDidRun) {
+      handler = this.#commandHandlers.get(params.commandID);
+      event = { commandID: params.commandID, workspaceContext: isContextReference(params.context) ? params.context : null };
+      if (!handler) {
+        this.log(`No handler for command ${params.commandID}.`);
+        return;
+      }
+    } else if (method === HOST_NOTIFICATIONS.didChangeContexts) {
+      handler = this.#contextsHandler;
+    } else {
+      handler = this.#hostNotificationHandlers.get(method);
+    }
+    if (!handler) return;
+    Promise.resolve()
+      .then(() => handler(event))
       .catch((error) => this.log(`Notification ${method} failed:`, error));
   }
 
@@ -420,12 +527,12 @@ class Backend {
     this.#initializeParams = params;
     const offered = params.capabilities?.experimental ?? {};
     const offers = (entry, version) => Array.isArray(entry?.versions) && entry.versions.includes(version);
-    this.#buildVersion = this.#buildHandlers.size > 0
-      ? Array.from({ length: BUILD_VERSION }, (_, index) => BUILD_VERSION - index)
-        .find((version) => offers(offered.litheBuild, version)) ?? null
-      : null;
+    const highest = (entry, latest) => Array.from({ length: latest }, (_, index) => latest - index)
+      .find((version) => offers(entry, version)) ?? null;
+    this.#buildVersion = this.#buildHandlers.size > 0 ? highest(offered.litheBuild, BUILD_VERSION) : null;
+    this.#functionsVersion = highest(offered.litheFunctions, FUNCTIONS_VERSION);
     this.#negotiated = Object.freeze({
-      functions: offers(offered.litheFunctions, FUNCTIONS_VERSION),
+      functions: this.#functionsVersion !== null,
       build: this.#buildVersion !== null,
       vcs: this.#vcs !== null && offers(offered.litheVcs, VCS_VERSION),
     });
@@ -446,7 +553,7 @@ class Backend {
       return;
     }
     if (!this.#negotiated.functions && this.#functions.size > 0) {
-      this.log('The host did not offer litheFunctions version 1; functions stay unavailable.');
+      this.log(`The host did not offer a litheFunctions version from 1 to ${FUNCTIONS_VERSION}; functions stay unavailable.`);
     }
     const experimental = { ...(this.#capabilities.experimental ?? {}) };
     if (this.#negotiated.build) experimental.litheBuild = { version: this.#buildVersion };
@@ -457,7 +564,7 @@ class Backend {
     }
     if (this.#negotiated.functions) {
       experimental.litheFunctions = {
-        version: FUNCTIONS_VERSION,
+        version: this.#functionsVersion,
         functions: this.functionIDs.map((functionID) => ({ id: functionID })),
       };
     }
@@ -513,7 +620,7 @@ class Backend {
     } : context), (result) => buildResult(method, result), () => { reporting = false; });
   }
 
-  #invokeFunction(id, { functionID, operationID, params }) {
+  #invokeFunction(id, { functionID, operationID, params, context: workspaceContext }) {
     const handler = this.#negotiated.functions ? this.#functions.get(functionID) : undefined;
     if (!handler) {
       this.#respond(id, undefined, { code: ERROR_CODES.invalidParams, message: `Function ${functionID} is not registered.` });
@@ -530,7 +637,14 @@ class Backend {
     this.#run(
       id,
       functionID,
-      (context) => handler(params ?? {}, { ...context, functionID, operationID, progress }),
+      (context) => handler(params ?? {}, {
+        ...context,
+        functionID,
+        operationID,
+        // The page's window, from protocol 3; null for a call without one.
+        workspaceContext: isContextReference(workspaceContext) ? workspaceContext : null,
+        progress,
+      }),
       functionResult,
       () => {
         reporting = false;
@@ -558,6 +672,7 @@ class Backend {
         return running;
       },
       log: (...parts) => this.log(...parts),
+      host: createHost(this.#channel, signal),
     };
     Promise.resolve()
       .then(() => invoke(context))
@@ -688,11 +803,17 @@ class Backend {
   }
 
   #request(method, params) {
+    return this.#send(method, params).response;
+  }
+
+  /** Writes a request to the host; `response` settles with its answer. */
+  #send(method, params) {
     const id = `sdk-${this.#nextRequestId++}`;
-    return new Promise((resolve, reject) => {
+    const response = new Promise((resolve, reject) => {
       this.#outgoing.set(id, { resolve, reject, method });
       this.#write({ jsonrpc: '2.0', id, method, ...(params === undefined ? {} : { params }) });
     });
+    return { id, response };
   }
 
   #settleOutgoing({ id, result, error }) {
@@ -700,9 +821,7 @@ class Backend {
     if (!pending) return;
     this.#outgoing.delete(id);
     if (error) {
-      const failure = new PluginSdkError(error.data?.code ?? 'sdk.host.error', error.message ?? `${pending.method} failed.`);
-      failure.rpcCode = error.code;
-      pending.reject(failure);
+      pending.reject(HostError.fromResponse(pending.method, error));
     } else {
       pending.resolve(result ?? null);
     }
