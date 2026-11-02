@@ -10,7 +10,7 @@
 //!   without leaking details to the page (`fail.unexpectedly`).
 
 use lithe_plugin_sdk::{
-    sdk_codes, BackendHandle, Cancelled, Context, FunctionError, PluginError, SdkError, Value,
+    BackendHandle, Cancelled, Context, FunctionError, PluginError, SdkError, Value,
 };
 use serde_json::json;
 use std::fs;
@@ -204,11 +204,11 @@ fn secret(params: &Value) -> Result<&str, PluginError> {
         .ok_or_else(|| PluginError::new("sample.invalidParams", "\"secret\" must be a string."))
 }
 
-/// A host that offers no credential store, or a plugin installed without the
-/// `credentials.store` permission, is a state the page can explain; other
-/// failures stay internal.
+/// A host that offers no credential store (`plugin.host.unavailable`), or a
+/// plugin installed without the `credentials.store` permission, is a state
+/// the page can explain; other failures stay internal.
 fn credentials_failure(error: SdkError) -> FunctionError {
-    if error.code() == sdk_codes::NOT_NEGOTIATED || error.code().starts_with("plugin.host.") {
+    if error.code().starts_with("plugin.host.") {
         PluginError::new(
             "sample.credentialsUnavailable",
             "Lithe cannot store credentials for this plugin.",

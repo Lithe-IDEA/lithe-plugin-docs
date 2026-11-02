@@ -6,10 +6,13 @@
 //! stdio and implements, from
 //! [plugin contract v1](https://github.com/Lithe-IDEA/lithe-plugin-docs/blob/main/contract/v1/README.md):
 //!
-//! - **`litheFunctions` 1 and 2**: plugin functions with progress,
+//! - **`litheFunctions` 1 to 3**: plugin functions with progress,
 //!   cancellation, and registration at runtime;
-//! - **host services** of version 2: the plugin's own
-//!   [`Credentials`] in the platform's secret store.
+//! - **[`Host`] services** of versions 2 and 3: the plugin's own
+//!   [`Credentials`] in the platform's secret store from version 2; from
+//!   version 3 workspace contexts, files, documents, the editor, previews,
+//!   the browser, window messages, capability discovery, subscriptions, and
+//!   the commands and context changes the host notifies.
 //!
 //! The SDK owns the wire format, negotiation, cancellation, and error
 //! mapping; plugin code supplies handlers. Each call runs on a thread of its
@@ -23,10 +26,15 @@
 mod backend;
 mod error;
 mod framing;
+mod host;
 mod protocol;
 mod stdio;
 
-pub use backend::{Backend, BackendHandle, Cancellation, Context, Credentials, Initialize};
-pub use error::{sdk_codes, Cancelled, FunctionError, PluginError, SdkError};
-pub use protocol::{is_credential_key, is_function_id, is_plugin_error_code};
+pub use backend::{Backend, BackendHandle, Cancellation, Context, Initialize};
+pub use error::{sdk_codes, Cancelled, FunctionError, PluginError, SdkError, HOST_ERROR_CODES};
+pub use host::{
+    Browser, Credentials, Documents, Editor, Event, Host, Preview, Subscription, Subscriptions,
+    Window, Workspace, WorkspaceContext,
+};
+pub use protocol::{is_command_id, is_credential_key, is_function_id, is_plugin_error_code};
 pub use serde_json::Value;

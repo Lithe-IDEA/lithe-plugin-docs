@@ -12,10 +12,10 @@ use crate::error::{
     SdkError,
 };
 use crate::framing::{read_frame, write_frame, Frame};
+use crate::host::{Channel, Credentials, Host, Outcome, Outgoing, WorkspaceContext};
 use crate::protocol::{
-    bounded_text, error_codes, is_credential_key, is_function_id, methods, FUNCTIONS_VERSIONS,
-    HOST_SERVICES_VERSION, MAX_CREDENTIAL_SECRET_BYTES, MAX_FUNCTIONS, MAX_MESSAGE_BYTES,
-    MAX_RESULT_BYTES,
+    bounded_text, error_codes, is_command_id, is_function_id, methods, CONTEXT_VERSION,
+    FUNCTIONS_VERSIONS, MAX_FUNCTIONS, MAX_MESSAGE_BYTES, MAX_RESULT_BYTES,
 };
 use serde_json::{json, Map, Value};
 use std::any::Any;
@@ -25,19 +25,21 @@ use std::io::{self, BufReader, Read, Write};
 use std::panic::{catch_unwind, AssertUnwindSafe};
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
-use std::sync::{mpsc, Arc, Condvar, Mutex, MutexGuard, PoisonError};
+use std::sync::{Arc, Condvar, Mutex, MutexGuard, PoisonError};
 use std::thread;
 use std::time::Duration;
 
 type Handler = Arc<dyn Fn(Value, &Context) -> Result<Value, FunctionError> + Send + Sync>;
 type InitializeHook = Box<dyn FnMut(&mut Initialize) -> Result<(), FunctionError> + Send>;
 type ShutdownHook = Box<dyn FnMut() + Send>;
+type CommandHandler =
+    Arc<dyn Fn(&str, Option<WorkspaceContext>) -> Result<(), FunctionError> + Send + Sync>;
+type NotificationHandler = Arc<dyn Fn(Value) -> Result<(), FunctionError> + Send + Sync>;
 type Answer = Result<Value, Value>;
-type Outcome = Result<Value, SdkError>;
 
 /// `Idle` → `Listening` → `Initializing` → `Ready` → `ShuttingDown` → `Exited`.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-enum Phase {
+pub(crate) enum Phase {
     Idle,
     Listening,
     Initializing,
@@ -46,15 +48,16 @@ enum Phase {
     Exited,
 }
 
-struct State {
-    phase: Phase,
+pub(crate) struct State {
+    pub(crate) phase: Phase,
     functions: BTreeMap<String, Handler>,
     /// The negotiated plugin-function protocol version.
     functions_version: Option<u64>,
     /// Host requests being handled, by JSON-RPC ID.
     incoming: HashMap<String, Running>,
     /// Requests this backend sent to the host, by JSON-RPC ID.
-    outgoing: HashMap<String, (&'static str, mpsc::Sender<Outcome>)>,
+    pub(crate) outgoing: HashMap<String, Outgoing>,
+    pub(crate) channel: Channel,
 }
 
 struct Running {
@@ -63,17 +66,23 @@ struct Running {
 }
 
 /// Everything handler threads share with the session. Locks are taken in the
-/// order `registrations`, `state`, `output`, never the other way round.
-struct Shared {
+/// order `registrations`, `capabilities`, `state`, `output`, never the other
+/// way round.
+pub(crate) struct Shared {
     name: String,
-    state: Mutex<State>,
+    pub(crate) state: Mutex<State>,
     output: Mutex<Option<Box<dyn Write + Send>>>,
     /// Serializes register/unregister so the host sees them in call order.
     registrations: Mutex<()>,
-    next_request: AtomicU64,
+    pub(crate) next_request: AtomicU64,
+    /// Signalled when a host-request slot frees or a waiting request must
+    /// give up; waits on `state`.
+    pub(crate) slots: Condvar,
+    /// The session's `getCapabilities` answer.
+    pub(crate) capabilities: Mutex<Option<Value>>,
 }
 
-fn lock<T>(mutex: &Mutex<T>) -> MutexGuard<'_, T> {
+pub(crate) fn lock<T>(mutex: &Mutex<T>) -> MutexGuard<'_, T> {
     mutex.lock().unwrap_or_else(PoisonError::into_inner)
 }
 
@@ -110,6 +119,9 @@ pub struct Backend {
     version: Option<String>,
     initialize_hooks: Vec<InitializeHook>,
     shutdown_hooks: Vec<ShutdownHook>,
+    commands: HashMap<String, CommandHandler>,
+    contexts_changed: Option<NotificationHandler>,
+    host_notifications: HashMap<String, NotificationHandler>,
 }
 
 impl Backend {
@@ -124,14 +136,20 @@ impl Backend {
                     functions_version: None,
                     incoming: HashMap::new(),
                     outgoing: HashMap::new(),
+                    channel: Channel::default(),
                 }),
                 output: Mutex::new(None),
                 registrations: Mutex::new(()),
                 next_request: AtomicU64::new(1),
+                slots: Condvar::new(),
+                capabilities: Mutex::new(None),
             }),
             version: None,
             initialize_hooks: Vec::new(),
             shutdown_hooks: Vec::new(),
+            commands: HashMap::new(),
+            contexts_changed: None,
+            host_notifications: HashMap::new(),
         }
     }
 
@@ -175,6 +193,73 @@ impl Backend {
     {
         self.shutdown_hooks.push(Box::new(hook));
         self
+    }
+
+    /// Handles `lithe/host/commands/didRun` for one of the plugin's commands
+    /// (protocol 3), with the workspace context the command ran in. It is an
+    /// event: the host waits for no result, and a failure is only logged.
+    /// Each run has a thread of its own. A later handler for the same ID
+    /// replaces the earlier one.
+    ///
+    /// `command_id` is the command's ID from the manifest, 1-128 of
+    /// `[a-z0-9.-]`.
+    pub fn on_command<F>(&mut self, command_id: &str, handler: F) -> Result<&mut Self, SdkError>
+    where
+        F: Fn(&str, Option<WorkspaceContext>) -> Result<(), FunctionError> + Send + Sync + 'static,
+    {
+        if !is_command_id(command_id) {
+            return Err(SdkError::new(
+                "sdk.command.invalidID",
+                format!("Command ID {command_id:?} must be 1-128 of [a-z0-9.-]."),
+            ));
+        }
+        self.commands
+            .insert(command_id.to_string(), Arc::new(handler));
+        Ok(self)
+    }
+
+    /// Handles `lithe/host/workspace/didChangeContexts` (protocol 3) with
+    /// `{ revision }`; call `host().workspace().list_contexts()` for the
+    /// contexts.
+    pub fn on_contexts_changed<F>(&mut self, handler: F) -> &mut Self
+    where
+        F: Fn(Value) -> Result<(), FunctionError> + Send + Sync + 'static,
+    {
+        self.contexts_changed = Some(Arc::new(handler));
+        self
+    }
+
+    /// Handles a `lithe/host/*` notification a later host adds. Commands,
+    /// context changes, and subscription events have their own APIs.
+    pub fn on_host_notification<F>(
+        &mut self,
+        method: &str,
+        handler: F,
+    ) -> Result<&mut Self, SdkError>
+    where
+        F: Fn(Value) -> Result<(), FunctionError> + Send + Sync + 'static,
+    {
+        if !method.starts_with(methods::HOST_PREFIX) {
+            return Err(SdkError::new(
+                "sdk.method.invalid",
+                format!("{method} is not a host notification."),
+            ));
+        }
+        if [
+            methods::DID_CHANGE_CONTEXTS,
+            methods::SUBSCRIPTION_NOTIFY,
+            methods::COMMAND_DID_RUN,
+        ]
+        .contains(&method)
+        {
+            return Err(SdkError::new(
+                "sdk.method.reserved",
+                format!("{method} is routed by the SDK; use on_command, on_contexts_changed, or Host::subscribe."),
+            ));
+        }
+        self.host_notifications
+            .insert(method.to_string(), Arc::new(handler));
+        Ok(self)
     }
 
     /// A handle for other threads: runtime registration, host services, and
@@ -304,8 +389,46 @@ impl Backend {
                 }
                 None
             }
+            method if method.starts_with(methods::HOST_PREFIX) => {
+                self.host_notification(method, params);
+                None
+            }
             // `initialized` and anything else a plugin backend is not sent.
             _ => None,
+        }
+    }
+
+    /// Routes a host notification. Core checked its shape and the session's
+    /// grant; one this SDK does not know is ignored, as the contract asks.
+    fn host_notification(&self, method: &str, params: &Value) {
+        if self.shared.functions_version() < Some(CONTEXT_VERSION) || !params.is_object() {
+            return;
+        }
+        match method {
+            methods::SUBSCRIPTION_NOTIFY => self.shared.deliver(params),
+            methods::COMMAND_DID_RUN => {
+                let command_id = params["commandID"].as_str().unwrap_or_default();
+                let Some(handler) = self.commands.get(command_id).cloned() else {
+                    return self
+                        .shared
+                        .log(format_args!("No handler for command {command_id}."));
+                };
+                let command_id = command_id.to_string();
+                let context = WorkspaceContext::from_reference(&params["context"]);
+                self.shared
+                    .notify_handler(method, move || handler(&command_id, context));
+            }
+            _ => {
+                let handler = if method == methods::DID_CHANGE_CONTEXTS {
+                    self.contexts_changed.as_ref()
+                } else {
+                    self.host_notifications.get(method)
+                };
+                if let Some(handler) = handler.cloned() {
+                    let params = params.clone();
+                    self.shared.notify_handler(method, move || handler(params));
+                }
+            }
         }
     }
 
@@ -374,7 +497,7 @@ impl Backend {
                 );
             }
             None if !state.functions.is_empty() => self.shared.log(
-                "The host did not offer litheFunctions version 1 or 2; functions stay unavailable.",
+                "The host did not offer a litheFunctions version from 1 to 3; functions stay unavailable.",
             ),
             None => {}
         }
@@ -451,11 +574,11 @@ impl Shared {
         lock(&self.state).phase
     }
 
-    fn functions_version(&self) -> Option<u64> {
+    pub(crate) fn functions_version(&self) -> Option<u64> {
         lock(&self.state).functions_version
     }
 
-    fn log(&self, message: impl Display) {
+    pub(crate) fn log(&self, message: impl Display) {
         let _ = writeln!(io::stderr(), "[{}] {message}", self.name);
     }
 
@@ -463,8 +586,7 @@ impl Shared {
         let running = {
             let mut state = lock(&self.state);
             state.phase = Phase::Exited;
-            // Dropping the senders ends every host request still waiting.
-            state.outgoing.clear();
+            self.close_channel(&mut state);
             state.running_cancellations()
         };
         running.iter().for_each(Cancellation::cancel);
@@ -472,7 +594,33 @@ impl Shared {
         code
     }
 
-    fn write(&self, message: &Value) {
+    /// Runs a notification handler off the reader thread; a failure is
+    /// logged.
+    fn notify_handler(
+        self: &Arc<Self>,
+        method: &str,
+        handler: impl FnOnce() -> Result<(), FunctionError> + Send + 'static,
+    ) {
+        let shared = Arc::clone(self);
+        let method = method.to_string();
+        let spawned = thread::Builder::new()
+            .name(format!("lithe-notification-{method}"))
+            .spawn(move || match catch_unwind(AssertUnwindSafe(handler)) {
+                Ok(Ok(())) => {}
+                Ok(Err(error)) => shared.log(format_args!("Notification {method} failed: {error}")),
+                Err(panic) => shared.log(format_args!(
+                    "Notification {method} panicked: {}",
+                    panic_message(&panic)
+                )),
+            });
+        if let Err(error) = spawned {
+            self.log(format_args!(
+                "A notification handler could not start: {error}"
+            ));
+        }
+    }
+
+    pub(crate) fn write(&self, message: &Value) {
         let mut output = lock(&self.output);
         let Some(writer) = output.as_mut() else {
             return;
@@ -506,6 +654,10 @@ impl Shared {
         let cancellation = Cancellation::new();
         let handler = {
             let mut state = lock(&shared.state);
+            let workspace_context = state
+                .functions_version
+                .filter(|version| *version >= CONTEXT_VERSION)
+                .and_then(|_| WorkspaceContext::from_reference(&params["context"]));
             let handler = state
                 .functions_version
                 .and_then(|_| state.functions.get(&function_id).cloned());
@@ -518,9 +670,9 @@ impl Shared {
                     },
                 );
             }
-            handler
+            handler.map(|handler| (handler, workspace_context))
         };
-        let Some(handler) = handler else {
+        let Some((handler, workspace_context)) = handler else {
             return shared.respond(
                 &id,
                 Err(rpc_error(
@@ -535,15 +687,23 @@ impl Shared {
         let spawned = thread::Builder::new()
             .name(format!("lithe-function-{function_id}"))
             .spawn(move || {
+                // Ends host requests the call left behind, on clones of its host.
+                let ended = Cancellation::new();
                 let context = Context {
                     shared: Arc::clone(&worker),
                     function_id,
                     operation_id,
+                    host: Host::new(
+                        Arc::clone(&worker),
+                        vec![cancellation.clone(), ended.clone()],
+                    ),
                     cancellation,
+                    workspace_context,
                     reporting: AtomicBool::new(true),
                 };
                 let outcome = catch_unwind(AssertUnwindSafe(|| handler(call_params, &context)));
                 context.reporting.store(false, Ordering::SeqCst);
+                ended.cancel();
                 let answer = worker.function_answer(&context, outcome);
                 lock(&worker.state).incoming.remove(&thread_key);
                 worker.respond(&thread_id, answer);
@@ -600,68 +760,9 @@ impl Shared {
         }
     }
 
-    /// Sends a request to the host and waits for its answer, the end of the
-    /// session, or the cancellation of the call that sent it.
-    fn request(
-        &self,
-        method: &'static str,
-        params: Value,
-        cancellation: Option<&Cancellation>,
-    ) -> Outcome {
-        let id = format!("sdk-{}", self.next_request.fetch_add(1, Ordering::Relaxed));
-        let (sender, receiver) = mpsc::channel();
-        {
-            let mut state = lock(&self.state);
-            match state.phase {
-                Phase::Ready => {}
-                Phase::Exited => {
-                    return Err(SdkError::new(
-                        sdk_codes::SESSION_CLOSED,
-                        "The session ended.",
-                    ))
-                }
-                _ => {
-                    return Err(SdkError::new(
-                        "sdk.session.notReady",
-                        "The session is not ready for requests.",
-                    ))
-                }
-            }
-            state.outgoing.insert(id.clone(), (method, sender.clone()));
-        }
-        if let Some(cancellation) = cancellation {
-            cancellation.on_cancel(move || {
-                let _ = sender.send(Err(SdkError::new(
-                    sdk_codes::CALL_CANCELLED,
-                    "The call was cancelled.",
-                )));
-            });
-        } else {
-            drop(sender);
-        }
-        self.write(&json!({ "jsonrpc": "2.0", "id": id, "method": method, "params": params }));
-        let outcome = receiver.recv().unwrap_or_else(|_| {
-            Err(SdkError::new(
-                sdk_codes::SESSION_CLOSED,
-                "The session ended.",
-            ))
-        });
-        lock(&self.state).outgoing.remove(&id);
-        outcome
-    }
-
-    fn settle_outgoing(&self, id: &Value, message: &Map<String, Value>) {
-        let Some(id) = id.as_str() else {
-            return;
-        };
-        let Some((method, sender)) = lock(&self.state).outgoing.remove(id) else {
-            return;
-        };
-        let outcome = match message.get("error").filter(|error| !error.is_null()) {
-            Some(error) => Err(SdkError::from_response(method, error)),
-            None => Ok(message.get("result").cloned().unwrap_or(Value::Null)),
-        };
-        let _ = sender.send(outcome);
+    /// A `lithe/function/*` request; it takes no host-request slot.
+    fn request(self: &Arc<Self>, method: &str, params: Value) -> Outcome {
+        self.exchange(method, params, false, &[], None)
     }
 }
 
@@ -782,6 +883,8 @@ pub struct Context {
     function_id: String,
     operation_id: Value,
     cancellation: Cancellation,
+    host: Host,
+    workspace_context: Option<WorkspaceContext>,
     reporting: AtomicBool,
 }
 
@@ -821,14 +924,24 @@ impl Context {
         );
     }
 
-    /// The plugin's credentials. A request still waiting for the host when
-    /// the call is cancelled fails with `sdk.call.cancelled`, which `?`
-    /// turns into a cancelled answer.
+    /// Host services for this call. A request still waiting for the host
+    /// when the call is cancelled or ends fails with `sdk.call.cancelled`,
+    /// which `?` turns into a cancelled answer, and from protocol 3 the SDK
+    /// cancels it on the wire.
+    pub fn host(&self) -> &Host {
+        &self.host
+    }
+
+    /// The `{ contextID, generation }` of the window the call came from
+    /// (protocol 3); `None` for calls without one, such as from the plugin's
+    /// own UI, and before protocol 3.
+    pub fn workspace_context(&self) -> Option<&WorkspaceContext> {
+        self.workspace_context.as_ref()
+    }
+
+    /// `host().credentials()`.
     pub fn credentials(&self) -> Credentials {
-        Credentials {
-            shared: Arc::clone(&self.shared),
-            cancellation: Some(self.cancellation.clone()),
-        }
+        self.host.credentials()
     }
 
     pub fn backend(&self) -> BackendHandle {
@@ -878,7 +991,6 @@ impl BackendHandle {
         let registered = self.shared.request(
             methods::FUNCTION_REGISTER,
             json!({ "functions": [{ "id": id }] }),
-            None,
         );
         if registered.is_err() {
             lock(&self.shared.state).functions.remove(id);
@@ -903,7 +1015,7 @@ impl BackendHandle {
             }
         }
         self.shared
-            .request(methods::FUNCTION_UNREGISTER, json!({ "ids": [id] }), None)?;
+            .request(methods::FUNCTION_UNREGISTER, json!({ "ids": [id] }))?;
         let running: Vec<_> = {
             let mut state = lock(&self.shared.state);
             state.functions.remove(id);
@@ -918,12 +1030,15 @@ impl BackendHandle {
         Ok(())
     }
 
-    /// The plugin's credentials, for work outside a function call.
+    /// Host services, for work outside a function call; usable once the
+    /// session is ready.
+    pub fn host(&self) -> Host {
+        Host::new(Arc::clone(&self.shared), Vec::new())
+    }
+
+    /// `host().credentials()`.
     pub fn credentials(&self) -> Credentials {
-        Credentials {
-            shared: Arc::clone(&self.shared),
-            cancellation: None,
-        }
+        self.host().credentials()
     }
 
     /// Writes a diagnostic line to stderr, which the host keeps in its log.
@@ -932,74 +1047,8 @@ impl BackendHandle {
     }
 }
 
-/// The host's `credentials` service (plugin-function protocol 2): secrets
-/// private to this plugin, kept in the platform's secret store, never in
-/// `${stateDir}`. It needs the `credentials.store` permission; without it
-/// every request fails with `plugin.host.permissionDenied`.
-pub struct Credentials {
-    shared: Arc<Shared>,
-    cancellation: Option<Cancellation>,
-}
-
-impl Credentials {
-    /// The secret stored under `key`, or `None`.
-    pub fn get(&self, key: &str) -> Result<Option<String>, SdkError> {
-        let result = self.request(methods::CREDENTIALS_GET, key, json!({ "key": key }))?;
-        match &result["secret"] {
-            Value::String(secret) => Ok(Some(secret.clone())),
-            Value::Null => Ok(None),
-            _ => Err(SdkError::new(
-                "sdk.host.invalidResult",
-                "The host answered without a secret.",
-            )),
-        }
-    }
-
-    /// Stores `secret` (at most 16 KiB) under `key`, replacing any value.
-    pub fn set(&self, key: &str, secret: &str) -> Result<(), SdkError> {
-        if secret.len() > MAX_CREDENTIAL_SECRET_BYTES {
-            return Err(SdkError::new(
-                "sdk.credentials.invalidSecret",
-                format!("A secret is at most {MAX_CREDENTIAL_SECRET_BYTES} bytes."),
-            ));
-        }
-        self.request(
-            methods::CREDENTIALS_SET,
-            key,
-            json!({ "key": key, "secret": secret }),
-        )
-        .map(drop)
-    }
-
-    /// Removes the secret under `key`; succeeds when nothing was stored.
-    pub fn delete(&self, key: &str) -> Result<(), SdkError> {
-        self.request(methods::CREDENTIALS_DELETE, key, json!({ "key": key }))
-            .map(drop)
-    }
-
-    fn request(&self, method: &'static str, key: &str, params: Value) -> Outcome {
-        if !is_credential_key(key) {
-            return Err(SdkError::new(
-                "sdk.credentials.invalidKey",
-                "A credential key is 1-128 ASCII letters, digits, \".\", \"_\", \":\", or \"-\".",
-            ));
-        }
-        if self
-            .shared
-            .functions_version()
-            .is_none_or(|version| version < HOST_SERVICES_VERSION)
-        {
-            return Err(SdkError::new(
-                sdk_codes::NOT_NEGOTIATED,
-                "The host did not negotiate plugin-function protocol 2, which offers credentials.",
-            ));
-        }
-        self.shared
-            .request(method, params, self.cancellation.as_ref())
-    }
-}
-
-/// The cancellation of one call. Clones observe the same call.
+/// The cancellation of one call, or of work a plugin may stop for its own
+/// reasons (see [`Host::with_cancellation`]). Clones observe the same token.
 #[derive(Clone)]
 pub struct Cancellation(Arc<CancellationInner>);
 
@@ -1010,14 +1059,22 @@ struct CancellationInner {
 
 struct CancellationState {
     cancelled: bool,
-    callbacks: Vec<Box<dyn FnOnce() + Send>>,
+    next_watch: u64,
+    callbacks: Vec<(u64, Box<dyn FnOnce() + Send>)>,
+}
+
+impl Default for Cancellation {
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 impl Cancellation {
-    fn new() -> Self {
+    pub fn new() -> Self {
         Self(Arc::new(CancellationInner {
             state: Mutex::new(CancellationState {
                 cancelled: false,
+                next_watch: 0,
                 callbacks: Vec::new(),
             }),
             changed: Condvar::new(),
@@ -1053,16 +1110,11 @@ impl Cancellation {
     /// it already is: for example to cancel a query a driver is running.
     /// The callback runs on the thread that cancels, so it must not block.
     pub fn on_cancel(&self, callback: impl FnOnce() + Send + 'static) {
-        let mut state = lock(&self.0.state);
-        if state.cancelled {
-            drop(state);
-            callback();
-        } else {
-            state.callbacks.push(Box::new(callback));
-        }
+        let _ = self.watch(callback);
     }
 
-    pub(crate) fn cancel(&self) {
+    /// Cancels: wakes waiters and runs the callbacks, once.
+    pub fn cancel(&self) {
         let callbacks = {
             let mut state = lock(&self.0.state);
             if state.cancelled {
@@ -1072,15 +1124,38 @@ impl Cancellation {
             std::mem::take(&mut state.callbacks)
         };
         self.0.changed.notify_all();
-        for callback in callbacks {
+        for (_, callback) in callbacks {
             callback();
         }
+    }
+
+    /// Like [`on_cancel`](Self::on_cancel), but removable with
+    /// [`unwatch`](Self::unwatch); `None` when already cancelled, after
+    /// running `callback`.
+    pub(crate) fn watch(&self, callback: impl FnOnce() + Send + 'static) -> Option<u64> {
+        let mut state = lock(&self.0.state);
+        if state.cancelled {
+            drop(state);
+            callback();
+            return None;
+        }
+        let watch = state.next_watch;
+        state.next_watch += 1;
+        state.callbacks.push((watch, Box::new(callback)));
+        Some(watch)
+    }
+
+    pub(crate) fn unwatch(&self, watch: u64) {
+        lock(&self.0.state)
+            .callbacks
+            .retain(|(other, _)| *other != watch);
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::sync::mpsc;
 
     #[test]
     fn file_uris_become_paths() {
