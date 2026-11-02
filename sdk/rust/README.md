@@ -62,9 +62,11 @@ const { value } = await lithe.request('functions.invoke', { function: 'connectio
 
 [`examples/sample-backend`](examples/sample-backend) is a complete plugin:
 the manifest, a web page, notes kept in `${stateDir}` with progress, a
-function registered at runtime, a secret in the credential store, and
-cancellation. `node scripts/sdk-e2e.mjs` drives it through a real Lithe Core
-session with the scenario in
+function registered at runtime, a secret in the credential store,
+cancellation, a watch on the page's workspace, a command answered with a
+message in its window, and a handler for workspace changes.
+`node scripts/sdk-e2e.mjs` drives it through a real Lithe Core session with
+the scenario in
 [`sdk/e2e/plugin_sdk/backend.rs`](../e2e/plugin_sdk/backend.rs).
 
 ## Getting the SDK

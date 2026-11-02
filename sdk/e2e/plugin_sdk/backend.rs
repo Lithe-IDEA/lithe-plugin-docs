@@ -6,8 +6,9 @@
 //! services, and answers Core's `hostRequest` events from an in-memory
 //! credential store the way the macOS host answers them from the Keychain.
 //! The scenario drives functions with progress, a plugin failure, an
-//! unexpected failure, cancellation, runtime registration, credentials, and
-//! state across a restart, where the backend is granted no host service.
+//! unexpected failure, cancellation, runtime registration, credentials, the
+//! host services of protocol 3, and state across a restart, where the
+//! backend is granted no host service.
 
 use super::{core, listing, Fixture, Session};
 use serde_json::{json, Value};
@@ -33,7 +34,17 @@ pub fn run_backend_scenario(package: &Path) {
     let fixture = Fixture::new("backend");
     let state = fixture.root.join("state");
     let plan = launch_plan(&manifest, package, &state);
-    assert_eq!(plan["backend"]["hostServices"], json!(["credentials"]));
+    assert_eq!(
+        plan["backend"]["hostServices"],
+        json!([
+            "credentials",
+            "lithe/host/window/showError",
+            "lithe/host/window/showInformation",
+            "lithe/host/window/showWarning",
+            "lithe/host/workspace/watch",
+            "workspace"
+        ])
+    );
     assert_eq!(plan["requiredDirectories"], json!(["state"]));
     fs::create_dir_all(&state).expect("host state directory");
 
@@ -42,6 +53,7 @@ pub fn run_backend_scenario(package: &Path) {
         session.functions(),
         [
             "fail.unexpectedly",
+            "files.nextChange",
             "note.read",
             "note.save",
             "secret.check",
@@ -158,6 +170,8 @@ pub fn run_backend_scenario(package: &Path) {
     );
     wait_for_file(&mut session, &state.join("cancelled"));
 
+    run_host_services(&mut session);
+
     // State survives a restart. Without credentials.store the host grants no
     // host service, and Core refuses the request before the host sees it.
     session.stop();
@@ -178,6 +192,19 @@ pub fn run_backend_scenario(package: &Path) {
     assert_eq!(
         refused["error"]["pluginErrorCode"], "sample.credentialsUnavailable",
         "{refused}"
+    );
+    // The capabilities Core reports leave out the watch, so the sample
+    // refuses before asking the host.
+    invoke_in(
+        &restarted,
+        "watch-ungranted",
+        "files.nextChange",
+        &workspace(),
+    );
+    let unwatched = restarted.completion("watch-ungranted");
+    assert_eq!(
+        unwatched["error"]["pluginErrorCode"], "sample.watchUnavailable",
+        "{unwatched}"
     );
     assert!(
         !restarted
@@ -207,6 +234,199 @@ pub fn run_backend_scenario(package: &Path) {
         left,
         BTreeSet::from(["cancelled".to_string(), "waiting".to_string()])
     );
+}
+
+/// The workspace context of the window the scenario's pages and command
+/// run in.
+fn workspace() -> Value {
+    json!({ "contextID": "w-sample", "generation": 1 })
+}
+
+/// Protocol 3 through Core: a call's workspace context, capability discovery
+/// Core answers itself, a file watch whose event arrives as a host
+/// notification, a typed host failure, a cancelled call cancelling its host
+/// request on the wire, and notifications whose handlers send host requests
+/// of their own.
+fn run_host_services(session: &mut Session) {
+    let context = workspace();
+    let folders = json!({
+        "folders": [{ "rootID": "r-sample", "name": "orders", "path": "/work/orders" }]
+    });
+
+    // Without a context the sample asks the host nothing.
+    let nowhere = session.call("watch-nowhere", "files.nextChange", json!({}));
+    assert_eq!(
+        nowhere["error"]["pluginErrorCode"], "sample.noWorkspace",
+        "{nowhere}"
+    );
+
+    // The watch's event reaches the call through subscriptions/notify.
+    invoke_in(session, "watch", "files.nextChange", &context);
+    let request = take_host_request(session, "lithe/host/workspace/getFolders");
+    assert_eq!(request["result"]["params"], json!({ "context": context }));
+    respond(session, &request, Ok(folders.clone()));
+    let request = take_host_request(session, "lithe/host/workspace/watch");
+    assert_eq!(
+        request["result"]["params"],
+        json!({
+            "context": context,
+            "resource": { "rootID": "r-sample", "path": "" },
+            "recursive": true
+        })
+    );
+    respond(
+        session,
+        &request,
+        Ok(json!({ "subscriptionID": "watch-1" })),
+    );
+    assert!(notify(
+        session,
+        "lithe/host/subscriptions/notify",
+        json!({
+            "subscriptionID": "watch-1",
+            "sequence": 1,
+            "event": { "rootID": "r-sample", "changedPaths": ["notes.txt"], "requiresRescan": false }
+        })
+    ));
+    let request = take_host_request(session, "lithe/host/subscriptions/dispose");
+    assert_eq!(
+        request["result"]["params"],
+        json!({ "subscriptionID": "watch-1" })
+    );
+    respond(session, &request, Ok(Value::Null));
+    let changed = session.completion("watch");
+    assert_eq!(
+        changed["result"]["value"],
+        json!({ "changedPaths": ["notes.txt"] }),
+        "{changed}"
+    );
+
+    // A host failure keeps its code, and the sample turns it into its own.
+    invoke_in(session, "watch-stale", "files.nextChange", &context);
+    let request = take_host_request(session, "lithe/host/workspace/getFolders");
+    respond(
+        session,
+        &request,
+        Err(json!({ "message": "The workspace changed.", "code": "plugin.host.contextExpired" })),
+    );
+    let stale = session.completion("watch-stale");
+    assert_eq!(
+        stale["error"]["pluginErrorCode"], "sample.workspaceChanged",
+        "{stale}"
+    );
+
+    // Cancelling the call cancels its unanswered host request on the wire.
+    invoke_in(session, "watch-cancel", "files.nextChange", &context);
+    let request = take_host_request(session, "lithe/host/workspace/getFolders");
+    respond(session, &request, Ok(folders.clone()));
+    let pending = take_host_request(session, "lithe/host/workspace/watch");
+    core(
+        "lsp.cancelOperation",
+        json!({ "sessionId": session.id, "operationId": "watch-cancel" }),
+    );
+    assert_eq!(
+        session.completion("watch-cancel")["error"]["code"],
+        "requestCancelled"
+    );
+    let cancelled = pending["result"]["hostRequestID"].clone();
+    session.await_event("the watch request to be cancelled", |event| {
+        event["type"] == "hostRequestCancelled" && event["result"]["hostRequestID"] == cancelled
+    });
+
+    // Notifications reach their handlers, which ask the host for more.
+    assert!(notify(
+        session,
+        "lithe/host/workspace/didChangeContexts",
+        json!({ "revision": 2 })
+    ));
+    let request = take_host_request(session, "lithe/host/workspace/listContexts");
+    respond(
+        session,
+        &request,
+        Ok(json!({
+            "revision": 2,
+            "contexts": [{
+                "contextID": "w-sample",
+                "generation": 1,
+                "name": "orders",
+                "authority": { "kind": "local" },
+                "folders": folders["folders"]
+            }]
+        })),
+    );
+    assert!(notify(
+        session,
+        "lithe/host/commands/didRun",
+        json!({ "commandID": "org.example.sample-backend.greet", "context": context })
+    ));
+    let request = take_host_request(session, "lithe/host/workspace/getFolders");
+    assert_eq!(request["result"]["params"], json!({ "context": context }));
+    respond(session, &request, Ok(folders));
+    let request = take_host_request(session, "lithe/host/window/showInformation");
+    assert_eq!(
+        request["result"]["params"],
+        json!({ "context": context, "text": "Sample Backend sees orders." })
+    );
+    respond(session, &request, Ok(json!({ "selectedIndex": null })));
+
+    // Core answered capability discovery without the host.
+    assert!(
+        !session
+            .events
+            .iter()
+            .any(|event| event["type"] == "hostRequest"
+                && event["method"] == "lithe/host/getCapabilities"),
+        "the host was asked for capabilities"
+    );
+}
+
+/// Invokes `function` as a page of the window showing `context` does.
+fn invoke_in(session: &Session, operation: &str, function: &str, context: &Value) {
+    core(
+        "lsp.functionRequest",
+        json!({
+            "sessionId": session.id,
+            "operationId": operation,
+            "function": { "pluginID": session.plugin_id, "functionID": function },
+            "params": {},
+            "context": context,
+        }),
+    );
+}
+
+/// Waits for a `hostRequest` for `method` and takes it from the events, so
+/// the next wait finds the next one.
+fn take_host_request(session: &mut Session, method: &str) -> Value {
+    let request = session.await_event(&format!("a {method} host request"), |event| {
+        event["type"] == "hostRequest" && event["method"] == method
+    });
+    let id = request["result"]["hostRequestID"].clone();
+    session.events.retain(|event| {
+        !(event["type"] == "hostRequest" && event["result"]["hostRequestID"] == id)
+    });
+    request
+}
+
+/// Answers a host request as the host does: its result, or its failure.
+fn respond(session: &Session, request: &Value, outcome: Result<Value, Value>) {
+    let mut response = json!({
+        "sessionId": session.id,
+        "hostRequestID": request["result"]["hostRequestID"],
+    });
+    match outcome {
+        Ok(result) => response["result"] = result,
+        Err(error) => response["error"] = error,
+    }
+    core("lsp.hostResponse", response);
+}
+
+/// Sends a host notification through Core; whether it reached the backend.
+fn notify(session: &Session, method: &str, params: Value) -> bool {
+    core(
+        "lsp.hostNotify",
+        json!({ "sessionId": session.id, "method": method, "params": params }),
+    )["delivered"]
+        == true
 }
 
 fn launch_plan(manifest: &Value, package: &Path, state: &Path) -> Value {
