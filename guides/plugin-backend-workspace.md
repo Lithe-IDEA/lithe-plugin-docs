@@ -7,7 +7,9 @@
 
 > **宿主支持。** `requires.backend: 2` 和插件函数协议 3 还在 Lithe `preview` 分支上开发，尚未进入稳定版。
 > 稳定版宿主只提供 `backend: [1]` 时会以 `plugin.api.unsupported` 拒绝 `backend` 2 的插件，所以老版本 Lithe
-> 不会启动一个期待工作区上下文的进程。官方 SDK 目前实现到协议 2，用协议 3 需要自己处理下文的请求和通知。
+> 不会启动一个期待工作区上下文的进程。三个官方 SDK 都实现了协议 3：Node.js SDK 0.2.0、Java SDK 0.2.0 和 Rust SDK 0.1.0
+> （见各自 README 的 Host services：[Node.js](../sdk/node/README.md#host-services)、[Java](../sdk/java/README.md#host-services)、
+> [Rust](../sdk/rust/README.md#host-services)）。用其他语言或更早的 SDK 需要自己处理下文的请求和通知。
 
 ## 1. 三个版本号各管什么
 

@@ -105,7 +105,7 @@ Schema 只检查 JSON 结构。ID 引用、权限、激活事件、模板变量�
 | [Java](sdk/java/README.md) | Java 8+ | `sdk-java-v<版本>` | `lithe-plugin-sdk-java-<版本>.jar` 和 `.sha256` | shade 进后端 JAR |
 | [Rust](sdk/rust/README.md) | Rust 1.87+ | `sdk-rust-v<版本>` | `lithe-plugin-sdk-rust-<版本>.crate` 和 `.sha256` | 用 Git 依赖锁定标签（`Cargo.lock` 记录 commit），或解压后作为 `path` 依赖；编译成每个平台各一份的插件后端可执行文件 |
 
-SDK 的源码都在本仓库的 `sdk/` 下，发布在[本仓库的 Releases](https://github.com/Lithe-IDEA/lithe-plugin-docs/releases) 里，不在 npm、Maven 或 crates.io 上。Rust SDK 目前只实现插件后端（`backend`）：插件函数和宿主凭据服务；构建后端和 VCS 后端请用 Node.js 或 Java SDK。Java SDK 0.1.0 是搬到这里之前从 Lithe 主仓库发布的，[那个 Release](https://github.com/1lck/Lithe-IDEA/releases/tag/sdk-java-v0.1.0) 继续可用，已经锁定它的插件不用改。
+SDK 的源码都在本仓库的 `sdk/` 下，发布在[本仓库的 Releases](https://github.com/Lithe-IDEA/lithe-plugin-docs/releases) 里，不在 npm、Maven 或 crates.io 上。Rust SDK 目前只实现插件后端（`backend`）：插件函数和宿主服务（插件函数协议 1–3）；构建后端请用 Node.js 或 Java SDK，VCS 后端请用 Node.js SDK。Java SDK 0.1.0 是搬到这里之前从 Lithe 主仓库发布的，[那个 Release](https://github.com/1lck/Lithe-IDEA/releases/tag/sdk-java-v0.1.0) 继续可用，已经锁定它的插件不用改。
 
 规则只有一条：**在构建时下载，并按你锁定的 SHA-256（或 Git commit）校验；运行时不下载任何东西。** 插件包安装后没有 `npm install` 步骤，也必须能离线运行。
 
