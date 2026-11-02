@@ -4,9 +4,9 @@
 // same rules locally so a plugin author sees a mistake when registering a
 // handler instead of as a refused session at runtime.
 
-/** Protocol versions this SDK can answer: the highest of each. */
+/** Protocol versions this SDK can answer. */
 export const FUNCTIONS_VERSION = 3;
-export const BUILD_VERSION = 6;
+export const BUILD_VERSION = 11;
 export const VCS_VERSION = 1;
 
 /** First plugin-function version with host services (credentials). */
@@ -25,6 +25,8 @@ export const METHODS = Object.freeze({
   functionUnregister: 'lithe/function/unregister',
   functionProgress: 'lithe/function/progress',
   buildModel: 'lithe/build/model',
+  buildConfiguration: 'lithe/build/configuration',
+  buildEditConfiguration: 'lithe/build/editConfiguration',
   buildDependencies: 'lithe/build/dependencies',
   buildExecute: 'lithe/build/execute',
   buildTest: 'lithe/build/test',
@@ -112,6 +114,8 @@ export const HOST_ERRORS = Object.freeze({
 
 /** Minimum negotiated version of each typed build operation. */
 export const BUILD_METHOD_VERSIONS = Object.freeze({
+  [METHODS.buildConfiguration]: 7,
+  [METHODS.buildEditConfiguration]: 7,
   [METHODS.buildModel]: 1,
   [METHODS.buildDependencies]: 1,
   [METHODS.buildExecute]: 2,
@@ -259,4 +263,38 @@ export function isReservedMethod(method) {
     method === METHODS.cancelRequest ||
     method.startsWith('lithe/')
   );
+}
+
+/** Version-10 user choices remain argv arrays until the owning tool consumes them. */
+export function isBuildLaunchOptions(value) {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return false;
+  const allowed = ['execution', 'runtimeArguments', 'arguments', 'environment', 'workingDirectory', 'entrypoint', 'debug'];
+  if (Object.keys(value).some(key => !allowed.includes(key))
+      || !['application', 'service', 'task'].includes(value.execution)) return false;
+  const text = (item, maximum) => typeof item === 'string' && Buffer.byteLength(item) <= maximum && !item.includes('\0');
+  for (const arguments_ of [value.runtimeArguments, value.arguments]) {
+    if (!Array.isArray(arguments_) || arguments_.length > 1024 || arguments_.some(item => !text(item, 65536))) return false;
+  }
+  const environment = value.environment;
+  if (!environment || typeof environment !== 'object' || Array.isArray(environment)
+      || Object.keys(environment).length > 64 || Object.entries(environment).some(([key, item]) =>
+        !/^[A-Za-z_][A-Za-z0-9_]{0,127}$/.test(key) || !text(item, 65536))) return false;
+  if (Object.hasOwn(value, 'debug')) {
+    const debug = value.debug;
+    if (value.execution !== 'service' || !debug || typeof debug !== 'object' || Array.isArray(debug)
+        || Object.keys(debug).length !== 3
+        || typeof debug.adapterID !== 'string' || !/^[a-z0-9.-]{1,128}\/[a-z0-9-]{1,64}$/.test(debug.adapterID) || ['.', '..'].includes(debug.adapterID.split('/')[0])
+        || typeof debug.configurationType !== 'string' || !debug.configurationType.trim() || Buffer.byteLength(debug.configurationType) > 256 || /[\x00-\x1f\x7f-\x9f]/.test(debug.configurationType)) return false;
+    const target = debug.target;
+    if (!target || typeof target !== 'object' || Array.isArray(target) || Object.keys(target).length !== 3
+        || target.kind !== 'connection' || target.host !== '127.0.0.1'
+        || !Number.isInteger(target.port) || target.port < 1 || target.port > 65535) return false;
+  }
+  if (Object.hasOwn(value, 'entrypoint') && (!text(value.entrypoint, 4096) || !value.entrypoint)) return false;
+  if (Object.hasOwn(value, 'workingDirectory')) {
+    const path = value.workingDirectory;
+    if (!text(path, 4096) || !path || path.includes('\\') || /^[A-Za-z]:/.test(path)
+        || (path !== '.' && path.split('/').some(part => !part || part === '.' || part === '..'))) return false;
+  }
+  return true;
 }

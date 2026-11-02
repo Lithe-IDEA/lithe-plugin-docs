@@ -12,8 +12,14 @@ backend.build.execute((params, context) => {
 });
 backend.build.test(async (params, context) => {
   const suite: string | undefined = params.suite;
+  const selectorKind: string | undefined = params.selectorKind;
+  const selectors: string[] | undefined = params.selectors;
+  void selectorKind; void selectors;
   context.progress({ output: suite });
-  return { exitCode: 2, output: 'test failure' };
+  const wantsReport: true | undefined = params.testResults;
+  return { exitCode: 2, output: 'test failure', ...(wantsReport ? { testResults: {
+    format: 'litheTestResults' as const, version: 1 as const, tests: [{ project: 'app', suite: 'Suite', case: 'checks', status: 'failed' as const }],
+  } } : {}) };
 });
 backend.build.discoverTests(async (params: BuildRequestParams) => ({
   tests: [{ suite: 'Suite', case: 'exact # [case]', project: { name: 'app', path: params.root } }],
@@ -62,3 +68,16 @@ backend.build.model((params) => {
   }
   return { projects: [] };
 });
+
+backend.build.configuration(() => ({ sources: [] }));
+backend.build.editConfiguration((params, context) => {
+  context.throwIfCancelled();
+  const output: string = params.outputFile;
+  const values: Record<string, import('@lithe/plugin-sdk').BuildConfigurationValue> = params.edits.values;
+  void output; void values;
+  // @ts-expect-error Native bindings do not expose XML roots or native documents.
+  void params.snapshot.sources[0]!.rootElement;
+  return { sourceID: params.edits.sourceID, revision: params.edits.revision, changed: false };
+});
+// @ts-expect-error Edit receipts require a source identity and a revision.
+backend.build.editConfiguration(() => ({ changed: true }));

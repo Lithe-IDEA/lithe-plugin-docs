@@ -1,8 +1,10 @@
 // A fictional build engine whose facts are supplied by lithe-sample.json.
 // Native IDE operations use typed handlers; this plugin needs no web page.
-import { readFile, realpath } from 'node:fs/promises';
+import { readFile, realpath, open } from 'node:fs/promises';
+import { constants } from 'node:fs';
 import { join, isAbsolute, resolve, sep, relative, posix } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { createHash } from 'node:crypto';
 import { createBackend, PluginError } from '../../../src/index.mjs';
 
 const backend = createBackend({ name: 'sample-native-build' });
@@ -15,6 +17,41 @@ backend.build.model(async ({ root, modelInputs }) => {
     targets: all.filter(({ run }) => run).map(({ modelPath: path }) => ({ name: 'Main', path, project: path, tags: ['application'] })) };
 });
 backend.build.dependencies(() => ({ dependencies: [] }));
+// The fictional engine supplies its non-sensitive native projection. Real
+// plugins read these facts from their selected upstream configuration API.
+backend.build.configuration(async ({ root }) => {
+  const base = await inside(root);
+  const configuration = JSON.parse(await readFile(join(base, 'lithe-sample.json'), 'utf8')).configuration;
+  return configuration ?? { sources: [] };
+});
+
+// This fictional engine uses JSON, independently of Maven's XML format.
+backend.build.editConfiguration(async ({ snapshot, edits, outputFile }, context) => {
+  const source = snapshot.sources.find(source => source.id === edits.sourceID);
+  if (!source?.writable || source.revision !== edits.revision || Object.keys(edits.values).some(id => id !== 'cacheDirectory')) {
+    throw new PluginError('sample.configuration', 'Invalid native edit.');
+  }
+  const bytes = await readFile(fileURLToPath(source.uri));
+  const revision = 'sha256:' + createHash('sha256').update(bytes).digest('hex');
+  if (revision !== edits.revision) throw new PluginError('sample.configuration', 'Native source changed.');
+  let document;
+  try { document = JSON.parse(bytes.toString('utf8')); }
+  catch { throw new PluginError('sample.configuration', 'Native configuration could not be parsed.'); }
+  for (const [id, value] of Object.entries(edits.values)) {
+    if (value === null) delete document[id]; else document[id] = value;
+  }
+  context.signal.throwIfAborted();
+  const replacement = Buffer.from(JSON.stringify(document));
+  const output = await open(outputFile, constants.O_WRONLY | (constants.O_NOFOLLOW ?? 0));
+  try {
+    const metadata = await output.stat();
+    if (!metadata.isFile() || metadata.size !== 0 || metadata.nlink > 1) throw new PluginError('sample.configuration', 'Invalid staging file.');
+    context.signal.throwIfAborted();
+    await output.writeFile(replacement);
+  }
+  finally { await output.close(); }
+  return { sourceID: source.id, changed: true, revision: 'sha256:' + createHash('sha256').update(replacement).digest('hex') };
+});
 
 backend.build.execute(async (params, context) => {
   if (params.task !== 'build') throw new PluginError('sample.task', 'Unknown build task.');
@@ -35,12 +72,15 @@ backend.build.test(async (params, context) => {
     throw new PluginError('sample.test', 'The selected test no longer exists.');
   }
   let output = '';
+  const tests = [];
+  const finish = exitCode => ({ exitCode, output, ...(params.testResults ? { testResults: { format: 'litheTestResults', version: 1, tests } } : {}) });
   for (const { project, test } of selected) {
     const result = await run(test.command, project, params.userArguments, context);
     output += result.stdout + result.stderr;
-    if (result.exitCode !== 0) return { exitCode: result.exitCode, output };
+    tests.push({ project: project.path, suite: test.suite, case: test.case, status: result.exitCode === 0 ? 'passed' : 'failed' });
+    if (result.exitCode !== 0) return finish(result.exitCode);
   }
-  return { exitCode: 0, output };
+  return finish(0);
 });
 
 backend.build.prepareRun((params, context) => prepare(params, context, false));
@@ -48,7 +88,13 @@ backend.build.prepareDebug((params, context) => prepare(params, context, true));
 async function prepare(params, context, debug) {
   const selected = await select(params);
   const project = selected[0];
-  if (selected.length !== 1 || params.run !== 'application' || !project.run
+  const options = params.launchOptions;
+  const execution = params.run === 'application' ? 'application' : params.run;
+  if ((options && (options.runtimeArguments.length || options.entrypoint || options.debug || options.execution !== execution))
+      || (!['application', 'service', 'task'].includes(params.run)) || (params.run !== 'application' && !options)) {
+    throw new PluginError('sample.launchOptions', 'This engine does not support the requested runtime or entrypoint options.');
+  }
+  if (selected.length !== 1 || !project.run
       || params.target?.name !== 'Main' || params.target?.path !== project.path) {
     throw new PluginError('sample.target', 'The selected application no longer exists.');
   }
@@ -60,8 +106,8 @@ async function prepare(params, context, debug) {
       workingDirectory: project.path, environment: {} };
   }
   return { executable: { kind: 'command', value: project.run.command },
-    arguments: [...project.run.arguments, ...params.userArguments],
-    workingDirectory: project.path, environment: {} };
+    arguments: [...project.run.arguments, ...params.userArguments, ...(options?.arguments ?? [])],
+    workingDirectory: options?.workingDirectory ?? project.path, environment: options?.environment ?? {} };
 }
 
 async function build(selected, arguments_, context) {

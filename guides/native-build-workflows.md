@@ -13,6 +13,7 @@
 | 发现可运行的用例 | `backend.build.discoverTests` | `onDiscoverTests` | 3 |
 | 准备应用启动 | `backend.build.prepareRun` | `onPrepareRun` | 4 |
 | 准备原生程序调试 | `backend.build.prepareDebug` | `onPrepareDebug` | 5 |
+| 读取原生配置 | `backend.build.configuration` | `onConfiguration` | 7 |
 
 安装时检查清单的能力版本，启动时 SDK 从宿主提供的版本中选最高的共同版本。没有对应协议时，新方法在进入处理器之前被拒绝；不会改发私有函数或展开成另一条宿主命令。Node 用 `backend.buildVersion`、Java 用 `backend.negotiated().buildVersion()` 查看结果。
 
@@ -93,3 +94,50 @@ node scripts/sdk-e2e.mjs --source /path/to/Lithe-IDEA --working-tree --build-wor
 `prepareDebug` 先完成构建，再返回 `{program, arguments, workingDirectory, environment}`。程序是当前实例内的已有文件，路径从工作区起算；宿主校验路径和可执行权限，再复用现有 DebugAdapter Registry。取消、错误和过期结果都不能启动调试。Node 和 Java 的 sample-native-build 从虚构引擎的 `run.debugProgram` 读取程序，参数使用当前请求的 userArguments；示例的 `example-dap` 是占位适配器命令，真实插件应打包符合其许可的成熟适配器。
 
 端到端示例验证两个 SDK 的真实进程、运行前构建、原生调试准备前构建、Core 路径解码、进度及失败不返回目标。它不启动真实调试器，也不代表 Java/JDT、跨插件协作或 Windows 已完成。
+
+## 原生配置读取与确认保存（协议 7，开发中）
+
+构建系统声明 `configuration: {"source":"provider"}`，要求 `buildProviders: 7`，并使用自己的工作区 Provider 进程。宿主以同一组工具选择、选项和环境发送 `lithe/build/configuration`；这是读取，不传编辑值或完整原生文件。Node 注册 `backend.build.configuration(handler)`，Java 注册 `onConfiguration(handler)`。SDK 补齐 `format: "litheBuildConfiguration"`、`version: 1`；旧协商版本在进入处理器前拒绝。
+
+处理器从选中的成熟上游获得实际来源与生效值，返回 `sources`。每个来源包含 `id`、`scope`（installation/user/workspace）、文件 URI、原始字节的 SHA-256 revision（缺失文件为 missing）、writable、XML 根名称与命名空间，以及非敏感字段。字段区分 value（原值，未设置为 null）、effectiveValue 和 effectiveSource，并声明 path（根以下的直接 XML 元素路径）；stringList 还声明 itemElement。参考契约合并并同步后的 `contract/v1/fixtures/build-configuration.json`。当前镜像在宿主合并前保持原样，不能把待合并字段写进旧契约副本。
+
+例如 Maven 插件观察其所选 Maven 的原始 `SettingsBuildingRequest` 与 `SettingsBuildingResult`，在 reactor 导入前取得源文件与合并结果；会话执行请求提供最终命令行覆盖值。不要在宿主、SDK 或插件里重写 Maven 配置优先级，不要把会话 SettingsAdapter 当成未覆盖的原始设置。配置探针需在返回前确认实际来源和哈希仍匹配，文件更改时明确失败。
+
+宿主在通用设置页显示来源、原值、继承/覆盖和生效值。输入只改草稿；保存明确列出的目标来源后，平台适配器以原始快照进行条件替换，再调用同一 Provider 读取实际生效值。取消、打开、失焦和离页不写配置。安装来源始终只读；多个作用域选择同一文件时，只能显示完全一致的只读别名。保存失效或冲突保留草稿，不把提交值当成生效值。
+
+完整 XML 可能含凭据，只能在宿主文件 adapter 与 Core 的纯编辑命令间流动。不要通过配置回复、日志、插件函数、网页或模型共享传整份文件。宿主仅编辑获准的非敏感节点并保留其他内容、注释和权限；Provider 只读真实事实，不接收或代写宿主确认过的原生文档。探针目录、输出和带源哈希的模型缓存属于隔离的工作区状态，调用结束清理，不能写包或跨工作树复用。
+
+Maven 的真实集成场景覆盖损坏 POM 前读取、用户/安装来源、自定义路径、命令行覆盖、敏感内容保留、Core 编辑后回读、旧版本拒绝、清理与包清单不变。SDK 单元测试分别验证 1–7 协商与配置格式；宿主合并前用 `node scripts/sdk-e2e.mjs --source <Lithe工作树> --working-tree --build-workflows --native-configuration` 验证 Node/Java 的端到端示例及协议 7 配置投影、Core 内部纯 XML 编辑、敏感内容保留与读取无写入。源码通过不表示已发版；Java SDK/JAR 的正式版本与哈希仍需发布流程固定。
+
+`--native-configuration` 在宿主合并前显式启用协议 7 场景；契约镜像同步到包含 7 的 preview 提交后默认启用。Node/Java 的无页面样例仍以其虚构引擎 JSON 供应非敏感配置投影，不增加 XML 解析或凭据传输。
+
+## Maven framework model properties
+
+Maven's backend publishes `run.modelVersion: "1"` on each canonical model
+project. For non-aggregator projects it may also publish `run.provider` with
+`spring-boot.maven`, `quarkus.maven`, or `micronaut.maven`. The selection comes
+from Maven's effective applied build plugins, including active Profiles and
+inheritance; plugin management alone is not application. These are scalar model
+properties, not a new SDK RPC or launch recipe. The host forwards the current
+project name, reactor and selection to Run generation; Core validates and
+projects existing service identities. A host requiring this model rejects an
+older Maven plugin without the version property and asks for an update rather
+than parsing POMs itself. Existing framework launch options remain in their
+current Run configuration layer until launch planning is migrated.
+
+The optional scalar project property `java.minimumVersion` contains a normalized
+Java feature version from the configured compiler execution model. Maven's
+backend calculates its own lifecycle plan without executing goals, evaluates
+compiler parameters with Maven's evaluator, and accounts for main/test and
+custom executions. Missing means unknown (including an unavailable descriptor
+or unsupported evaluated version). Hosts must not fill the gap by parsing POM text.
+The highest known floor applies to project toolchain selection; platform Java
+version preferences must not lower it.
+
+Maven also publishes optional scalar `maven.wrapper` (`mvnw` or `mvnw.cmd`,
+relative to the instance root) and `maven.minimumVersion` properties, read from
+that instance's native script/Wrapper configuration. Hosts project the script
+into a workspace-relative path. Java Properties semantics own comments and URL
+escaping; unknown distribution filenames stay unknown, and model reading never
+executes the Wrapper. Script and properties changes invalidate the model.
+Multiple independent reactors must not share one global Wrapper selection.

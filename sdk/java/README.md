@@ -79,8 +79,10 @@ JAR it starts must hold everything it loads.
 | `onModel(handler)`, `onDependencies(handler)` | Implement the typed build requests. The SDK stamps `format` and `version`. Core validates the document. `litheBuild` is answered only when a handler exists. |
 | `onExecute(handler)` | Protocol 2+: a bounded provider-owned task, returning `{ exitCode, output }`. |
 | `onTest(handler)`, `onDiscoverTests(handler)` | Protocol 3+: exact execution and runnable selectors; discovery format/version are stamped. |
+| `onConfiguration(handler)` | Protocol 7+: read-only non-sensitive raw/effective native configuration; stamps `litheBuildConfiguration`, version 1. The host owns explicit native-file saves. |
+| `onEditConfiguration(handler)` | Protocol 7+: format-owned replacement to an existing private host output file; returns only source ID, SHA-256 and changed status, stamped `litheConfigurationEdit` v1. Never CREATE the output or write the original source. |
 | `onPrepareRun(handler)` | Protocol 4: prepare a portable plan; the host owns the application. |
-| `negotiated().buildVersion()` | Highest common build version (1–6), or zero; newer methods are refused before their handler runs. |
+| `negotiated().buildVersion()` | Highest common build version (1–7), or zero; newer methods are refused before their handler runs. |
 | `function(id, handler)` | Declares a function offered in `initialize`. |
 | `registerFunction(id, handler)`, `unregisterFunction(id)` | Add or withdraw a function. Called before the `initialize` answer (for example from `onInitialize`), they change the initial list. Later calls send `lithe/function/register` or `lithe/function/unregister`, in order. Both return a `CompletableFuture`. Withdrawing a function revokes its running calls. |
 | `negotiated().functionsVersion()` | Highest common plugin-function version (1–3), or zero. |
@@ -273,7 +275,87 @@ producer changes. Protocol 1–5 handlers reject requests containing model input
 
 The two native workflow samples demonstrate independent producer and consumer
 backends in the Core end-to-end tests. Their engine is fictional; this does not
-migrate Maven, JDT, LLDB or existing plugin business logic.
+migrate Maven, JDT, LLDB or existing plugin business logic. The contract mirror
+must be synced from the merged Lithe revision before these changes are released.
+
+## Inline test reports (development protocol 8)
+
+A test declared with `results: { "decoder": "provider" }` requires buildProviders 8.
+Core sends `testResults: true`; answer with `testResults: { format: "litheTestResults",
+version: 1, tests: [...] }` beside `exitCode` and `output`. Cases carry suite/case/status
+and optional project/source paths, message, durationMillis and invocations. A failed
+test still returns its nonzero exit code and current reports. Report discovery and
+freshness belong to the provider's upstream engine; never return old files or silently
+empty results after a read failure. Core validates 10,000 cases/8 MiB and keeps equal
+suite/case names in distinct projects separate. Earlier negotiation refuses the new
+request field. Ordinary execute replies may include reports for build phases that run
+tests. These SDK sources are development inputs pending a coordinated host/SDK release.
+
+## Opaque test selectors (development protocol 9)
+
+`onTest` can receive `selectorKind` and `selectors` for a namespace declared by
+`test.selectorKinds`. The SDK admits them only after protocol 9 negotiation and
+rejects conflicts with suite/case, more than 64 values, empty/control-containing
+values and values exceeding 4096 UTF-8 bytes. An empty list selects the normal
+workspace/project scope. Preserve language-engine identities until mapping them
+to the upstream runner, and reject selections that cannot be represented exactly.
+
+## Declarative build preparation (development buildSystems 4)
+
+A provider task may declare `preparation: { "purpose": "run", "sourceRoles":
+["source", "generatedSource"] }` in its manifest and require `buildSystems: 4`.
+Declare a separate task for test source roles when needed. Task IDs are private
+to the provider; hosts find the purpose/role binding in the current model.
+`onExecute` receives the selected ID through the existing method, so no SDK
+handler or build RPC version changes. Missing roles/declarations fail explicitly.
+Preparation tasks must be project scoped, run without prompts and have unique
+purpose/role bindings. The provider owns filtering and upstream build semantics;
+the language workflow awaits completion before resolving launch paths.
+Per-run options/tools are ephemeral inputs and never overwrite saved defaults.
+
+
+## Typed run choices (development protocol 10)
+
+`onPrepareRun` receives optional `launchOptions` after version-10 negotiation.
+Its execution kind, runtime/program argv arrays, environment and optional
+workspace-relative working directory/opaque entrypoint are resolved user choices.
+The SDK rejects malformed options or older sessions before invoking the handler.
+Service/task declarations require protocol 10 and these options; their process
+still belongs to the host after preparation. Preserve empty argv values, spaces,
+Unicode and literal backslashes. Reject unsupported runtime or entrypoint choices;
+the native example consumes supported arguments, environment and cwd directly.
+No new runtime dependency or Java baseline is introduced.
+
+Test an unmerged host with
+`node scripts/sdk-e2e.mjs --source <Lithe checkout> --working-tree --build-workflows --provider-run-options`.
+The contract mirror and released SDK remain pinned until the corresponding
+preview commit is merged and synchronized.
+
+
+## Registry connection debug choices (development protocol 11)
+
+A service preparation may receive `launchOptions.debug = { adapterID: 'dev.example/debug', configurationType: 'example', target: { kind: 'connection', host: '127.0.0.1', port: 51235 } }`.
+The host selects a current registered adapter and loopback port. The provider
+owns engine-specific suspension flags and rejects a choice it cannot honor.
+It cannot select an endpoint, adapter or DAP arguments. SDKs reject the field
+on protocol 10 or older. The portable process result is unchanged; the host
+owns readiness, attachment and cleanup. The native-build examples reject this
+unsupported connection choice. This revises unpublished v11 only; 8–10 and
+release versions/locks are unchanged.
+
+### Native configuration editing (development protocol 7)
+
+Field IDs are opaque to the host; XML element bindings and host XML editing have
+been removed. The sample native engine uses JSON while Maven owns its XML reader
+and writer. Read only allowlisted non-sensitive facts, check the exact source
+revision, write replacement bytes to the existing host staging file without
+CREATE, and return a receipt only. Preserve unknown fields/comments supported by
+the native format and private values locally. The host verifies the output hash,
+rechecks operation/source ownership, publishes atomically and re-reads upstream.
+On cancellation the host removes staging; never recreate it or return document
+bytes. Protocols 8–10 retain their existing version numbers and handlers. Protocol
+7 is being revised in the unmerged development PR; contract mirrors are synced
+only after the host change merges. No SDK release or lock update is implied.
 
 ## Native terminal API (unreleased)
 

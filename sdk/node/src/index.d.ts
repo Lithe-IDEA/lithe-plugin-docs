@@ -362,6 +362,11 @@ export interface BuildExecutionParams extends BuildRequestParams {
 }
 
 export interface BuildTestParams extends BuildRequestParams {
+  /** Protocol 9: public semantic namespace and upstream-owned opaque identities. */
+  selectorKind?: string;
+  selectors?: string[];
+  /** Requires build protocol 8 and an inline report in the reply. */
+  testResults?: true;
   project?: BuildSelection | null;
   target?: BuildSelection | null;
   suite?: string;
@@ -370,7 +375,43 @@ export interface BuildTestParams extends BuildRequestParams {
   operationID: string;
 }
 
+/** Protocol 7: non-sensitive native facts; bindings are private to the provider. */
+export type BuildConfigurationValue = string | boolean | string[] | null;
+export interface BuildConfigurationDocument {
+  format?: 'litheBuildConfiguration'; version?: 1;
+  sources: { id: string; scope: 'installation' | 'user' | 'workspace'; uri: string;
+    revision: string; writable: boolean;
+    fields: { id: string; kind: 'text' | 'file' | 'directory' | 'boolean' | 'stringList';
+      value: BuildConfigurationValue; effectiveValue: BuildConfigurationValue; effectiveSource: string }[];
+  }[];
+}
+export interface BuildConfigurationEditParams extends BuildRequestParams {
+  snapshot: BuildConfigurationDocument;
+  edits: { sourceID: string; revision: string; values: Record<string, BuildConfigurationValue> };
+  /** Existing private host file; open without CREATE and never write the source. */
+  outputFile: string;
+}
+export interface BuildConfigurationEditReceipt {
+  format?: 'litheConfigurationEdit'; version?: 1;
+  sourceID: string; revision: string; changed: boolean;
+}
+export type BuildConfigurationHandler = (params: BuildRequestParams, context: RequestContext) => BuildConfigurationDocument | Promise<BuildConfigurationDocument>;
+export type BuildConfigurationEditHandler = (params: BuildConfigurationEditParams, context: RequestContext) => BuildConfigurationEditReceipt | Promise<BuildConfigurationEditReceipt>;
+
+/** Version 10. These are resolved user choices, not shell command strings. */
+export interface BuildLaunchOptions {
+  execution: 'application' | 'service' | 'task';
+  runtimeArguments: string[];
+  arguments: string[];
+  environment: Record<string, string>;
+  workingDirectory?: string;
+  entrypoint?: string;
+  /** Version 11. Suspend the service for a registry-selected connection attach. */
+  debug?: { adapterID: string; configurationType: string; target: { kind: 'connection'; host: '127.0.0.1'; port: number } };
+}
+
 export interface BuildRunParams extends BuildRequestParams {
+  launchOptions?: BuildLaunchOptions;
   run: string;
   project: BuildSelection;
   target: BuildSelection;
@@ -390,7 +431,15 @@ export interface BuildContext extends RequestContext {
   progress(report: BuildProgressReport): void;
 }
 
-export interface BuildExecutionResult { exitCode: number; output: string; }
+/** Results belong to this operation; the host does not discover report files. */
+export interface BuildTestResultsDocument {
+  format: 'litheTestResults'; version: 1;
+  /** Completed project/suite/case scopes; omitted means only returned cases are replaced. */
+  coverage?: { project: string; suite?: string; case?: string }[];
+  tests: { project?: string; suite: string; case: string; status: 'passed' | 'failed' | 'error' | 'skipped';
+    message?: string; durationMillis?: number; path?: string; line?: number; invocations?: number }[];
+}
+export interface BuildExecutionResult { exitCode: number; output: string; testResults?: BuildTestResultsDocument; }
 export interface BuildTestDiscovery {
   format?: 'litheTestDiscovery';
   version?: 1;
@@ -480,7 +529,7 @@ export interface ListenOptions {
 export interface Backend {
   readonly negotiated: Negotiated;
   readonly initializeParams: JsonObject | null;
-  /** Highest common version (1-6), or null before/without negotiation. */
+  /** Highest common version (1-11), or null before/without negotiation. */
   readonly buildVersion: number | null;
   /** Highest common plugin-function version (1-3), or null before/without negotiation. */
   readonly functionsVersion: number | null;
@@ -488,6 +537,10 @@ export interface Backend {
   /** Host services; usable once the session is ready. */
   readonly host: Host;
   readonly build: {
+    /** Non-sensitive source-backed settings; requires build protocol 7. */
+    configuration(handler: BuildConfigurationHandler): Backend;
+    /** Format-independent edit to a host-owned staging file; returns a receipt only (v7). */
+    editConfiguration(handler: BuildConfigurationEditHandler): Backend;
     model(handler: BuildHandler): Backend;
     dependencies(handler: BuildHandler): Backend;
     execute(handler: BuildExecutionHandler): Backend;
