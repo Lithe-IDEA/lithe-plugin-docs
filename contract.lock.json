@@ -3,12 +3,16 @@
   "source": {
     "repository": "https://github.com/1lck/Lithe-IDEA",
     "directory": "shared/contracts/plugins/v1",
-    "revision": "32021a86f0c6c4ad2964dbbe3c2bb7854d84ad67"
+    "revision": "589116e30d3bdbf72c9695f8ff18a952c7da33ac"
   },
   "files": [
     {
       "path": "README.md",
-      "sha256": "75cf6add5c473eb333caca793dc9add6394476c7f4c5196b2bf5f1aea7873d59"
+      "sha256": "0f32eb07a05f6e929696b51c87052eab6c369489c89b47d1b3fc8dc82ac3f6e6"
+    },
+    {
+      "path": "fixtures/backend-workspace.plugin.json",
+      "sha256": "6eef7a0735e4cd0c66b32a1075ad8f689554e26f929d3a1f436249026e06037b"
     },
     {
       "path": "fixtures/backend.plugin.json",
@@ -23,44 +27,108 @@
       "sha256": "cb24aedb59cdcec6b358dbeb95213143a4fc229aea8973ddd3f154f09335b9dc"
     },
     {
+      "path": "fixtures/build-debug-preparation.json",
+      "sha256": "73d3362fac7302c5698b440536821784350fbf6eb267b94d144994d403f0efed"
+    },
+    {
+      "path": "fixtures/build-execution-protocol.json",
+      "sha256": "556779c92b7b43970ff882cce6fd278dbe0d16476403778a9240d61c4a15b3da"
+    },
+    {
       "path": "fixtures/build-host-integration.plugin.json",
       "sha256": "36361a98a86de1c6c9c4f0694accab3adadefd53f344b4ac3a85b8906d749b13"
+    },
+    {
+      "path": "fixtures/build-model-consumer.plugin.json",
+      "sha256": "c41ac0f6fa6600f5bc0ee29d7d89f8257d9f9fec9add8d4c5ac448ad753177f5"
+    },
+    {
+      "path": "fixtures/build-model-producer.plugin.json",
+      "sha256": "2bed5e883cd21d37599cdaf69f2663b903e1149b58a7f33f7c01658ec081a455"
     },
     {
       "path": "fixtures/build-plans.json",
       "sha256": "b1ebdab5d1e7d0b6f5fc948335581c41814dac83937b8452722ad5da6836d6ab"
     },
     {
+      "path": "fixtures/build-provider-debug-preparation.plugin.json",
+      "sha256": "07db3ced65ab5f73318de59c8857b48f7b68d731bae928bc2954e3e47f585170"
+    },
+    {
+      "path": "fixtures/build-provider-execution.plugin.json",
+      "sha256": "6978c19d7f4353c5dadc833ac723dad76c001aae2c92286d4dd4a9ff2bd67101"
+    },
+    {
       "path": "fixtures/build-provider-language-server.plugin.json",
       "sha256": "fc6fae12c07715ad5017484cf9a17905d51ffa7ee40ccf4200613b720644f2ce"
+    },
+    {
+      "path": "fixtures/build-provider-run-preparation.plugin.json",
+      "sha256": "14fca4d8fba7a2bb66f3d6fb7ae81c745bc323d44d9958d8fdfc5c1adbcc7ac1"
+    },
+    {
+      "path": "fixtures/build-provider-tests.plugin.json",
+      "sha256": "071cef77007fbde34e1ff971c10bbe693e9275f10de1c070801baf880c4e19f8"
     },
     {
       "path": "fixtures/build-provider.plugin.json",
       "sha256": "bbb19c3d201be64af5262be549fe92822c14e77efae616e64c4f32ddd56b2758"
     },
     {
+      "path": "fixtures/build-run-preparation.json",
+      "sha256": "3609997b65e0322ae16756f1af376c041c55aa1a20187cad0c5a9bf1444a10cd"
+    },
+    {
       "path": "fixtures/build-static-file.plugin.json",
       "sha256": "0380748f151cf2b154133dac5447c8665801f16bf005314ab7ac1d4d11475c92"
+    },
+    {
+      "path": "fixtures/build-test-discovery.json",
+      "sha256": "62384b0d2c31cd2fed877a421dd90eb1fff1e7d991e1622567004bc2eace5dd6"
+    },
+    {
+      "path": "fixtures/build-test-protocol.json",
+      "sha256": "a67b9b6448aff53792cb791b0fa6994fcb0e94729a5c5a85a524398ebe6e58fd"
     },
     {
       "path": "fixtures/build-tool-path.plugin.json",
       "sha256": "685144e417bbf01b013144dec109d51b56922f98811e9ea6eda34da26749165c"
     },
     {
+      "path": "fixtures/command-backend.plugin.json",
+      "sha256": "791f11f3b9d59d5909a9ca94788bddb7f7493b7610361553d5733d7aed18df22"
+    },
+    {
       "path": "fixtures/command-plans.json",
       "sha256": "a188fd65f6cdb47f9e9ad4b0de3a7ddcd17e4e577b34f6e25b96d2c1f2bdca7c"
     },
     {
+      "path": "fixtures/debug-adapter-language-server.plugin.json",
+      "sha256": "c29d1e94a69840a63317e5d4b15a0a9cd8267a980fa2b21c37528bc08bb3ee96"
+    },
+    {
       "path": "fixtures/debug-adapter-rejections.json",
-      "sha256": "0aaa586c19884025eb9bee36dc213fbebacc4d0503c3f5ed10a196c922cfaeaf"
+      "sha256": "ec6023c48236ec3f59f8c8c7bfd4cefea0180f14e11fd4823fb2e48ac36567a6"
+    },
+    {
+      "path": "fixtures/debug-adapter-remote-attach.plugin.json",
+      "sha256": "66b4e0326f3b99027865869742ec98afd7da0df6133bc0a23115749edde13e3b"
     },
     {
       "path": "fixtures/debug-adapter.plugin.json",
       "sha256": "81038febbde31e0554451789106f8fc255e87038c8185602ce0c7e918f90ff78"
     },
     {
+      "path": "fixtures/editor-actions.plugin.json",
+      "sha256": "ca86471b63a15e6f12102777c59c300a6da7690ac13e02835e43abf41f26eb0b"
+    },
+    {
       "path": "fixtures/function-protocol.json",
-      "sha256": "980e8d39db2af9d7f922cdc01b0ec06e2cb8c33da2142ec8040befa975b7eae5"
+      "sha256": "e880024b108b2d11c5c2b93c39ea642460989eaf530bc1f85254f404780dfc3b"
+    },
+    {
+      "path": "fixtures/grammars/http.monarch.json",
+      "sha256": "2fb9c325feb966d0d6569a77a2a8493b0e43e13b7cd64f9b30548ff826f9cdea"
     },
     {
       "path": "fixtures/hello-lithe.plugin.json",
@@ -68,7 +136,11 @@
     },
     {
       "path": "fixtures/invalid-manifests.json",
-      "sha256": "107afd7d3f440a87aab3611a80aa5e92c067cd719019dafd94bda8cdbd6b842f"
+      "sha256": "3859c99928158e44fc1f9f25caff5289ed3c2f8e3af200108ab17051915246c2"
+    },
+    {
+      "path": "fixtures/language-grammar.plugin.json",
+      "sha256": "9c55a3ea5f075328fca87c845f04f680e35fb283a39283c742fb5d435be05faa"
     },
     {
       "path": "fixtures/language-host-integration.plugin.json",
@@ -143,12 +215,24 @@
       "sha256": "14c6fa8b073732f93b85b30e4fa9e8384ce094f2fb6fe833e41476f12c8d2132"
     },
     {
+      "path": "fixtures/publisher-bundled.plugin.json",
+      "sha256": "195c3f7c9712f44711602c059e32af88b3e7b7285b600cffd38f116e5b1150eb"
+    },
+    {
       "path": "fixtures/runtime-versions.json",
       "sha256": "a19c1c057ab54a2b24a4a0e5a0d7764f0b9063bb6dd356baf19f5f6e37a76e19"
     },
     {
       "path": "fixtures/settings-v2.plugin.json",
       "sha256": "83d4c7faf7bfbb9c474639bfc0ef42dae8cd7d370d388f8527589f2afed12981"
+    },
+    {
+      "path": "fixtures/tool-definition.plugin.json",
+      "sha256": "06b94a1886edcaa8ade3ae1462d01aa6e54e7ec3104ae28d0b796f2a303fd90a"
+    },
+    {
+      "path": "fixtures/toolchain-provider.plugin.json",
+      "sha256": "87a7c83ecf5e1983953fd29705237ff9c1b9480d22416aec7e85293a2342600a"
     },
     {
       "path": "fixtures/vcs-provider.plugin.json",
@@ -168,7 +252,63 @@
     },
     {
       "path": "plugin-manifest.schema.json",
-      "sha256": "f35d510bf76feeff2978289bebbeba19453cd60b1e101b7677c6106934a27f95"
+      "sha256": "424d5e6a9f0c216eb79add116b90d75f6634f7b31c51629a730ec155ada27016"
+    },
+    {
+      "path": "proposals/toolchains/README.md",
+      "sha256": "eeec7c53075056649d103af78fa9c5b2e0a28bc60c8049d4ae2a9d3ec15e17e7"
+    },
+    {
+      "path": "proposals/toolchains/fixtures/java-tool-definition.json",
+      "sha256": "23408937de3c5d77712657e8753d23d7cd07d91e73d5c3d0788d3ae283f56134"
+    },
+    {
+      "path": "proposals/toolchains/fixtures/local.json",
+      "sha256": "0d24ed31d1b330cd45147274747206dada3dc660deae66eb72acdf359e2092ba"
+    },
+    {
+      "path": "proposals/toolchains/fixtures/manifest-rejections.json",
+      "sha256": "de2ebb472c31eb8e5ff3fd9217572311dc65df1bb62a17736e4192d105576674"
+    },
+    {
+      "path": "proposals/toolchains/fixtures/mise-provider.json",
+      "sha256": "55f9b992e8d4988afb3e8574025af2e593c71c799a98bd9b237b9d01c5fc474c"
+    },
+    {
+      "path": "proposals/toolchains/fixtures/query-cases.json",
+      "sha256": "d1a7c3e8b8df18cba3d40cca437b712a787b8935d6c8eb7b567e74736d42c203"
+    },
+    {
+      "path": "proposals/toolchains/fixtures/resolution-cases.json",
+      "sha256": "8292f41dc287e0d96638a3583324354f106cc0bd149c91ab76f80525893c5cab"
+    },
+    {
+      "path": "proposals/toolchains/local.schema.json",
+      "sha256": "a27683a7d4086af4e24cfae220af4d2089bb7c14cb0f9fbd7a83e3ba7a193a51"
+    },
+    {
+      "path": "proposals/toolchains/manifest-contributions.schema.json",
+      "sha256": "9b66f66bfeb5ad32b7415c084048f95ad54d7b1628bd89ce146dfcfc4c746ebf"
+    },
+    {
+      "path": "proposals/toolchains/manifest.md",
+      "sha256": "c8074693b61fa55cdecd8cda923e9c21a1be923093ef1f00acafb99844afec82"
+    },
+    {
+      "path": "proposals/toolchains/protocol.md",
+      "sha256": "5218ad632fcdc09b317dc2b248e68528fedc9afd030cd2e3d276f1c34b4a851d"
+    },
+    {
+      "path": "proposals/toolchains/query.schema.json",
+      "sha256": "4cb8093ee80d99527fb05d4cf7aa86a55f74711e9bf9e61139db3681d7361219"
+    },
+    {
+      "path": "proposals/toolchains/resolution.schema.json",
+      "sha256": "c0ce78a4df543e2bae06877ae9a49c425a4fb81f5af3ff4626b064c8063b288c"
+    },
+    {
+      "path": "toolchains.md",
+      "sha256": "0d9e19ea676836d469e3342f01d1e0eef60c6cd321f3671e1b5db1235690c39f"
     }
   ]
 }
