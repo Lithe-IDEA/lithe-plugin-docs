@@ -35,6 +35,11 @@ export function includesNativeWorkflows(schema, requested = false) {
   return requested || versions.includes(6);
 }
 
+/** Exercise shortcut import when the selected host declares the capability. */
+export function includesKeymapImport(schema) {
+  return schema?.properties?.requires?.properties?.keymapImportProviders?.const === 1;
+}
+
 function run(command, args, options = {}) {
   return new Promise((resolvePromise, reject) => {
     const child = spawn(command, args, { stdio: 'inherit', ...options });
@@ -157,7 +162,10 @@ async function main() {
   const rust = await rustSample();
   const revision = await checkoutCore(source, ref);
   if (values['working-tree']) await copyWorkingTree(source, work);
+  const hostSchema = JSON.parse(await readFile(join(work, 'shared/contracts/plugins/v1/plugin-manifest.schema.json'), 'utf8'));
+  const keymapImport = includesKeymapImport(hostSchema);
   console.log(`Running the SDK end-to-end scenario against Lithe ${revision}${values['working-tree'] ? ' plus explicit working-tree changes' : ''}`);
+  console.log(`Shortcut import scenario: ${keymapImport ? 'enabled' : 'not supported by this host'}`);
   await copyScenario(join(work, 'rust/lithe-core/tests'));
 
   await run('cargo', ['test', '--locked', '--manifest-path', join(work, 'rust/Cargo.toml'), '-p', 'lithe-core',
@@ -170,6 +178,7 @@ async function main() {
       LITHE_PLUGIN_SDK_JAVA_SAMPLE: jar,
       LITHE_PLUGIN_SDK_JAVA_NATIVE_SAMPLE: nativeJar,
       LITHE_PLUGIN_SDK_RUST_SAMPLE: rust,
+      LITHE_PLUGIN_SDK_KEYMAP_IMPORT: keymapImport ? '1' : '0',
     },
   });
 }

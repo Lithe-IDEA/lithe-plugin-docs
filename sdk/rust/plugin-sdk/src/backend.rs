@@ -17,9 +17,10 @@ use crate::protocol::{
     bounded_text, error_codes, is_command_id, is_function_id, methods, CONTEXT_VERSION,
     FUNCTIONS_VERSIONS, MAX_FUNCTIONS, MAX_MESSAGE_BYTES, MAX_RESULT_BYTES,
 };
+use base64::{engine::general_purpose::STANDARD as BASE64, Engine as _};
 use serde_json::{json, Map, Value};
 use std::any::Any;
-use std::collections::{BTreeMap, HashMap};
+use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::fmt::Display;
 use std::io::{self, BufReader, Read, Write};
 use std::panic::{catch_unwind, AssertUnwindSafe};
@@ -51,6 +52,8 @@ pub(crate) enum Phase {
 pub(crate) struct State {
     pub(crate) phase: Phase,
     functions: BTreeMap<String, Handler>,
+    keymap_providers: BTreeMap<String, Handler>,
+    selected_keymap_providers: BTreeSet<String>,
     /// The negotiated plugin-function protocol version.
     functions_version: Option<u64>,
     /// Host requests being handled, by JSON-RPC ID.
@@ -133,6 +136,8 @@ impl Backend {
                 state: Mutex::new(State {
                     phase: Phase::Idle,
                     functions: BTreeMap::new(),
+                    keymap_providers: BTreeMap::new(),
+                    selected_keymap_providers: BTreeSet::new(),
                     functions_version: None,
                     incoming: HashMap::new(),
                     outgoing: HashMap::new(),
@@ -171,6 +176,51 @@ impl Backend {
         let mut state = lock(&self.shared.state);
         check_new_function(id, &state.functions)?;
         state.functions.insert(id.to_string(), Arc::new(handler));
+        drop(state);
+        Ok(self)
+    }
+
+    /// Declares an independent typed shortcut import provider. Its handler
+    /// receives an opaque snapshot, never a filesystem path; it can use the
+    /// call-scoped host to list and read the explicitly selected inputs.
+    pub fn keymap_import_provider<F>(&mut self, id: &str, handler: F) -> Result<&mut Self, SdkError>
+    where
+        F: Fn(KeymapImportRequest, &Context) -> Result<Value, FunctionError>
+            + Send
+            + Sync
+            + 'static,
+    {
+        if !valid_keymap_provider_id(id) {
+            return Err(SdkError::new(
+                "sdk.keymap.invalidID",
+                "Invalid shortcut import provider ID.",
+            ));
+        }
+        let mut state = lock(&self.shared.state);
+        if state.keymap_providers.contains_key(id) || state.keymap_providers.len() >= 8 {
+            return Err(SdkError::new(
+                "sdk.keymap.invalidRegistration",
+                "Duplicate provider or provider limit exceeded.",
+            ));
+        }
+        state.keymap_providers.insert(
+            id.to_string(),
+            Arc::new(move |params, context| {
+                handler(
+                    KeymapImportRequest {
+                        provider_id: params["providerID"]
+                            .as_str()
+                            .unwrap_or_default()
+                            .to_string(),
+                        snapshot_id: params["snapshotID"]
+                            .as_str()
+                            .unwrap_or_default()
+                            .to_string(),
+                    },
+                    context,
+                )
+            }),
+        );
         drop(state);
         Ok(self)
     }
@@ -350,6 +400,9 @@ impl Backend {
                 Phase::Ready if method == methods::FUNCTION_INVOKE => {
                     Shared::invoke(&self.shared, id, &params)
                 }
+                Phase::Ready if method == "lithe/keymap/import" => {
+                    Shared::invoke_keymap(&self.shared, id, &params)
+                }
                 Phase::Ready => self.shared.respond(
                     &id,
                     Err(rpc_error(
@@ -447,6 +500,9 @@ impl Backend {
             }
             state.phase = Phase::Initializing;
         }
+        let keymap_offer = params
+            .pointer("/capabilities/experimental/litheKeymapImport")
+            .cloned();
         let offered = params
             .pointer("/capabilities/experimental/litheFunctions/versions")
             .and_then(Value::as_array);
@@ -484,6 +540,32 @@ impl Backend {
         state.functions.extend(initialize.added);
         state.functions_version = functions_version;
         let mut experimental = Map::new();
+        if let Some(offer) = keymap_offer {
+            let version = offer
+                .get("versions")
+                .and_then(Value::as_array)
+                .is_some_and(|versions| versions.iter().any(|version| version.as_u64() == Some(1)));
+            if version {
+                if let Some(providers) = offer
+                    .get("providers")
+                    .and_then(Value::as_array)
+                    .filter(|ids| ids.len() <= 8)
+                {
+                    state.selected_keymap_providers = providers
+                        .iter()
+                        .filter_map(Value::as_str)
+                        .filter(|id| state.keymap_providers.contains_key(*id))
+                        .map(str::to_string)
+                        .collect();
+                    if !state.selected_keymap_providers.is_empty() {
+                        experimental.insert(
+                            "litheKeymapImport".into(),
+                            json!({"version":1,"providers":state.selected_keymap_providers}),
+                        );
+                    }
+                }
+            }
+        }
         match functions_version {
             Some(version) => {
                 let functions: Vec<_> = state
@@ -638,6 +720,90 @@ impl Shared {
             Ok(result) => json!({ "jsonrpc": "2.0", "id": id, "result": result }),
             Err(error) => json!({ "jsonrpc": "2.0", "id": id, "error": error }),
         });
+    }
+
+    fn invoke_keymap(shared: &Arc<Self>, id: Value, params: &Value) {
+        let provider = params
+            .get("providerID")
+            .and_then(Value::as_str)
+            .unwrap_or_default();
+        let snapshot = params
+            .get("snapshotID")
+            .and_then(Value::as_str)
+            .unwrap_or_default();
+        if !params.as_object().is_some_and(|object| object.len() == 2)
+            || !valid_keymap_provider_id(provider)
+            || !valid_snapshot_id(snapshot)
+        {
+            return shared.respond(
+                &id,
+                Err(rpc_error(
+                    error_codes::INVALID_PARAMS,
+                    "Invalid shortcut import request.",
+                )),
+            );
+        }
+        let call_id = format!("keymap:{provider}");
+        let key = request_key(&id);
+        let cancellation = Cancellation::new();
+        let handler = {
+            let mut state = lock(&shared.state);
+            let handler = state
+                .selected_keymap_providers
+                .contains(provider)
+                .then(|| state.keymap_providers.get(provider).cloned())
+                .flatten();
+            if handler.is_some() {
+                state.incoming.insert(
+                    key.clone(),
+                    Running {
+                        function_id: call_id.clone(),
+                        cancellation: cancellation.clone(),
+                    },
+                );
+            }
+            handler
+        };
+        let Some(handler) = handler else {
+            return shared.respond(
+                &id,
+                Err(rpc_error(
+                    error_codes::INVALID_PARAMS,
+                    "Shortcut import provider was not negotiated.",
+                )),
+            );
+        };
+        let worker = Arc::clone(shared);
+        let call_params = params.clone();
+        let thread_key = key.clone();
+        let thread_id = id.clone();
+        let spawned = thread::Builder::new()
+            .name("lithe-keymap-import".into())
+            .spawn(move || {
+                let ended = Cancellation::new();
+                let context = Context {
+                    shared: Arc::clone(&worker),
+                    function_id: call_id,
+                    operation_id: Value::Null,
+                    host: Host::new(
+                        Arc::clone(&worker),
+                        vec![cancellation.clone(), ended.clone()],
+                    ),
+                    cancellation,
+                    workspace_context: None,
+                    reporting: AtomicBool::new(false),
+                };
+                let outcome = catch_unwind(AssertUnwindSafe(|| handler(call_params, &context)));
+                ended.cancel();
+                let answer = worker.function_answer(&context, outcome);
+                lock(&worker.state).incoming.remove(&thread_key);
+                worker.respond(&thread_id, answer);
+            });
+        if let Err(error) = spawned {
+            lock(&shared.state).incoming.remove(&key);
+            shared.log(format_args!("The import could not start: {error}"));
+            shared.respond(&id, Err(internal_response()));
+        }
     }
 
     fn invoke(shared: &Arc<Self>, id: Value, params: &Value) {
@@ -954,6 +1120,128 @@ impl Context {
     pub fn log(&self, message: impl Display) {
         self.shared.log(message);
     }
+}
+
+/// A single host-authorized source snapshot for a shortcut import.
+pub struct KeymapImportRequest {
+    provider_id: String,
+    snapshot_id: String,
+}
+
+/// A source file in the host's selected, read-only snapshot.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct KeymapSourceFile {
+    pub id: String,
+    pub path: String,
+    pub byte_count: u64,
+}
+
+impl KeymapImportRequest {
+    pub fn provider_id(&self) -> &str {
+        &self.provider_id
+    }
+    pub fn snapshot_id(&self) -> &str {
+        &self.snapshot_id
+    }
+
+    /// Lists the declared files captured for this request. The path is
+    /// relative to the selected source and is only a label, never authority.
+    pub fn list_inputs(&self, host: &Host) -> Result<Vec<KeymapSourceFile>, SdkError> {
+        let result = host.request(
+            "lithe/host/keymapImport/listInputs",
+            json!({
+                "providerID": self.provider_id, "snapshotID": self.snapshot_id
+            }),
+        )?;
+        let invalid = || {
+            SdkError::new(
+                "sdk.keymap.invalidResponse",
+                "Invalid shortcut source list.",
+            )
+        };
+        let files = result
+            .get("files")
+            .and_then(Value::as_array)
+            .filter(|files| files.len() <= 128)
+            .ok_or_else(invalid)?;
+        files
+            .iter()
+            .map(|file| {
+                let id = file
+                    .get("id")
+                    .and_then(Value::as_str)
+                    .filter(|id| valid_snapshot_id(id))
+                    .ok_or_else(invalid)?;
+                let path = file
+                    .get("path")
+                    .and_then(Value::as_str)
+                    .filter(|path| !path.is_empty() && path.len() <= 4096)
+                    .ok_or_else(invalid)?;
+                let byte_count = file
+                    .get("byteCount")
+                    .and_then(Value::as_u64)
+                    .filter(|size| *size <= 1_048_576)
+                    .ok_or_else(invalid)?;
+                Ok(KeymapSourceFile {
+                    id: id.into(),
+                    path: path.into(),
+                    byte_count,
+                })
+            })
+            .collect()
+    }
+
+    /// Reads one bounded chunk from a file ID returned by `list_inputs`.
+    pub fn read_chunk(
+        &self,
+        host: &Host,
+        file_id: &str,
+        offset: u64,
+        maximum_bytes: u32,
+    ) -> Result<Vec<u8>, SdkError> {
+        let invalid = || SdkError::new("sdk.keymap.invalidChunk", "Invalid shortcut source chunk.");
+        if !valid_snapshot_id(file_id)
+            || offset > 1_048_576
+            || maximum_bytes == 0
+            || maximum_bytes > 131_072
+        {
+            return Err(invalid());
+        }
+        let result = host.request(
+            "lithe/host/keymapImport/readChunk",
+            json!({
+                "providerID": self.provider_id, "snapshotID": self.snapshot_id,
+                "fileID": file_id, "offset": offset, "maximumBytes": maximum_bytes
+            }),
+        )?;
+        let encoded = result
+            .get("data")
+            .and_then(Value::as_str)
+            .filter(|data| data.len() <= 174_764)
+            .ok_or_else(invalid)?;
+        let bytes = BASE64.decode(encoded).map_err(|_| invalid())?;
+        if bytes.len() > maximum_bytes as usize {
+            return Err(invalid());
+        }
+        Ok(bytes)
+    }
+}
+
+fn valid_keymap_provider_id(id: &str) -> bool {
+    !id.is_empty()
+        && id.len() <= 64
+        && id.as_bytes()[0].is_ascii_lowercase()
+        && id
+            .bytes()
+            .all(|byte| byte.is_ascii_lowercase() || byte.is_ascii_digit() || byte == b'-')
+}
+
+fn valid_snapshot_id(id: &str) -> bool {
+    !id.is_empty()
+        && id.len() <= 128
+        && id
+            .bytes()
+            .all(|byte| byte.is_ascii_alphanumeric() || byte == b'-' || byte == b'_')
 }
 
 /// A clonable handle to a backend for any thread.

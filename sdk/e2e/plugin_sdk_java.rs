@@ -11,6 +11,12 @@
 mod plugin_sdk;
 
 #[test]
+fn the_java_sdk_import_provider_reads_a_selected_source_through_core() {
+    let (Some(java), Some(jar)) = (std::env::var_os("LITHE_PLUGIN_SDK_JAVA"), std::env::var_os("LITHE_PLUGIN_SDK_JAVA_SAMPLE")) else { return; };
+    plugin_sdk::keymap::run("java-keymap", &java.to_string_lossy(), &["-jar".into(), jar.to_string_lossy().into_owned()]);
+}
+
+#[test]
 fn the_java_sdk_sample_backend_serves_build_requests_and_plugin_functions() {
     let (Some(java), Some(jar)) = (
         std::env::var_os("LITHE_PLUGIN_SDK_JAVA"),

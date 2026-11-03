@@ -19,10 +19,23 @@ on stdio and implements Lithe's backend protocols from
 - **`litheVcs` 1**: typed `lithe/vcs/*` requests, for a plugin's
   `vcsProviders` entry, from the
   [VCS provider contract](https://github.com/1lck/Lithe-IDEA/blob/preview/shared/contracts/vcs-provider-v1.md).
+- **`litheKeymapImport` 1** (unreleased): independently negotiated shortcut
+  import providers reading only explicitly selected source snapshots.
 
 The SDK owns the wire format, negotiation, cancellation, process cleanup, and
 error mapping. Your code supplies only handlers. Node 20.3 or newer is
 required; declare it as the runtime's `minimumVersion`.
+
+## Shortcut import providers (unreleased)
+
+Declare `backend.keymapImportProvider(id, handler)` before listening. Its
+handler receives a snapshot with `providerID`, `snapshotID`, `listInputs()`
+and `readChunk(fileID, offset, maximumBytes)`, plus the normal call context.
+Paths returned by `listInputs` are relative labels; reads use opaque file IDs.
+Return `{ bindings: [...] }` in the normalized contract format and observe the
+call's cancellation signal. The host revokes the snapshot when the call ends.
+Do not turn conditional or multi-stroke rules into global bindings. Product
+discovery and the import workflow are not available yet.
 
 ## A minimal backend
 
@@ -121,7 +134,7 @@ package. The SDK has no dependencies.
 
 | API | Purpose |
 | --- | --- |
-| `createBackend({ name?, version?, capabilities? })` | Creates the backend. `capabilities` are standard LSP server capabilities; `experimental.litheBuild`, `experimental.litheFunctions`, and `experimental.litheVcs` are reserved for the SDK. |
+| `createBackend({ name?, version?, capabilities? })` | Creates the backend. `capabilities` are standard LSP server capabilities; the SDK negotiates its experimental protocols. |
 | `backend.build.model(handler)`, `backend.build.dependencies(handler)` | Implements the typed build requests. The SDK stamps `format` and `version`; a handler returning another format or a version other than 1 fails. Core validates the document. `litheBuild` is answered only when a handler exists. |
 | `backend.build.execute(handler)` | Protocol 2+: provider-owned bounded task, returning `{ exitCode, output }`. |
 | `backend.build.test(handler)`, `backend.build.discoverTests(handler)` | Protocol 3+: exact test execution and runnable selectors; discovery gets `format: "litheTestDiscovery"`, `version: 1`. |

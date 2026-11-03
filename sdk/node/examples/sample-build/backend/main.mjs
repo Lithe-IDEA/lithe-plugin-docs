@@ -24,6 +24,13 @@ import { fileURLToPath } from 'node:url';
 import { createBackend, openStateStore, PluginError } from '../../../src/index.mjs';
 
 const backend = createBackend({ name: 'sample-build', version: '0.1.0' });
+// Exercised only when the Core end-to-end harness offers this provider.
+backend.keymapImportProvider('fixture', async (snapshot) => {
+  const files = await snapshot.listInputs();
+  const bytes = await snapshot.readChunk(files[0].id, 0, 4);
+  if (Buffer.from(bytes).toString('utf8') !== 'data') throw new Error('Unexpected fixture source');
+  return { bindings: [{ commandID: 'find-next', keys: [{ key: 'f3', modifiers: [] }] }] };
+});
 let workspaceRoot;
 let store;
 

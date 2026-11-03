@@ -19,6 +19,7 @@
 #![allow(dead_code)]
 
 pub mod backend;
+pub mod keymap;
 pub mod native_build;
 pub mod vcs;
 
