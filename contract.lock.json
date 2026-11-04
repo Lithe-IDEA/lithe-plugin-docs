@@ -3,12 +3,12 @@
   "source": {
     "repository": "https://github.com/1lck/Lithe-IDEA",
     "directory": "shared/contracts/plugins/v1",
-    "revision": "f64d262c48f1ff5ad1778b301138596493a09ad5"
+    "revision": "ced042289b5fbf9b6562eacd8da1f15428b5849d"
   },
   "files": [
     {
       "path": "README.md",
-      "sha256": "4cfe0f5f6cb15980bf9db4b19fe5ed80082c417132ccad04dee5959d7efdef72"
+      "sha256": "b30695e1c297812ad009937b78daf12f23b74d4c111c602614e393c25d5b5693"
     },
     {
       "path": "fixtures/backend-workspace.plugin.json",
@@ -100,7 +100,7 @@
     },
     {
       "path": "fixtures/command-plans.json",
-      "sha256": "a188fd65f6cdb47f9e9ad4b0de3a7ddcd17e4e577b34f6e25b96d2c1f2bdca7c"
+      "sha256": "d268b4d3966c73031b1876c11cec9a2f6ee6dcc27b8bee687c9a349c147610f4"
     },
     {
       "path": "fixtures/debug-adapter-language-server.plugin.json",
@@ -137,6 +137,10 @@
     {
       "path": "fixtures/invalid-manifests.json",
       "sha256": "3859c99928158e44fc1f9f25caff5289ed3c2f8e3af200108ab17051915246c2"
+    },
+    {
+      "path": "fixtures/keymap-import-provider.plugin.json",
+      "sha256": "03d3843f30edd82fd02652a6f800eca9d7afcddc7b9d2a0bd1b3726c2dfb8eae"
     },
     {
       "path": "fixtures/language-grammar.plugin.json",
@@ -256,7 +260,7 @@
     },
     {
       "path": "plugin-manifest.schema.json",
-      "sha256": "fba04d8c2c053cec877ab0419e1236810a75368fb3536b271b6a6301ba750339"
+      "sha256": "7ed0714e4d6120dc4098410db07ca5286f64677b05f03b7532f0ca73bdda2e5d"
     },
     {
       "path": "proposals/toolchains/README.md",

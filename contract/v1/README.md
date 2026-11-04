@@ -13,6 +13,7 @@ This directory is the cross-platform source of truth:
 | `plugin-manifest.schema.json` | JSON shape of `plugin.json` |
 | `fixtures/*.plugin.json` | Valid example manifests, named after the capability they exercise rather than a published plugin: `language-*` (packaged, system-command, and host-integration language servers; `node-runtime` for a discovered runtime), `hello-lithe` and `web-panel` (UI), `settings-v2`, and `build-*` (level 3 build systems and the two forms of a build provider) |
 | `fixtures/tool-definition.plugin.json`, `fixtures/toolchain-provider.plugin.json` | Production-shape Core fixtures for tool definitions and a packaged toolchain provider; require explicit new host capabilities, not yet supplied by native products |
+| `fixtures/keymap-import-provider.plugin.json` | Two independent shortcut import providers sharing one packaged backend; native source access is not implemented yet |
 | `fixtures/invalid-manifests.json` | Edits to a valid manifest and the rejection code every host must report |
 | `fixtures/command-plans.json` | Golden run/test command expansions and language-server launch plans |
 | `fixtures/runtime-versions.json` | Golden outcomes of the launch runtime version check |
@@ -56,13 +57,77 @@ admit new sources into existing Build candidate sets. Definitions are entirely
 plugin-owned, with reserved short IDs checked against host-verified official
 provenance when constructing the registry.
 
-Neither native host advertises or integrates this foundation yet. Core consumes
-captured host facts; it does not start a provider, run a probe, watch files, scan
-the system, persist pins, or change current Java/Maven selection. The broader
-proposal remains unsupported where it exceeds this implemented slice. In
-particular, `toolchainConsumers`, generic runtime launches, settings pages, mise
-and SDKMAN providers, and live backend activation are not implemented here.
-Proposal envelopes remain separate from production manifests.
+macOS advertises these capabilities for its read-only toolchain settings pages.
+The native adapter scans declarations, probes checked executables, queries plugin
+backends and watches their inputs; Core consumes captured facts and owns validation
+and resolution. Windows does not advertise the capabilities. Saving pins,
+`toolchainConsumers`, generic runtime launches and live backend activation remain
+unsupported, and current Java/Maven/Build/Run selection is unchanged. Version-manager
+implementations such as mise belong to their own plugin packages. Proposal
+envelopes remain separate from production manifests. See [the implemented slice](toolchains.md).
+
+## Shortcut import providers (Core foundation)
+
+`keymapImportProviders` contains one to eight `{id, displayName, recognition, inputs}` entries.
+IDs are unique within the plugin, start with a lowercase letter, contain only
+lowercase ASCII letters, digits and hyphens, and are at most 64 bytes. The
+plugin requires `keymapImportProviders: 1`, `backend: 2`, `serverProcess: 1`,
+`backend.launch`, `keymaps.provide` and `keymaps.readSelectedSources`. Its backend starts from a packaged
+executable or packaged runtime without discovered runtime dependencies. The
+host starts it for an explicit import; it is not a startup or workspace-open
+activation event. The permission permits offering mappings; it grants no file
+access on its own. `keymaps.readSelectedSources` authorizes only the provider's
+declared inputs under the source directory the user explicitly selected for this
+import, and only for the lifetime of that import.
+
+`recognition` lists one to sixteen distinct metadata-only probes. A
+`{kind: "file" | "directory", path}` probe matches an entry of that kind
+beneath the selected root, using the input path restrictions and refusing
+symlinks. A `{kind: "root", base: "userConfig", components}` probe matches
+the selected directory's exact path beneath the platform's user configuration
+directory (macOS Application Support, Windows roaming AppData). Components
+contain one to eight safe literal names and may end in one `*`, matching
+exactly one directory component; the first component must be literal. The
+source matches any probe. Recognition never authorizes reading file contents
+or discloses the absolute path to the provider. A host may use probes without
+launching backends, and must recheck them on import.
+
+`inputs` lists one to sixteen unique selectors. `{kind: "file", path}` selects
+one relative file; `{kind: "directory", path, extension}` selects immediate
+children of that directory with the exact lowercase alphanumeric extension,
+never recursive descendants. Paths have at most 256 characters, contain no
+empty, `.` or `..` segments, backslashes, colons, wildcards, control characters,
+or segments ending in a dot or space. Directory selectors have at most 64
+matches after scanning at most 4096 directory entries. The native reader must reject symlinks and paths escaping the
+selected root, bound each file to 1 MiB and the snapshot to 8 MiB, and expose
+only scoped opaque handles in chunks of at most 128 KiB. A manifest cannot
+authorize arbitrary paths or access an unselected source.
+
+Core offers `experimental.litheKeymapImport: {versions: [1], providers}` only
+to a plugin-owned session with declared providers. The backend selects a
+nonempty duplicate-free subset as `{version: 1, providers}`. A request to an
+unselected provider is refused. `lithe/keymap/import` carries only
+`{providerID, snapshotID}`. The snapshot is an opaque host-owned reference;
+the provider never interprets it as a path. Core bounds the operation and
+validates normalized results against the host's action catalog. Providers own
+source formats and must not silently promote conditional or multi-stroke rules
+to global shortcuts. The exact Core commands, limits and fixtures are in the
+[Rust Core API](https://github.com/1lck/Lithe-IDEA/blob/preview/shared/contracts/rust-core-api.md#normalized-shortcut-import-validation).
+
+When granted individually, protocol 3 methods `lithe/host/keymapImport/listInputs`
+and `lithe/host/keymapImport/readChunk` take `snapshotID` and `providerID`.
+Listing returns `{files: [{id, path, byteCount}]}`; a read additionally takes
+`fileID`, a nonnegative `offset` and `maximumBytes` from 1 through 131072 and
+returns `{data}` containing base64 bytes. Paths are relative to the selected
+root and file IDs are opaque. The host binds snapshots to their plugin, session
+and provider, revokes them when the import or session ends, and rejects files
+replaced or changed after capture. A new snapshot for that provider revokes the
+previous one. Errors never disclose absolute paths.
+
+This is a foundation, not an available product extension: macOS implements the
+scoped reader, but provider discovery, the product import workflow and Windows
+source access are not implemented. Hosts must not advertise this capability
+until they implement the complete workflow. No existing SDK advertises it.
 
 ## Package layout
 
@@ -96,8 +161,9 @@ symbolic links. A host treats an installed package as read-only.
 | `settings` | User-adjustable plugin options (level 2 and later). |
 | `ui` | Host-rendered tool windows and commands (level 2 and later). |
 | `buildSystems` | Project-level build tools (level 3). |
-| `toolDefinitions` | Plugin-owned tool policy ([Core foundation](toolchains.md)); requires `toolDefinitions: 1` and `executableResolution: 2`; native adapters are not connected. |
+| `toolDefinitions` | Plugin-owned tool policy ([Core foundation](toolchains.md)); requires `toolDefinitions: 1` and `executableResolution: 2`; macOS hosts read-only discovery. |
 | `toolchainProviders` | Backend fact-provider declarations ([Core foundation](toolchains.md)); requires `toolchainProviders: 1`, backend/server-process capabilities and `toolchains.provide`. |
+| `keymapImportProviders` | Independent shortcut import providers; requires `keymapImportProviders: 1`, `backend: 2`, `serverProcess: 1` and `keymaps.provide`. macOS provides access to explicitly selected sources; Windows does not yet advertise this capability. |
 
 Unknown fields are refused (`plugin.manifest.invalid`) so an older host
 rejects a package instead of ignoring part of it. At levels 1 and 2 a new
@@ -295,6 +361,7 @@ contains a machine path, and the host decides where state lives.
 | `${pluginDir}` | Root of the installed, read-only package. It must be used at most once per value and be followed by a `/`-rooted path inside the package; that path may vary only by `${arch}`. |
 | `${stateDir}` | Writable directory the host keeps for this plugin's server and removes when the plugin is uninstalled. Not available in `validationArguments`. |
 | `${workspaceStateDir}` | Writable directory for the server's state of the current workspace. Not available in `validationArguments`, nor in a [plugin backend](#plugin-backend), which belongs to no workspace. |
+| `${logDir}` | Absolute current-session `plugins/<id>/files/` directory, explicitly supplied by the host as `logDirectory`. Available for language servers and plugin backends, never in `validationArguments`. The host creates it in writable log storage, outside the installed package; Core does not derive it from package resources. |
 | `${arch}` | Host CPU architecture: `arm64` or `x86_64`. |
 | `${setting:<id>}` | Current value of a declared [plugin setting](#plugin-settings-api-2). Not available in `validationArguments`, and never inside a package path. |
 
@@ -302,10 +369,10 @@ contains a machine path, and the host decides where state lives.
 host selects the process with exactly one of `languageID` (a language server),
 `buildSystemID` (a build provider), `vcsProviderID` (a VCS provider), and
 `backend: true` (the [plugin backend](#plugin-backend)), passes `{pluginDirectory,
-stateDirectory, workspaceStateDirectory?, architecture, settings?}`, and
+stateDirectory, workspaceStateDirectory?, logDirectory?, architecture, settings?}`, and
 receives. `workspaceStateDirectory` may be omitted only when the selected
 process does not use `${workspaceStateDir}`; otherwise the request is
-`plugin.launch.invalidRequest`.
+`plugin.launch.invalidRequest`. The same error applies when a template uses `${logDir}` but `logDirectory` is absent, empty, or not absolute.
 
 | Field | Meaning |
 | --- | --- |
@@ -314,7 +381,7 @@ process does not use `${workspaceStateDir}`; otherwise the request is
 | `validationArguments` | Expanded probe arguments. |
 | `runtimeRequirements` | `{tool, minimumVersion?}` for every runtime the host must discover, a discovered launch tool included, sorted by tool. A packaged runtime is not listed. Only the launch tool can carry a minimum version. |
 | `initializationOptions` | Expanded options; absent when the server declares none. |
-| `requiredDirectories` | `state` and/or `workspaceState`: the directories the host must create before starting the server. |
+| `requiredDirectories` | `state`, `workspaceState`, and/or `log`: the directories the host must create before starting the server. |
 | `requiredPackagePaths` | Sorted package-relative paths the launch points at. The host verifies each is inside the package and not a symbolic link before starting the server. |
 | `settings` | Effective value of every declared setting that produced this plan; absent when the plugin declares none. |
 | `buildProvider` | Present only for a `buildSystemID` selection: `{buildSystemID, executesProjectCode, mayUseNetwork, languageServer?}`. `languageServer` names the language whose server is the provider; the rest of the plan is then that server's plan, and the host reuses its running session instead of starting a second process. |
@@ -513,9 +580,9 @@ hosts. Level 3 versions each section on its own. A level 3 manifest lists in
 | `debugAdapters` | [`debugAdapters[]`](#api-level-4-debug-adapters); v2 adds target arguments/environment | `1`, `2` |
 | `projectGenerators` | [`projectGenerators[]`](#project-generators): entries of the New Project window | `1` |
 | `backend` | [`backend`](#plugin-backend): the plugin's own long-lived process | `1`, `2` (adds [start without a page and workspace contexts](#backend-2-workspace-contexts)) |
-| `toolDefinitions` | [Tool identities, layouts, discovery and four-layer candidates](toolchains.md) | `1` (Core only) |
-| `toolchainProviders` | [Provider declarations and permission-bound answer validation](toolchains.md) | `1` (Core only) |
-| `executableResolution` | [Shared executable candidates](#shared-executable-candidates-executableresolution-1); v2 adds tool-definition candidates without changing existing Build candidate sets | `1`, `2` (v2 Core only) |
+| `toolDefinitions` | [Tool identities, layouts, discovery and four-layer candidates](toolchains.md) | `1` (Core; macOS read-only settings) |
+| `toolchainProviders` | [Provider declarations and permission-bound answer validation](toolchains.md) | `1` (Core; macOS read-only settings) |
+| `executableResolution` | [Shared executable candidates](#shared-executable-candidates-executableresolution-1); v2 adds tool-definition candidates without changing existing Build candidate sets | `1`, `2` (v2 Core; macOS read-only settings) |
 
 Version 1 of every capability means what its section means at level 2
 (runtime launches, launch templates, `initializationOptions`, and so on), so
@@ -603,6 +670,8 @@ Rules for publishing across levels and capability versions:
 | `ui.contribute` | `ui` is declared |
 | `ui.web` | a tool window shows [web content](#web-content-ui-2) |
 | `backend.launch` | `backend` is declared |
+| `keymaps.provide` | `keymapImportProviders` is nonempty; permits offering mappings, not reading files by itself |
+| `keymaps.readSelectedSources` | `keymapImportProviders` is nonempty; permits reading only declared files in an explicitly selected import source |
 | `credentials.store` | the backend uses the [credentials host service](#host-services-protocol-version-2); refused without a `backend` |
 | `workspace.metadata` | the backend uses the [workspace host service](#workspace-contexts-and-capability-discovery-protocol-version-3); refused without `backend` 2 |
 | `editor.actions` | the backend registers independent editor actions; requires `backend` 2 and `documents.read`, grants only `editor/registerActions`, not document edits or domain execution |
