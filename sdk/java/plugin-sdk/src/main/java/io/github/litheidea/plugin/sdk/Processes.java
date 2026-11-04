@@ -79,6 +79,7 @@ public final class Processes {
         private long killGraceMillis = 2000;
         private Consumer<String> onStdout;
         private Consumer<String> onStderr;
+        private Runnable listenerFailure = () -> {};
 
         /** Working directory; defaults to the backend's. */
         public Options directory(Path value) {
@@ -122,6 +123,8 @@ public final class Processes {
             return this;
         }
 
+        Options listenerFailure(Runnable value) { listenerFailure = value; return this; }
+
         Cancellation cancellation() {
             return cancellation;
         }
@@ -135,6 +138,7 @@ public final class Processes {
             copy.killGraceMillis = killGraceMillis;
             copy.onStdout = onStdout;
             copy.onStderr = onStderr;
+            copy.listenerFailure = listenerFailure;
             return copy;
         }
     }
@@ -213,8 +217,8 @@ public final class Processes {
         process.getOutputStream().close();
         Running entry = new Running(process, grouped ? GROUPS.leader(process) : 0);
         RUNNING.add(entry);
-        Capture stdout = new Capture(process.getInputStream(), settings.maxOutputBytes, settings.onStdout, "stdout");
-        Capture stderr = new Capture(process.getErrorStream(), settings.maxOutputBytes, settings.onStderr, "stderr");
+        Capture stdout = new Capture(process.getInputStream(), settings.maxOutputBytes, settings.onStdout, "stdout", settings.listenerFailure);
+        Capture stderr = new Capture(process.getErrorStream(), settings.maxOutputBytes, settings.onStderr, "stderr", settings.listenerFailure);
         Cancellation.Registration registration = cancellation == null
                 ? () -> {}
                 : cancellation.onCancel(() -> entry.stop(settings.killGraceMillis));
@@ -377,13 +381,15 @@ public final class Processes {
         private final InputStream input;
         private final int limit;
         private final Consumer<String> listener;
+        private final Runnable listenerFailure;
         private final CharsetDecoder decoder = StandardCharsets.UTF_8.newDecoder()
                 .onMalformedInput(CodingErrorAction.REPLACE)
                 .onUnmappableCharacter(CodingErrorAction.REPLACE);
         private final Thread thread;
         private volatile boolean truncated;
 
-        Capture(InputStream input, int limit, Consumer<String> listener, String name) {
+        Capture(InputStream input, int limit, Consumer<String> listener, String name, Runnable listenerFailure) {
+            this.listenerFailure = listenerFailure;
             this.input = input;
             this.limit = limit;
             this.listener = listener;
@@ -433,7 +439,7 @@ public final class Processes {
                 try {
                     listener.accept(characters.toString());
                 } catch (RuntimeException error) {
-                    System.err.println("An output listener failed: " + error);
+                    listenerFailure.run();
                 }
             }
         }

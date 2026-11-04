@@ -56,7 +56,7 @@ class BackendTest {
         TestHost host = new TestHost(backend);
         Map<String, Object> result = object(host.initialize().get("result"));
         assertEquals(
-                map("litheBuild", map("version", 1L),
+                map("litheLogging", map("version", 1L), "litheBuild", map("version", 1L),
                         "litheFunctions", map("version", 1L, "functions",
                                 Arrays.asList(map("id", "install.prepare"), map("id", "snapshot.refresh")))),
                 object(result.get("capabilities")).get("experimental"));
@@ -69,7 +69,7 @@ class BackendTest {
     @Test
     void aHostThatOffersNothingGetsNoLitheCapabilities() {
         TestHost quiet = new TestHost(functionBackend());
-        assertEquals(map(), object(object(quiet.initialize(map()).get("result")).get("capabilities")).get("experimental"));
+        assertEquals(map("litheLogging", map("version", 1L)), object(object(quiet.initialize(map()).get("result")).get("capabilities")).get("experimental"));
         quiet.close();
 
         // No build handler: litheBuild is never claimed. Only an unknown version: no functions.
@@ -77,7 +77,7 @@ class BackendTest {
         Map<String, Object> answer = object(other.initialize(map(
                 "litheBuild", map("versions", Arrays.asList(1L)),
                 "litheFunctions", map("versions", Arrays.asList(99L)))).get("result"));
-        assertEquals(map(), object(answer.get("capabilities")).get("experimental"));
+        assertEquals(map("litheLogging", map("version", 1L)), object(answer.get("capabilities")).get("experimental"));
         other.close();
     }
 
@@ -219,8 +219,86 @@ class BackendTest {
         assertEquals(-32603L, crash.get("code"));
         assertFalse(((String) crash.get("message")).contains("/Users/"));
         assertFalse(crash.containsKey("data"));
+        assertEquals("", host.errors());
+        List<Map<String, Object>> facts = new ArrayList<>();
+        for (Map<String, Object> message : host.messages()) {
+            if ("lithe/log".equals(message.get("method"))) facts.add(object(message.get("params")));
+        }
+        assertEquals(2, facts.size());
+        assertEquals("operationFailed", facts.get(0).get("kind"));
+        assertEquals("maven.snapshotLocked", facts.get(0).get("code"));
+        assertEquals("internal_error", facts.get(1).get("code"));
+        assertEquals("b", facts.get(1).get("operationId"));
         assertThrows(IllegalArgumentException.class, () -> new PluginError("bad code!", "x"));
         host.close();
+    }
+
+    @Test
+    void typedDiagnosticsCorrelateAndSuppressOnlySuccess() {
+        Backend backend = Backend.create(null, null).function("work.inspect", (params, context) -> {
+            context.diagnostics().degraded("work.inspect", "cache_unavailable", 2L);
+            context.diagnostics().recovered("work.inspect", "cache_restored");
+            if (Boolean.TRUE.equals(params.get("fail"))) throw new PluginError("work.failed", "private explanation");
+            return null;
+        }).suppressSuccessDiagnostics("work.inspect");
+        TestHost host = new TestHost(backend);
+        try {
+            host.initialize();
+            host.request("lithe/function/invoke", invoke("work.inspect", "host-success", map("fail", false)));
+            host.request("lithe/function/invoke", invoke("work.inspect", "host-failure", map("fail", true)));
+            List<Map<String, Object>> facts = new ArrayList<>();
+            for (Map<String, Object> message : host.messages()) {
+                if ("lithe/log".equals(message.get("method"))) facts.add(object(message.get("params")));
+            }
+            assertEquals(5, facts.size());
+            assertEquals("operationFailed", facts.get(4).get("kind"));
+            assertEquals("host-failure", facts.get(4).get("operationId"));
+            assertEquals("work.failed", facts.get(4).get("code"));
+            assertFalse(facts.toString().contains("private explanation"));
+            assertEquals("", host.errors());
+            assertThrows(PluginSdkError.class, () -> backend.diagnostics().degraded("unknown", "failure"));
+            assertThrows(PluginSdkError.class, () -> backend.diagnostics().degraded("work.inspect", "raw message"));
+        } finally { host.close(); }
+    }
+
+    @Test
+    void modelDiagnosticsReuseOriginalRpcIdWhenOperationIsAbsent() {
+        Backend backend = Backend.create(null, null).onModel((params, context) -> {
+            context.diagnostics().degraded("lithe/build/model", "snapshot_unavailable");
+            return map("projects", Collections.emptyList());
+        });
+        TestHost host = new TestHost(backend);
+        try {
+            host.initialize();
+            host.request("lithe/build/model", map("root", "."), 42L);
+            List<Object> operations = new ArrayList<>();
+            for (Map<String, Object> message : host.messages()) {
+                if ("lithe/log".equals(message.get("method"))) operations.add(object(message.get("params")).get("operationId"));
+            }
+            assertEquals(Arrays.asList("42", "42"), operations);
+        } finally { host.close(); }
+    }
+
+    @Test
+    void initializeDiagnosticsWaitForCapabilityAnswerAndStayBounded() {
+        Backend backend = Backend.create(null, null);
+        backend.onInitialize((params, negotiated) -> {
+            for (long count = 0; count < 10; count++) {
+                backend.diagnostics().degraded("initialize", "snapshot_unavailable", count);
+            }
+        });
+        TestHost host = new TestHost(backend);
+        try {
+            host.initialize();
+            host.request("lithe/function/invoke", invoke("missing", "barrier", null));
+            List<Map<String, Object>> messages = host.messages();
+            assertNotNull(messages.get(0).get("result"), "capability answer precedes diagnostics");
+            List<Object> counts = new ArrayList<>();
+            for (Map<String, Object> message : messages) {
+                if ("lithe/log".equals(message.get("method"))) counts.add(object(message.get("params")).get("count"));
+            }
+            assertEquals(Arrays.asList(0L, 1L, 2L, 3L, 4L, 5L, 6L, 7L), counts);
+        } finally { host.close(); }
     }
 
     @Test
@@ -476,7 +554,7 @@ class BackendTest {
         });
         TestHost host = new TestHost(backend);
         CompletableFuture<Map<String, Object>> initialize = host.requestAsync("initialize",
-                map("capabilities", map()), 3001L);
+                map("capabilities", map("experimental", map("litheLogging", map("versions", Arrays.asList(1))))), 3001L);
         Fixtures.await(hookStarted, "the initialize hook");
         assertNull(host.request("shutdown", null).get("error"));
         release.countDown();

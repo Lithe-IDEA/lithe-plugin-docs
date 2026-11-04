@@ -81,7 +81,7 @@ test('a host that does not offer litheVcs gets no provider and no VCS answers', 
   const backend = createBackend().vcs('svn', required());
   const host = new TestHost(backend);
   const { result } = await host.initialize({ litheVcs: { versions: [2] } });
-  assert.deepEqual(result.capabilities.experimental, {});
+  assert.deepEqual(result.capabilities.experimental, { litheLogging: { version: 1 } });
   assert.equal(backend.negotiated.vcs, false);
   const refused = await host.request('lithe/vcs/status', { root: ROOT, tool: null });
   assert.equal(refused.error.code, ERROR_CODES.methodNotFound);

@@ -21,10 +21,7 @@ pub(crate) fn protocol_output() -> Box<dyn Write + Send> {
             let protocol = dup(1);
             if protocol >= 0 {
                 if dup2(2, 1) < 0 {
-                    let _ = writeln!(
-                        io::stderr(),
-                        "Could not redirect stdout; printing to stdout corrupts the protocol."
-                    );
+                    std::process::exit(1);
                 }
                 return Box::new(std::fs::File::from_raw_fd(protocol));
             }

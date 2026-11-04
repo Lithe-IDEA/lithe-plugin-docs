@@ -22,7 +22,7 @@ public class PluginError extends RuntimeException {
         this(code, message, null);
     }
 
-    /** As {@link #PluginError(String, String)}; {@code cause} is kept for logs only. */
+    /** As {@link #PluginError(String, String)}; {@code cause} stays in memory, outside automatic diagnostics. */
     public PluginError(String code, String message, Throwable cause) {
         super(message, cause);
         if (!Protocol.isPluginErrorCode(code)) {

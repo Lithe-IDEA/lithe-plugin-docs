@@ -53,7 +53,14 @@ impl Provider<'_> {
                 "arguments": arguments,
             }),
         );
-        self.session.completion(&operation_id)
+        let completed = self.session.completion(&operation_id);
+        let (event, level) = if completed.get("error").is_some() {
+            ("plugins.operation.failed", "ERROR")
+        } else {
+            ("plugins.operation.finished", "INFO")
+        };
+        super::assert_log_facts(&self.session.plugin_id, &[(&operation_id, event, level)]);
+        completed
     }
 
     /// Sends one operation and returns the reply as `vcs.decodeReply` normalizes it.

@@ -117,6 +117,8 @@ pub fn run_backend_scenario(package: &Path) {
         "a machine path reached the host: {failed}"
     );
 
+    super::assert_log_facts(&plugin_id, &[("save", "plugins.operation.finished", "INFO"), ("fail", "plugins.operation.failed", "ERROR")]);
+
     // Credentials travel as host requests and never touch the state directory.
     let mut store = BTreeMap::new();
     let remembered = serve_host(

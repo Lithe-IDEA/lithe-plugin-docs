@@ -14,6 +14,7 @@
 | 跟着教程完整做一遍 | [教程](#教程) |
 | 写 `plugin.json` 时有提示和校验 | [在编辑器里校验](#在编辑器里校验-pluginjson) |
 | 需要自己的后端进程 | [插件后端 SDK](#插件后端-sdk可选) |
+| 接入宿主日志、排查插件故障 | [插件接入统一日志](guides/plugin-logging.md) |
 | 参考现成插件 | [示例插件](#示例插件) |
 | 查字段的准确含义 | [插件契约](#插件契约) |
 
@@ -34,7 +35,7 @@ Lithe 读取并校验 `plugin.json`，然后自己启动其中声明的外部进
 - `id` 用你自己的反向域名，例如 `io.github.<你的用户名>.zig-support`。`dev.lithe` 和 `dev.lithe.*` 是官方保留命名空间。
 - `vendor.signatureRequirement` 写 `"none"`。社区插件不带 Lithe 签名，用户安装前会看到完整的程序、权限和来源，并确认。
 - 包内路径只用 `/`，不能有 `..`、绝对路径或符号链接。
-- 插件包安装后是只读的。缓存、状态和日志写到 Lithe 通过启动模板传给你的目录（`${stateDir}`、`${workspaceStateDir}`），不要写进插件包。
+- 插件包安装后是只读的。缓存和状态使用 Lithe 通过启动模板传入的 `${stateDir}`、`${workspaceStateDir}`；诊断日志使用 SDK 与宿主统一入口。确需原生文件日志时，先确认目标宿主支持 `${logDir}`，详见[插件接入统一日志](guides/plugin-logging.md)。
 
 ## 五步做出第一个插件
 
@@ -128,6 +129,7 @@ SDK 的源码都在本仓库的 `sdk/` 下，发布在[本仓库的 Releases](ht
 | 教程 | 内容 |
 | --- | --- |
 | [LSP 插件完整生命周期](guides/lsp-plugin-lifecycle.md) | 从 Lua 模板开始：清单、服务器打包、激活、状态目录、停止、升级与卸载 |
+| [插件接入统一日志](guides/plugin-logging.md) | 三 SDK 的安全失败边界、受管诊断通道、macOS v2 / Windows v1 状态，以及 `${logDir}` 的本地会话生命周期 |
 | [原生构建工作流（开发中）](guides/native-build-workflows.md) | Node/Java SDK 的构建执行、精确测试、运行准备，以及未提交源码的真实 Core 验证 |
 | [构建、运行与测试接入](guides/build-tool-integration.md) | 可用的执行提供者示例、工程后端边界，以及开发中的 API 3 状态 |
 | [编写调试适配器插件](guides/debug-adapter-plugin.md) | API 4：从最小清单到启动方式、先编译再调试的 `executable`、调试控制台补全，以及预发布与转正 |

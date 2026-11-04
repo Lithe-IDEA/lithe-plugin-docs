@@ -27,6 +27,7 @@ fn negotiates_only_offered_providers_and_invokes_typed_domain_request() {
         0,
         "initialize",
         json!({"capabilities": {"experimental": {
+            "litheLogging": {"versions": [1]},
             "litheKeymapImport": {"versions": [1], "providers": ["first", "unknown"]}
         }}}),
     );
@@ -40,7 +41,16 @@ fn negotiates_only_offered_providers_and_invokes_typed_domain_request() {
         "lithe/keymap/import",
         json!({"providerID":"first", "snapshotID":"snapshot-1"}),
     );
-    assert_eq!(host.answer(1).0["result"], json!({"bindings":[]}));
+    let (answer, before) = host.answer(1);
+    assert_eq!(answer["result"], json!({"bindings":[]}));
+    // The fact names the wire method Core accepts, never the provider-scoped call id.
+    let facts: Vec<_> = before
+        .iter()
+        .filter(|frame| frame["method"] == "lithe/log")
+        .collect();
+    assert_eq!(facts.len(), 1);
+    assert_eq!(facts[0]["params"]["kind"], "operationFinished");
+    assert_eq!(facts[0]["params"]["operation"], "lithe/keymap/import");
     host.request(
         2,
         "lithe/keymap/import",
@@ -81,7 +91,7 @@ fn cancellation_reaches_a_running_provider() {
         })
         .unwrap();
     let mut host = Host::start(backend);
-    host.request(0, "initialize", json!({"capabilities":{"experimental":{"litheKeymapImport":{"versions":[1],"providers":["first"]}}}}));
+    host.request(0, "initialize", json!({"capabilities":{"experimental":{"litheLogging":{"versions":[1]},"litheKeymapImport":{"versions":[1],"providers":["first"]}}}}));
     host.answer(0);
     host.request(
         1,
@@ -111,9 +121,14 @@ fn provider_lists_and_reads_selected_files_through_scoped_host() {
         })
         .unwrap();
     let mut host = Host::start(backend);
-    host.request(0, "initialize", json!({"capabilities":{"experimental":{
-        "litheFunctions":{"versions":[3]}, "litheKeymapImport":{"versions":[1],"providers":["first"]}
-    }}}));
+    host.request(
+        0,
+        "initialize",
+        json!({"capabilities":{"experimental":{
+            "litheLogging":{"versions":[1]}, "litheFunctions":{"versions":[3]},
+            "litheKeymapImport":{"versions":[1],"providers":["first"]}
+        }}}),
+    );
     host.answer(0);
     host.request(
         1,

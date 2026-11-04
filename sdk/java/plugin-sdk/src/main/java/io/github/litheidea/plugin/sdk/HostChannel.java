@@ -258,7 +258,7 @@ final class HostChannel {
                 if (early.size() < MAX_EARLY_EVENTS) {
                     early.add(new Early((String) id, sequence, params.get("event")));
                 } else {
-                    transport.log("Dropped an early event of subscription " + id + ".");
+                    transport.log("Dropped an early subscription event: queue_full");
                 }
             }
             // Otherwise the subscription was disposed; nothing follows a disposal.
@@ -477,7 +477,7 @@ final class HostChannel {
                     route.listener.onEvent(event);
                 }
             } catch (Throwable error) {
-                transport.log("Subscription " + route.id + " failed to handle an event:", error);
+                transport.log("A subscription listener failed:", error);
             }
         }
     }

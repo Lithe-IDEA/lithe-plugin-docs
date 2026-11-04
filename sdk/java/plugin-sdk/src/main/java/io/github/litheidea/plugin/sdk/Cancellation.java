@@ -15,6 +15,9 @@ public final class Cancellation {
     private final Object lock = new Object();
     private final List<Runnable> listeners = new ArrayList<>();
     private String reason;
+    private final Runnable listenerFailure;
+    public Cancellation() { this(() -> {}); }
+    Cancellation(Runnable listenerFailure) { this.listenerFailure = listenerFailure; }
 
     /** Cancels with {@code reason}; later calls have no effect. */
     public void cancel(String reason) {
@@ -73,7 +76,7 @@ public final class Cancellation {
      * a plugin may also stop for its own reasons.
      */
     public Cancellation combinedWith(Cancellation other) {
-        Cancellation combined = new Cancellation();
+        Cancellation combined = new Cancellation(listenerFailure);
         Registration first = onCancel(() -> combined.cancel(reasonOrDefault()));
         Registration second = other.onCancel(() -> combined.cancel(other.reasonOrDefault()));
         combined.onCancel(() -> {
@@ -83,11 +86,11 @@ public final class Cancellation {
         return combined;
     }
 
-    private static void runIsolated(Runnable listener) {
+    private void runIsolated(Runnable listener) {
         try {
             listener.run();
         } catch (RuntimeException error) {
-            System.err.println("A cancellation listener failed: " + error);
+            listenerFailure.run();
         }
     }
 

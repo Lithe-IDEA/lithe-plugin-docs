@@ -29,6 +29,7 @@ use std::collections::BTreeMap;
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::Command;
+use std::sync::{Mutex, PoisonError};
 use std::time::{Duration, Instant};
 
 const BUILD_SYSTEM: &str = "sample";
@@ -456,6 +457,7 @@ pub fn run_sample_scenario(sample: &Sample) {
         dependencies["dependencies"]["dependencies"][0]["name"], "left-pad",
         "{dependencies}"
     );
+    assert_log_facts(&plugin_id, &[("model", "plugins.operation.finished", "INFO"), ("dependencies", "plugins.operation.finished", "INFO")]);
 
     // A multi-step function: prepare, run the tool, record a snapshot.
     let built = session.call(
@@ -494,6 +496,8 @@ pub fn run_sample_scenario(sample: &Sample) {
         "{failed}"
     );
     assert_eq!(failed["error"]["pluginErrorCode"], "sample.buildFailed");
+
+    assert_log_facts(&plugin_id, &[("build-app", "plugins.operation.finished", "INFO"), ("build-broken", "plugins.operation.failed", "ERROR")]);
 
     // Cancelling a running build ends the tool the backend started.
     session.invoke(
@@ -580,4 +584,44 @@ pub fn run_sample_scenario(sample: &Sample) {
         state.is_empty(),
         "cleared state left files behind: {state:?}"
     );
+}
+
+/// Facts drained from Core's process-global catalog queue but not yet claimed.
+///
+/// Tests in one binary run in parallel and share that queue, so a drain can
+/// return facts recorded for another test's plugin. Every drain happens under
+/// this lock and lands here; each test then takes only its own plugin's facts.
+static DRAINED_FACTS: Mutex<Vec<Value>> = Mutex::new(Vec::new());
+
+/// Drains Core's queue and returns every unclaimed fact on the plugin's channel.
+fn take_plugin_facts(plugin: &str) -> Vec<Value> {
+    let channel = format!("plugins/{plugin}/host");
+    let mut facts = DRAINED_FACTS.lock().unwrap_or_else(PoisonError::into_inner);
+    let drained = core("diagnostics.drainCoreEvents", json!({}));
+    facts.extend(drained["events"].as_array().cloned().unwrap_or_default());
+    let (mine, others): (Vec<Value>, Vec<Value>) = facts
+        .drain(..)
+        .partition(|fact| fact["channel"] == channel.as_str());
+    *facts = others;
+    mine
+}
+
+/// Typed SDK notifications reach the Core-owned queue, with host operation correlation.
+fn assert_log_facts(plugin: &str, expected: &[(&str, &str, &str)]) {
+    let records = take_plugin_facts(plugin);
+    for (operation, event, level) in expected {
+        let matches: Vec<_> = records
+            .iter()
+            .filter(|fact| fact["event"] == *event && fact["op"] == *operation)
+            .collect();
+        assert_eq!(
+            matches.len(),
+            1,
+            "one terminal {event} for {operation}: {records:#?}"
+        );
+        assert_eq!(matches[0]["level"], *level);
+        assert!(matches[0]["fields"]["duration_ms"].as_u64().is_some());
+        assert!(!matches[0].to_string().contains("built app"));
+        assert!(!matches[0].to_string().contains("s3cr3t"));
+    }
 }

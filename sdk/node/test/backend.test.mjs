@@ -20,6 +20,7 @@ test('initialize answers the protocols the host offered, with sorted functions',
   const host = new TestHost(backend);
   const { result } = await host.initialize();
   assert.deepEqual(result.capabilities.experimental, {
+    litheLogging: { version: 1 },
     litheBuild: { version: 1 },
     litheFunctions: { version: 1, functions: [{ id: 'install.prepare' }, { id: 'snapshot.refresh' }] },
   });
@@ -30,12 +31,12 @@ test('initialize answers the protocols the host offered, with sorted functions',
 
 test('a host that offers nothing gets no Lithe capabilities, and a backend without build handlers never claims litheBuild', async () => {
   const quiet = new TestHost(functionBackend());
-  assert.deepEqual((await quiet.initialize({})).result.capabilities.experimental, {});
+  assert.deepEqual((await quiet.initialize({})).result.capabilities.experimental, { litheLogging: { version: 1 } });
   await quiet.close();
 
   const other = new TestHost(functionBackend());
   const answer = (await other.initialize({ litheBuild: { versions: [1] }, litheFunctions: { versions: [99] } })).result;
-  assert.deepEqual(answer.capabilities.experimental, {});
+  assert.deepEqual(answer.capabilities.experimental, { litheLogging: { version: 1 } });
   await other.close();
 });
 
@@ -128,7 +129,7 @@ test('progress echoes the operation ID, is bounded, and stops once the call ende
   assert.ok(!host.messages.some((message) => message.params?.message === 'too late'));
 });
 
-test('a PluginError carries its code; other failures hide their details', async () => {
+test('a PluginError carries its code; automatic diagnostics omit failure contents', async (t) => {
   const backend = createBackend()
     .function('locked', () => {
       throw new PluginError('maven.snapshotLocked', 'Snapshot is locked.');
@@ -137,6 +138,9 @@ test('a PluginError carries its code; other failures hide their details', async 
       throw new Error('ENOENT: no such file, open /Users/someone/secret');
     });
   const host = new TestHost(backend);
+  t.after(() => host.close());
+  const diagnostics = [];
+  host.errorOutput.on('data', (chunk) => diagnostics.push(chunk.toString()));
   await host.initialize();
   const locked = await host.request('lithe/function/invoke', { functionID: 'locked', operationID: 'a' });
   assert.deepEqual(locked.error, { code: -32000, message: 'Snapshot is locked.', data: { code: 'maven.snapshotLocked' } });
@@ -144,6 +148,14 @@ test('a PluginError carries its code; other failures hide their details', async 
   assert.equal(crash.error.code, -32603);
   assert.ok(!crash.error.message.includes('/Users/'));
   assert.equal(crash.error.data, undefined);
+  assert.equal(diagnostics.join(''), '');
+  const records = host.messages.filter((message) => message.method === 'lithe/log').map(({ params }) => params);
+  assert.equal(records.length, 2);
+  assert.deepEqual(records.map(({ kind, operation, code, operationId }) => ({ kind, operation, code, operationId })), [
+    { kind: 'operationFailed', operation: 'locked', code: 'maven.snapshotLocked', operationId: 'a' },
+    { kind: 'operationFailed', operation: 'crash', code: 'internal_error', operationId: 'b' },
+  ]);
+  assert.ok(records.every(({ durationMs }) => Number.isSafeInteger(durationMs) && durationMs >= 0));
   assert.throws(() => new PluginError('bad code!', 'x'), TypeError);
   await host.close();
 });

@@ -182,12 +182,12 @@ impl std::error::Error for SdkError {}
 /// How a function handler fails. `?` converts every error type a handler
 /// typically meets: a [`PluginError`] keeps its code, [`Cancelled`] (and a
 /// host request cut short by cancellation) answers as cancelled, and anything
-/// else becomes a generic internal error whose details only reach stderr.
+/// else becomes a generic internal error; automatic diagnostics omit its contents.
 #[derive(Debug)]
 pub enum FunctionError {
     Plugin(PluginError),
     Cancelled,
-    /// Logged to stderr; the host sees only that the backend failed.
+    /// Retained in memory; automatic diagnostics record only the internal-error category.
     Internal(String),
 }
 

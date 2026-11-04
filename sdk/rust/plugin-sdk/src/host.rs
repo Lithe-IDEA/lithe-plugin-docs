@@ -289,9 +289,7 @@ impl Shared {
                     .push_back((subscription_id.to_string(), sequence, event));
             } else {
                 drop(state);
-                self.log(format_args!(
-                    "Dropped an early event of subscription {subscription_id}."
-                ));
+                self.failed("notification", "subscription_queue_full");
             }
         }
         // Otherwise the subscription was disposed; nothing follows a disposal.

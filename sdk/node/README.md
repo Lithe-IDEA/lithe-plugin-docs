@@ -130,6 +130,18 @@ A plugin package is installed read-only, has no `node_modules` install step,
 and must run offline, so everything the backend imports has to be inside the
 package. The SDK has no dependencies.
 
+## Logging
+
+The new SDK requires `experimental.litheLogging` version 1 at initialization.
+See [plugin logging](../../guides/plugin-logging.md) for the typed diagnostics
+API, host-owned catalog, exact levels, operation correlation and `${logDir}`.
+Use `diagnostics.degraded/recovered` (Rust: `diagnostics().degraded/recovered`)
+for handled fallback or recovery facts. Function and build/VCS terminal facts
+are automatic; do not log a failure before returning it to the SDK. Suppress
+successful high-frequency reads with `suppressSuccessDiagnostics(operation)`
+(Rust: `suppress_success_diagnostics`). The old free-text `log` API is removed;
+there is no stderr fallback or plugin-owned file writer.
+
 ## API
 
 | API | Purpose |
@@ -151,7 +163,7 @@ package. The SDK has no dependencies.
 | `backend.onInitialize(hook)`, `backend.onShutdown(hook)` | Lifecycle hooks. `onInitialize` receives the `initialize` params and what was negotiated. |
 | `backend.onRequest(method, handler)`, `backend.onNotification(method, handler)` | Ordinary LSP methods, such as `textDocument/hover` for a language server. Lifecycle and `lithe/*` methods are reserved. |
 | `backend.sendRequest`, `backend.sendNotification` | Ordinary LSP messages to the host; `lithe/*` methods are reserved. |
-| `backend.log(...)` | Writes a line to stderr, which the host keeps in its log. |
+| `backend.diagnostics.degraded(operation, code, count?)`, `.recovered(...)` | Typed handled fallback/recovery; no payload text. |
 | `backend.listen()` | Serves stdio until `exit` or the end of input. |
 | `PluginError(code, message)` | A failure meant for your own UI, or with a `VCS_ERRORS` code, for the host's. |
 | `HostError` | The host refused or failed a host request: `code` (`error.data.code`), `rpcCode`, and protocol 3 `details`. `HOST_ERRORS` maps each code to its number. |
@@ -165,7 +177,7 @@ Every handler receives a context:
 | `signal` | Aborted when Lithe cancels the call, its deadline passes, the function is withdrawn, or the session ends; also once the handler has settled, so work it left running stops. |
 | `throwIfCancelled()` | Throws the cancellation if `signal` is aborted. |
 | `run(command, args, options)` | `runProcess` bound to the call: cancelling or ending the call ends the whole process tree. In VCS handlers it also reports the finished command unless `options.report` is `false`. |
-| `log(...)` | Same as `backend.log`. |
+| `diagnostics` | Typed diagnostics correlated with this call. |
 | `host` | `backend.host` bound to the call: host requests it left unanswered are cancelled when the call ends. |
 | `functionID` | Functions only. |
 | `workspaceContext` | Functions only, protocol 3: `{ contextID, generation }` of the page's window, or `null`. |
@@ -264,12 +276,12 @@ their domain result/error contract; see the native workflow guide above.
 | --- | --- |
 | Returns a value (including `null`) | `result.value` |
 | Throws `PluginError(code, message)` | `plugin.function.failed` with your `message` and `pluginErrorCode`. The code is for your plugin's own UI; Lithe never branches on it. |
-| Throws anything else | `plugin.function.failed` with a generic message, so paths and stack traces never reach the UI. The real error goes to stderr. |
+| Throws anything else | `plugin.function.failed` with a generic message, so paths and stack traces never reach the UI. Automatic diagnostics record only a fixed failure category. |
 | Ends because of `signal` | `requestCancelled` (or Lithe's timeout/revocation outcome) |
 
 A result must serialize to at most 1 MiB of JSON. A value JSON cannot encode
 (a `BigInt`, a cycle) or a larger one fails like any other unexpected error and
-is logged to stderr; the session keeps running. A function ID is dot-separated
+emits one typed failure fact; the session keeps running. A function ID is dot-separated
 lowerCamelCase segments (`snapshot.refresh`), at most 128 bytes, and a session
 holds at most 256 functions. A `PluginError` code matches
 `[A-Za-z][A-Za-z0-9._-]*`, at most 64 bytes.
@@ -294,11 +306,12 @@ lifecycle unified. The SDK enforces the ones it can.
 3. **stdout belongs to the protocol.** When serving stdio, the SDK moves
    `console.log`, `console.info`, and `console.debug` to stderr. Never write to
    `process.stdout` yourself.
-4. **The package is read-only.** Keep caches, snapshots, and logs under the
+4. **The package is read-only.** Keep caches and snapshots under the
    directories Lithe passes through launch templates (`${stateDir}`,
    `${workspaceStateDir}`). `openStateStore` refuses any directory inside the
-   plugin package. Writing to the package breaks code signing and update
-   deltas.
+   plugin package. Diagnostics use the SDK and host; native log files require
+   an explicitly supplied `${logDir}` on a compatible local host. Writing to
+   the package breaks code signing and update deltas.
 5. **Work ends with its call.** Start processes with `context.run`, and check
    `signal` in long loops. On cancellation the SDK stops the process tree
    politely, then forcibly. When the handler returns or throws, tools of that
