@@ -75,7 +75,6 @@ backend.function('workspace.build', async ({ projects: selected }, context) => {
     const [tool, ...args] = project.build;
     const { exitCode } = await context.run(tool === 'node' ? process.execPath : tool, args, {
       cwd: inside(workspaceRoot, project.path),
-      onStdout: (text) => context.log(`[${project.name}] ${text.trimEnd()}`),
     });
     results.push({ name: project.name, exitCode });
     if (exitCode !== 0) {
@@ -110,7 +109,7 @@ function offerClear() {
       store.delete('snapshot');
       return null;
     })
-    .catch((error) => backend.log('snapshot.clear stays unavailable:', error.message));
+    .catch(() => backend.diagnostics.degraded('initialize', 'registration_failed'));
 }
 
 /** Every project, or exactly the named ones; an unknown name is an error, not an empty build. */

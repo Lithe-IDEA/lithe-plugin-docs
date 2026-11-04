@@ -124,8 +124,10 @@ async function copyScenario(destination) {
 
 async function javaSample() {
   if (process.env.LITHE_PLUGIN_SDK_JAVA_SAMPLE) return resolve(process.env.LITHE_PLUGIN_SDK_JAVA_SAMPLE);
+  // Shade can otherwise reuse a sample JAR containing a previous SDK after only
+  // the reactor dependency changed. E2E must execute the current SDK sources.
   await run(await which('mvn'), ['-B', '-ntp', '-q', '-f', join(repository, 'sdk/java/pom.xml'),
-    '-DskipTests', 'package']);
+    '-DskipTests', 'clean', 'package']);
   const jar = join(repository, 'sdk/java/examples/sample-build/target/sample-build.jar');
   await access(jar);
   return jar;

@@ -16,6 +16,7 @@ public final class CallContext {
         default void report(String message, Double percentage, String output) { report(message, percentage); }
     }
 
+    private final java.util.concurrent.atomic.AtomicBoolean quietSuccess = new java.util.concurrent.atomic.AtomicBoolean();
     private final Cancellation cancellation;
     private final Backend backend;
     private final String functionId;
@@ -58,6 +59,7 @@ public final class CallContext {
      */
     public Processes.Result run(List<String> command, Processes.Options options) throws IOException {
         Processes.Options settings = options == null ? new Processes.Options() : options.copy();
+        settings.listenerFailure(() -> diagnostics().degraded("notification", "output_listener_failed"));
         Cancellation own = settings.cancellation();
         settings.cancellation(own == null ? cancellation : cancellation.combinedWith(own));
         return Processes.run(command, settings);
@@ -68,10 +70,10 @@ public final class CallContext {
         return run(command, null);
     }
 
-    /** Writes a diagnostic line to stderr, which the host keeps in its log. */
-    public void log(String message) {
-        backend.log(message);
-    }
+    public void suppressSuccessDiagnostics() { quietSuccess.set(true); }
+    boolean quietSuccess() { return quietSuccess.get(); }
+
+    public Diagnostics diagnostics() { return new Diagnostics(backend, operationId); }
 
     /**
      * Reports progress of a function or bounded build call. Function messages

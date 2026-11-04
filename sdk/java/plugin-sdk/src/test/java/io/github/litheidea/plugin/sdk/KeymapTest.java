@@ -4,8 +4,10 @@ import static io.github.litheidea.plugin.sdk.Fixtures.map;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 
+import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
+import java.util.List;
 import java.util.Map;
 import java.nio.charset.StandardCharsets;
 import java.util.concurrent.CompletableFuture;
@@ -37,6 +39,15 @@ class KeymapTest {
                     object(capabilities.get("experimental")).get("litheKeymapImport"));
             assertEquals(map("bindings", Collections.emptyList()), host.request("lithe/keymap/import",
                     map("providerID", "first", "snapshotID", "snapshot-1")).get("result"));
+            // The terminal fact precedes the response and names the wire method Core accepts.
+            List<List<Object>> facts = new ArrayList<>();
+            for (Map<String, Object> message : host.messages()) {
+                if ("lithe/log".equals(message.get("method"))) {
+                    Map<String, Object> fact = object(message.get("params"));
+                    facts.add(Arrays.asList(fact.get("kind"), fact.get("operation")));
+                }
+            }
+            assertEquals(Collections.singletonList(Arrays.asList("operationFinished", "lithe/keymap/import")), facts);
             assertNotNull(host.request("lithe/keymap/import", map("providerID", "not-offered", "snapshotID", "snapshot-1")).get("error"));
             assertNotNull(host.request("lithe/keymap/import", map("providerID", "first", "snapshotID", "../private")).get("error"));
         } finally { host.close(); }

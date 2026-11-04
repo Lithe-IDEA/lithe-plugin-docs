@@ -84,6 +84,18 @@ SHA-256. The SDK is not published to a Maven repository. Use it like this:
 A plugin package is installed read-only and must run offline, so the backend
 JAR it starts must hold everything it loads.
 
+## Logging
+
+The new SDK requires `experimental.litheLogging` version 1 at initialization.
+See [plugin logging](../../guides/plugin-logging.md) for the typed diagnostics
+API, host-owned catalog, exact levels, operation correlation and `${logDir}`.
+Use `diagnostics.degraded/recovered` (Rust: `diagnostics().degraded/recovered`)
+for handled fallback or recovery facts. Function and build/VCS terminal facts
+are automatic; do not log a failure before returning it to the SDK. Suppress
+successful high-frequency reads with `suppressSuccessDiagnostics(operation)`
+(Rust: `suppress_success_diagnostics`). The old free-text `log` API is removed;
+there is no stderr fallback or plugin-owned file writer.
+
 ## API
 
 | API | Purpose |
@@ -104,7 +116,7 @@ JAR it starts must hold everything it loads.
 | `onInitialize(hook)`, `onShutdown(hook)` | Lifecycle hooks. `onInitialize` receives the `initialize` params and what was negotiated. |
 | `onRequest(method, handler)`, `onNotification(method, handler)` | Ordinary LSP methods. Lifecycle and `lithe/*` methods are reserved. |
 | `sendRequest`, `sendNotification` | Ordinary LSP messages to the host. `lithe/*` methods are reserved. |
-| `log(message[, error])` | Writes to stderr, which the host keeps in its log. |
+| `diagnostics().degraded(operation, code[, count])`, `.recovered(...)` | Typed handled fallback/recovery; no payload text. |
 | `listen()` | Serves stdio until `exit` or the end of input, then exits the JVM with the protocol's exit code. `listen(in, out, err)` serves other streams and returns the code instead. |
 | `PluginError(code, message)` | A failure meant for your own UI. |
 | `Processes.run(command[, options])` | Runs a process without a shell. Its stdin is closed. `Options` set the directory, environment, output limits, a cancellation, and output callbacks. |
@@ -117,7 +129,7 @@ Handlers run on their own threads. Every handler receives a `CallContext`:
 | `cancellation()`, `isCancelled()` | Cancelled when any of these happens: Lithe cancels the call, its deadline passes, the function is withdrawn, the session ends, or the handler finishes. Finishing the handler stops the work it left running. |
 | `throwIfCancelled()` | Throws `CancelledException` once the call is cancelled. |
 | `run(command[, options])` | `Processes.run` bound to the call: cancelling or ending the call stops the process. |
-| `log(message)` | Same as `Backend.log`. |
+| `diagnostics()` | Typed diagnostics correlated with this call. |
 | `functionId()` | Functions only. |
 | `host()` | [Host services](#host-services) bound to the call: ending the call cancels the requests it left unanswered. |
 | `workspaceContext()` | Protocol 3 functions: the `{ contextID, generation }` of the window that invoked the call, or null. |
@@ -136,8 +148,8 @@ build operations follow their domain contract:
 - A returned value becomes `result.value`.
 - `PluginError` becomes `plugin.function.failed` with your message and
   `pluginErrorCode`.
-- Any other exception is reported with a generic message, and its stack trace
-  goes to stderr.
+- Any other exception is reported with a generic message; automatic diagnostics
+  keep a fixed failure category without its message, cause or stack.
 - `CancelledException` ends the call as cancelled.
 - A result larger than 1 MiB of JSON fails like an unexpected error.
 
@@ -233,6 +245,8 @@ In Java:
    passes through launch templates (`${stateDir}`, `${workspaceStateDir}`).
    `StateStore.open` refuses a directory inside the plugin package. It finds
    the package by walking up from the SDK's own JAR to `plugin.json`.
+   Diagnostics use the SDK and host; native log files require an explicitly
+   supplied `${logDir}` on a compatible local host.
 5. **Work ends with its call.** Start processes with `context.run`, and check
    `isCancelled()` in long loops. On cancellation the SDK first asks the
    process to stop, then stops it forcibly after a grace period.

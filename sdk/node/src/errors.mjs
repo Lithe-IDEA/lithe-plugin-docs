@@ -9,7 +9,7 @@ export class PluginError extends Error {
   /**
    * @param {string} code Identifier of at most 64 bytes, such as `maven.snapshotLocked`.
    * @param {string} message User-facing text; Core keeps the first 1024 bytes.
-   * @param {object} [options] `{ cause }`, kept for logs only.
+   * @param {object} [options] `{ cause }`, retained in memory and omitted from automatic diagnostics.
    */
   constructor(code, message, options) {
     super(message, options);
@@ -96,6 +96,6 @@ export function toResponseError(error, signal) {
     };
   }
   // Unexpected exceptions often embed absolute paths (ENOENT) or internals;
-  // the caller logs the details to stderr instead.
+  // the caller logs only a fixed failure category to stderr.
   return { code: ERROR_CODES.internalError, message: 'The plugin backend failed unexpectedly.' };
 }

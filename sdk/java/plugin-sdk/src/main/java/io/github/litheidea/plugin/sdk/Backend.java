@@ -200,6 +200,10 @@ public final class Backend {
         BUILD_FORMATS = Collections.unmodifiableMap(formats);
     }
 
+    private volatile boolean logging;
+    private boolean loggingReady;
+    private final List<Map<String, Object>> earlyDiagnostics = new ArrayList<>();
+    private final java.util.Set<String> quietSuccess = new java.util.HashSet<>();
     private final String name;
     private final String version;
     private final Map<String, Object> capabilities;
@@ -238,9 +242,10 @@ public final class Backend {
         if (experimental instanceof Map
                 && (((Map<?, ?>) experimental).containsKey("litheBuild")
                         || ((Map<?, ?>) experimental).containsKey("litheFunctions")
-                        || ((Map<?, ?>) experimental).containsKey("litheKeymapImport"))) {
+                        || ((Map<?, ?>) experimental).containsKey("litheKeymapImport")
+                        || ((Map<?, ?>) experimental).containsKey("litheLogging"))) {
             throw new PluginSdkError("sdk.capabilities.reserved",
-                    "litheBuild, litheFunctions and litheKeymapImport are negotiated by the SDK; declare handlers instead.");
+                    "litheBuild, litheFunctions, litheKeymapImport and litheLogging are negotiated by the SDK; declare handlers instead.");
         }
         this.name = name == null ? "lithe-plugin-backend" : name;
         this.version = version;
@@ -482,6 +487,7 @@ public final class Backend {
                 if (error != null) {
                     synchronized (lock) {
                         functions.remove(id);
+                        quietSuccess.remove(id);
                     }
                     throw new CompletionException(unwrap(error));
                 }
@@ -497,6 +503,7 @@ public final class Backend {
                 if (functions.remove(id) == null) {
                     return failed(unknownFunction(id));
                 }
+                quietSuccess.remove(id);
                 return CompletableFuture.completedFuture(null);
             }
         }
@@ -513,6 +520,7 @@ public final class Backend {
                 List<Call> running = new ArrayList<>();
                 synchronized (lock) {
                     functions.remove(id);
+                    quietSuccess.remove(id);
                     for (Call call : incoming.values()) {
                         if (id.equals(call.functionId)) {
                             running.add(call);
@@ -543,18 +551,26 @@ public final class Backend {
         write(message);
     }
 
-    /** Writes a diagnostic line to stderr, which the host keeps in its log. */
-    public void log(String message) {
-        errorOutput.println("[" + name + "] " + message);
+    public Diagnostics diagnostics() { return new Diagnostics(this, null); }
+
+    public Backend suppressSuccessDiagnostics(String operation) {
+        if (!loggingOperation(operation)) throw new PluginSdkError("sdk.logging.invalidOperation", "Suppress a registered operation.");
+        synchronized (lock) { quietSuccess.add(operation); }
+        return this;
     }
 
-    /** Writes a diagnostic line and the failure's stack trace to stderr. */
-    public void log(String message, Throwable error) {
-        PrintStream stream = errorOutput;
-        synchronized (stream) {
-            stream.println("[" + name + "] " + message + " " + error);
-            error.printStackTrace(stream);
+    boolean loggingOperation(String operation) {
+        synchronized (lock) { return Diagnostics.OPERATIONS.contains(operation) || functions.containsKey(operation); }
+    }
+
+    void logFact(Map<String, Object> params) {
+        synchronized (lock) {
+            if (!logging) return;
+            if (!loggingReady) { if (earlyDiagnostics.size() < 8) earlyDiagnostics.add(params); return; }
         }
+        Map<String, Object> notification = message(null, "lithe/log");
+        notification.put("params", params);
+        write(notification);
     }
 
     /**
@@ -597,7 +613,7 @@ public final class Backend {
                 try {
                     messages = decoder.push(chunk, 0, count);
                 } catch (Framing.FramingException error) {
-                    log("Ending the session: " + error.getMessage());
+                    diagnostics().terminal("notification", new IllegalStateException(), System.nanoTime());
                     finish(1);
                     break;
                 }
@@ -743,7 +759,7 @@ public final class Backend {
                 handler = commandId instanceof String ? commandHandlers.get(commandId) : null;
             }
             if (handler == null) {
-                log("No handler for command " + commandId + ".");
+                diagnostics().degraded("notification", "command_unhandled");
                 return;
             }
             Map<String, Object> context = workspaceContext(params.get("context"));
@@ -769,7 +785,7 @@ public final class Backend {
             try {
                 handler.run();
             } catch (Throwable error) {
-                log("Notification " + method + " failed:", error);
+                diagnostics().terminal("notification", error, System.nanoTime());
             }
         });
     }
@@ -785,6 +801,14 @@ public final class Backend {
             phase = Phase.INITIALIZING;
             initializeParams = params;
             Map<String, Object> offered = experimental(params.get("capabilities"));
+            loggingReady = false;
+            earlyDiagnostics.clear();
+            logging = offers(offered.get("litheLogging"), 1);
+            if (!logging) {
+                phase = Phase.LISTENING;
+                respond(id, null, error(Protocol.INVALID_REQUEST, "The backend requires litheLogging version 1."));
+                return;
+            }
             int buildVersion = 0;
             if (!buildHandlers.isEmpty()) {
                 for (int version = Protocol.BUILD_VERSION; version > 0; version--) {
@@ -811,7 +835,6 @@ public final class Backend {
                     hook.run(params, agreed);
                 }
             } catch (Throwable failure) {
-                log("initialize failed:", failure);
                 synchronized (lock) {
                     if (phase == Phase.INITIALIZING) {
                         phase = Phase.LISTENING;
@@ -828,10 +851,10 @@ public final class Backend {
                     return;
                 }
                 if (!agreed.functions() && !functions.isEmpty()) {
-                    log("The host did not offer a litheFunctions version from 1 to " + Protocol.FUNCTIONS_VERSION
-                            + "; functions stay unavailable.");
+                    diagnostics().degraded("initialize", "functions_unavailable");
                 }
                 Map<String, Object> experimental = new LinkedHashMap<>(experimental(capabilities));
+                experimental.put("litheLogging", singleton("version", 1));
                 Map<String, Object> offeredCapabilities = experimental(params.get("capabilities"));
                 Object keymap = offeredCapabilities.get("litheKeymapImport");
                 if (offers(keymap, 1) && keymap instanceof Map) {
@@ -870,6 +893,10 @@ public final class Backend {
                 result.put("serverInfo", serverInfo);
                 phase = Phase.READY;
                 respond(id, result, null);
+                loggingReady = true;
+                List<Map<String, Object>> early = new ArrayList<>(earlyDiagnostics);
+                earlyDiagnostics.clear();
+                for (Map<String, Object> fact : early) logFact(fact);
             }
         });
     }
@@ -890,7 +917,7 @@ public final class Backend {
                 try {
                     hook.run();
                 } catch (Throwable error) {
-                    log("A shutdown hook failed:", error);
+                    diagnostics().terminal("shutdown", error, System.nanoTime());
                 }
             }
             Processes.killAll();
@@ -910,8 +937,8 @@ public final class Backend {
             respond(id, null, error(Protocol.INVALID_PARAMS, "Invalid shortcut import request."));
             return;
         }
-        run(id, null, null, context -> handler.handle(new KeymapSnapshot((String) provider, (String) snapshot, context.host()), context),
-                Backend::functionResult, null);
+        run(id, null, null, null, context -> handler.handle(new KeymapSnapshot((String) provider, (String) snapshot, context.host()), context),
+                Backend::functionResult, null, null, "lithe/keymap/import");
     }
 
     private static boolean validKeymapProvider(String id) {
@@ -974,7 +1001,7 @@ public final class Backend {
             return;
         }
         if (!Protocol.buildProgress(method)) {
-            run(id, null, null, context -> handler.handle(arguments, context), result -> buildResult(method, result), null);
+            run(id, null, null, null, context -> handler.handle(arguments, context), result -> buildResult(method, result), null, null, method);
             return;
         }
         Object wireId = arguments.get("operationID");
@@ -1001,7 +1028,7 @@ public final class Backend {
             }
         };
         run(id, null, (String) wireId, null, context -> handler.handle(arguments, context),
-                result -> buildResult(method, result), () -> reporting.set(false), progress);
+                result -> buildResult(method, result), () -> reporting.set(false), progress, method);
     }
 
     private interface Invocation {
@@ -1019,12 +1046,19 @@ public final class Backend {
     /** Runs one handler with its own cancellation and answers exactly once. */
     private void run(Object id, String functionId, String operationId, Map<String, Object> workspaceContext,
             Invocation invoke, Shape shape, Runnable onSettled, CallContext.ProgressSink progress) {
-        Cancellation cancellation = new Cancellation();
+        run(id, functionId, operationId, workspaceContext, invoke, shape, onSettled, progress, functionId == null ? "function-call" : functionId);
+    }
+
+    private void run(Object id, String functionId, String operationId, Map<String, Object> workspaceContext,
+            Invocation invoke, Shape shape, Runnable onSettled, CallContext.ProgressSink progress, String diagnosticOperation) {
+        long started = System.nanoTime();
+        String diagnosticOperationId = Diagnostics.requestOperationId(operationId, id);
+        Cancellation cancellation = new Cancellation(() -> diagnostics().degraded("notification", "cancellation_listener_failed"));
         String key = requestKey(id);
         synchronized (lock) {
             incoming.put(key, new Call(cancellation, functionId));
         }
-        CallContext context = new CallContext(cancellation, this, functionId, operationId, progress,
+        CallContext context = new CallContext(cancellation, this, functionId, diagnosticOperationId, progress,
                 new Host(channel, Collections.singletonList(cancellation)), workspaceContext);
         executor.execute(() -> {
             Object result = null;
@@ -1035,9 +1069,14 @@ public final class Backend {
                 result = shape.apply(value);
             } catch (Throwable failure) {
                 if (!cancellation.isCancelled()) {
-                    log((functionId != null ? "Function " + functionId : "A request") + " failed:", failure);
+                    new Diagnostics(this, diagnosticOperationId).terminal(diagnosticOperation, failure, started);
                 }
                 error = toResponseError(failure, cancellation);
+            }
+            if (error == null && !cancellation.isCancelled()) {
+                boolean quiet;
+                synchronized (lock) { quiet = context.quietSuccess() || quietSuccess.contains(diagnosticOperation); }
+                if (!quiet) new Diagnostics(this, diagnosticOperationId).terminal(diagnosticOperation, null, started);
             }
             try {
                 if (onSettled != null) {
@@ -1224,7 +1263,7 @@ public final class Backend {
             writeEncoded(Framing.encode(message));
         } catch (Json.JsonException failure) {
             // A result JSON cannot encode must not end the session.
-            log("The result could not be encoded:", failure);
+            diagnostics().terminal("result-encoding", failure, System.nanoTime());
             Map<String, Object> fallback = message(id, null);
             fallback.put("error", toResponseError(failure, null));
             write(fallback);
@@ -1246,7 +1285,7 @@ public final class Backend {
                 stream.flush();
             } catch (IOException error) {
                 // The host closed the pipe; the input side ends the session.
-                log("Writing to the host failed: " + error.getMessage());
+                // The closed protocol pipe leaves the host owning the terminal process fact.
             }
         }
     }
@@ -1267,7 +1306,7 @@ public final class Backend {
             return response;
         }
         // Unexpected exceptions often embed absolute paths or internals; the
-        // caller logs the details to stderr instead.
+        // caller logs only a fixed failure category to stderr.
         return error(Protocol.INTERNAL_ERROR, "The plugin backend failed unexpectedly.");
     }
 
@@ -1462,12 +1501,12 @@ public final class Backend {
 
         @Override
         public void log(String message) {
-            Backend.this.log(message);
+            Backend.this.diagnostics().degraded("notification", "subscription_queue_full");
         }
 
         @Override
         public void log(String message, Throwable error) {
-            Backend.this.log(message, error);
+            Backend.this.diagnostics().terminal("notification", error, System.nanoTime());
         }
 
         @Override

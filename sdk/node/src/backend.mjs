@@ -9,8 +9,10 @@
 // shared/contracts/vcs-provider-v1.md.
 
 import { format } from 'node:util';
+import { performance } from 'node:perf_hooks';
+import { diagnostics, KNOWN_OPERATIONS, requestOperationId } from './diagnostics.mjs';
 import { encodeFrame, FrameDecoder, FramingError, MALFORMED } from './framing.mjs';
-import { HostError, PluginSdkError, toResponseError } from './errors.mjs';
+import { HostError, PluginError, PluginSdkError, toResponseError } from './errors.mjs';
 import { createHost, HostChannel } from './host.mjs';
 import { killAllProcesses, runProcess } from './process.mjs';
 import {
@@ -60,6 +62,10 @@ export function createBackend(options = {}) {
 }
 
 class Backend {
+  #logging = false;
+  #loggingReady = false;
+  #earlyDiagnostics = [];
+  #quietSuccess = new Set();
   #name;
   #version;
   #capabilities;
@@ -106,10 +112,10 @@ class Backend {
 
   constructor({ name = 'lithe-plugin-backend', version, capabilities = {} } = {}) {
     const experimental = capabilities.experimental ?? {};
-    if ('litheBuild' in experimental || 'litheFunctions' in experimental || 'litheVcs' in experimental || 'litheKeymapImport' in experimental) {
+    if ('litheLogging' in experimental || 'litheBuild' in experimental || 'litheFunctions' in experimental || 'litheVcs' in experimental || 'litheKeymapImport' in experimental) {
       throw new PluginSdkError(
         'sdk.capabilities.reserved',
-        'litheBuild, litheFunctions, litheVcs, and litheKeymapImport are negotiated by the SDK; declare handlers instead.',
+        'litheLogging, litheBuild, litheFunctions, litheVcs, and litheKeymapImport are negotiated by the SDK; declare handlers instead.',
       );
     }
     this.#name = String(name);
@@ -133,7 +139,7 @@ class Backend {
       ready: () => this.#phase === 'ready',
       send: (method, params) => this.#send(method, params),
       notify: (method, params) => this.#write({ jsonrpc: '2.0', method, params }),
-      log: (...parts) => this.log(...parts),
+      log: () => this.#diagnostics().degraded('notification', 'event_handler_failed'),
     });
     this.host = createHost(this.#channel);
   }
@@ -319,6 +325,7 @@ class Backend {
         await this.#request(METHODS.functionRegister, { functions: [{ id }] });
       } catch (error) {
         this.#functions.delete(id);
+        this.#quietSuccess.delete(id);
         throw error;
       }
     });
@@ -331,6 +338,7 @@ class Backend {
         if (!this.#functions.delete(id)) {
           throw new PluginSdkError('sdk.function.unknown', `Function ${id} is not registered.`);
         }
+        this.#quietSuccess.delete(id);
       });
     }
     return this.#queueRegistration(async () => {
@@ -340,6 +348,7 @@ class Backend {
       }
       await this.#request(METHODS.functionUnregister, { ids: [id] });
       this.#functions.delete(id);
+      this.#quietSuccess.delete(id);
       for (const call of this.#incoming.values()) {
         if (call.functionID === id) call.controller.abort();
       }
@@ -358,9 +367,20 @@ class Backend {
     this.#write({ jsonrpc: '2.0', method, ...(params === undefined ? {} : { params }) });
   }
 
-  /** Writes a diagnostic line to stderr, which the host keeps in its log. */
-  log(...parts) {
-    this.#errorOutput.write(`[${this.#name}] ${format(...parts)}\n`);
+  get diagnostics() { return this.#diagnostics(); }
+
+  suppressSuccessDiagnostics(operation) {
+    if (!KNOWN_OPERATIONS.has(operation) && !this.#functions.has(operation)) throw new PluginSdkError('sdk.logging.invalidOperation', 'Suppress a registered operation.');
+    this.#quietSuccess.add(operation);
+    return this;
+  }
+
+  #diagnostics(operationId) {
+    return diagnostics((params) => {
+      if (!this.#logging) return;
+      if (!this.#loggingReady) { if (this.#earlyDiagnostics.length < 8) this.#earlyDiagnostics.push(params); return; }
+      this.#write({ jsonrpc: '2.0', method: 'lithe/log', params });
+    }, (id) => this.#functions.has(id), operationId);
   }
 
   /**
@@ -406,7 +426,7 @@ class Backend {
           messages = decoder.push(chunk);
         } catch (error) {
           if (!(error instanceof FramingError)) throw error;
-          this.log('Ending the session:', error.message);
+          this.#diagnostics().terminal('notification', {code:'framing_error'}, 0);
           this.#finish(1);
           return;
         }
@@ -472,7 +492,7 @@ class Backend {
     }
     const vcs = this.#negotiated.vcs ? this.#vcs.methods.get(method) : undefined;
     if (vcs) {
-      this.#run(id, null, (context) => vcs(params ?? {}, this.#vcsContext(context)), (result) => vcsResult(method, result));
+      this.#run(id, null, (context) => vcs(params ?? {}, this.#vcsContext(context)), (result) => vcsResult(method, result), undefined, method, params?.operationID);
       return;
     }
     const handler = this.#requestHandlers.get(method);
@@ -501,7 +521,7 @@ class Backend {
     if (!handler) return;
     Promise.resolve()
       .then(() => handler(params))
-      .catch((error) => this.log(`Notification ${method} failed:`, error));
+      .catch((error) => this.#diagnostics().terminal('notification', { code: failureKind(error) }, 0));
   }
 
   /**
@@ -520,7 +540,7 @@ class Backend {
       handler = this.#commandHandlers.get(params.commandID);
       event = { commandID: params.commandID, workspaceContext: isContextReference(params.context) ? params.context : null };
       if (!handler) {
-        this.log(`No handler for command ${params.commandID}.`);
+        this.#diagnostics().degraded('notification', 'command_unhandled');
         return;
       }
     } else if (method === HOST_NOTIFICATIONS.didChangeContexts) {
@@ -531,7 +551,7 @@ class Backend {
     if (!handler) return;
     Promise.resolve()
       .then(() => handler(event))
-      .catch((error) => this.log(`Notification ${method} failed:`, error));
+      .catch((error) => this.#diagnostics().terminal('notification', { code: failureKind(error) }, 0));
   }
 
   async #initialize(id, params) {
@@ -542,6 +562,14 @@ class Backend {
     this.#phase = 'initializing';
     this.#initializeParams = params;
     const offered = params.capabilities?.experimental ?? {};
+    this.#loggingReady = false;
+    this.#earlyDiagnostics = [];
+    this.#logging = offered.litheLogging?.versions?.includes(1) === true;
+    if (!this.#logging) {
+      this.#phase = 'listening';
+      this.#respond(id, undefined, { code: ERROR_CODES.invalidRequest, message: 'The backend requires litheLogging version 1.' });
+      return;
+    }
     const offers = (entry, version) => Array.isArray(entry?.versions) && entry.versions.includes(version);
     const highest = (entry, latest) => Array.from({ length: latest }, (_, index) => latest - index)
       .find((version) => offers(entry, version)) ?? null;
@@ -557,7 +585,6 @@ class Backend {
         await hook({ params, negotiated: this.#negotiated });
       }
     } catch (error) {
-      this.log('initialize failed:', error);
       if (this.#phase === 'initializing') this.#phase = 'listening';
       this.#respond(id, undefined, toResponseError(error));
       return;
@@ -569,9 +596,9 @@ class Backend {
       return;
     }
     if (!this.#negotiated.functions && this.#functions.size > 0) {
-      this.log(`The host did not offer a litheFunctions version from 1 to ${FUNCTIONS_VERSION}; functions stay unavailable.`);
+      this.#diagnostics().degraded('initialize', 'functions_unavailable');
     }
-    const experimental = { ...(this.#capabilities.experimental ?? {}) };
+    const experimental = { ...(this.#capabilities.experimental ?? {}), litheLogging: { version: 1 } };
     if (offers(offered.litheKeymapImport, 1) && Array.isArray(offered.litheKeymapImport?.providers)
         && offered.litheKeymapImport.providers.length <= 8) {
       this.#selectedKeymapProviders = new Set(offered.litheKeymapImport.providers.filter((id) => this.#keymapProviders.has(id)));
@@ -583,7 +610,7 @@ class Backend {
     if (this.#negotiated.vcs) {
       experimental.litheVcs = { version: VCS_VERSION, vcs: this.#vcs.id, capabilities: this.#vcs.capabilities };
     } else if (this.#vcs) {
-      this.log('The host did not offer litheVcs version 1; the VCS provider stays unavailable.');
+      this.#diagnostics().degraded('initialize', 'vcs_unavailable');
     }
     if (this.#negotiated.functions) {
       experimental.litheFunctions = {
@@ -596,6 +623,8 @@ class Backend {
       capabilities: { ...this.#capabilities, experimental },
       serverInfo: { name: this.#name, ...(this.#version ? { version: this.#version } : {}) },
     });
+    this.#loggingReady = true;
+    for (const params of this.#earlyDiagnostics.splice(0)) this.#write({ jsonrpc: '2.0', method: 'lithe/log', params });
   }
 
   async #shutdown(id) {
@@ -609,7 +638,7 @@ class Backend {
       try {
         await hook();
       } catch (error) {
-        this.log('A shutdown hook failed:', error);
+        this.#diagnostics().terminal('shutdown', { code: failureKind(error) }, 0);
       }
     }
     killAllProcesses();
@@ -640,7 +669,7 @@ class Backend {
         if (Number.isFinite(percentage)) report.percentage = Math.min(100, Math.max(0, Math.round(percentage)));
         this.#write({ jsonrpc: '2.0', method: METHODS.buildProgress, params: report });
       },
-    } : context), (result) => buildResult(method, result), () => { reporting = false; });
+    } : context), (result) => buildResult(method, result), () => { reporting = false; }, method, operationID);
   }
 
   #invokeKeymap(id, params) {
@@ -650,7 +679,7 @@ class Backend {
       return;
     }
     const handler = this.#keymapProviders.get(params.providerID);
-    this.#run(id, null, (context) => handler(keymapSnapshot(params, context.host), context), functionResult);
+    this.#run(id, null, (context) => handler(keymapSnapshot(params, context.host), context), functionResult, undefined, 'lithe/keymap/import');
   }
 
   #invokeFunction(id, { functionID, operationID, params, context: workspaceContext }) {
@@ -682,17 +711,24 @@ class Backend {
       () => {
         reporting = false;
       },
+      functionID,
+      operationID,
     );
   }
 
   /** Runs one handler with its own cancellation and answers exactly once. */
-  #run(id, functionID, invoke, shape, onSettled) {
+  #run(id, functionID, invoke, shape, onSettled, operation = functionID ?? 'function-call', operationId) {
+    const started = performance.now();
+    const diagnostic = this.#diagnostics(requestOperationId(operationId, id));
+    let quietSuccess = false;
     const controller = new AbortController();
     const key = requestKey(id);
     this.#incoming.set(key, { controller, functionID });
     const { signal } = controller;
     const context = {
       signal,
+      diagnostics: diagnostic,
+      suppressSuccessDiagnostics: () => { quietSuccess = true; },
       throwIfCancelled: () => signal.throwIfAborted(),
       run: (command, args, options = {}) => {
         const running = runProcess(command, args, {
@@ -704,7 +740,6 @@ class Backend {
         running.catch(() => {});
         return running;
       },
-      log: (...parts) => this.log(...parts),
       host: createHost(this.#channel, signal),
     };
     Promise.resolve()
@@ -715,16 +750,15 @@ class Backend {
           return { result: shape(value) };
         },
         (error) => {
-          if (!signal.aborted) this.log(`${functionID ? `Function ${functionID}` : 'A request'} failed:`, error);
           return { error: toResponseError(error, signal) };
         },
       )
       .catch((error) => {
         // Shaping the result failed, for example a build result in another format.
-        if (!signal.aborted) this.log('The result could not be sent:', error);
         return { error: toResponseError(error, signal) };
       })
       .then(({ result, error }) => {
+        if (!signal.aborted && (error || (!quietSuccess && !this.#quietSuccess.has(operation)))) diagnostic.terminal(operation, error ? { code: error.data?.code ?? 'internal_error' } : null, performance.now() - started);
         onSettled?.();
         this.#incoming.delete(key);
         // Work belongs to its call: tools still running when the handler
@@ -871,7 +905,7 @@ class Backend {
     } catch (failure) {
       // A result JSON cannot encode, such as a BigInt or a cycle, must not
       // become an unhandled rejection that ends the whole session.
-      this.log('The result could not be encoded:', failure);
+      this.#diagnostics().terminal('result-encoding', { code: 'result_encoding_failed' }, 0);
       this.#write({ jsonrpc: '2.0', id, error: toResponseError(failure) });
     }
   }
@@ -880,6 +914,12 @@ class Backend {
     if (!this.#output || this.#phase === 'exited') return;
     this.#output.write(encodeFrame(message));
   }
+}
+
+// Errors can include request bodies, credentials and paths. Only the category
+// crosses the diagnostic boundary; the response keeps its existing error contract.
+function failureKind(error) {
+  return error instanceof PluginError ? 'plugin_error' : 'internal_error';
 }
 
 /** Runs `change` now and reports its outcome as a promise. */

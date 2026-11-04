@@ -47,7 +47,7 @@ test('build negotiation chooses the highest common integer version', { timeout: 
     const response = await host.initialize({ litheBuild: { versions } });
     assert.equal(backend.buildVersion, versions[0] === 1 ? 4 : null);
     assert.deepEqual(response.result.capabilities.experimental,
-      versions[0] === 1 ? { litheBuild: { version: 4 } } : {});
+      versions[0] === 1 ? { litheLogging: { version: 1 }, litheBuild: { version: 4 } } : { litheLogging: { version: 1 } });
     await host.close();
   }
 });

@@ -28,6 +28,7 @@ fn negotiates_the_newest_offered_version_and_lists_the_functions() {
             result,
             json!({
                 "capabilities": { "experimental": {
+                    "litheLogging": {"version": 1},
                     "litheFunctions": { "version": version, "functions": [{ "id": "echo.value" }] }
                 } },
                 "serverInfo": { "name": "test-backend", "version": "1.2.3" }
@@ -44,7 +45,7 @@ fn a_host_without_plugin_functions_gets_no_functions() {
     let mut host = Host::start(echo_backend());
     assert_eq!(
         host.initialize(Value::Null)["capabilities"],
-        json!({ "experimental": {} })
+        json!({ "experimental": {"litheLogging": {"version": 1}} })
     );
     host.invoke(1, "echo.value", json!({}));
     assert_eq!(host.answer(1).0["error"]["code"], -32602);
@@ -114,12 +115,15 @@ fn maps_results_failures_and_panics() {
     let (answer, before) = host.answer(1);
     assert_eq!(answer["result"], json!({ "done": true }));
     assert_eq!(
-        before,
-        [json!({
+        before[0],
+        json!({
             "jsonrpc": "2.0", "method": "lithe/function/progress",
             "params": { "operationID": "op-1", "message": "Halfway", "percentage": 100 }
-        })]
+        })
     );
+    assert_eq!(before[1]["method"], "lithe/log");
+    assert_eq!(before[1]["params"]["kind"], "operationFinished");
+    assert_eq!(before[1]["params"]["operationId"], "op-1");
 
     host.invoke(2, "work.run", json!({ "mode": "plugin" }));
     assert_eq!(
@@ -256,7 +260,10 @@ fn credentials_need_protocol_two() {
     host.initialize(json!([1]));
     host.invoke(1, "secret.roundTrip", json!({ "key": "db:main" }));
     let (answer, before) = host.answer(1);
-    assert!(before.is_empty(), "{before:?}");
+    assert!(
+        before.iter().all(|frame| frame["method"] == "lithe/log"),
+        "{before:?}"
+    );
     assert_eq!(answer["error"]["message"], "plugin.host.unavailable");
     host.close();
 }
@@ -390,7 +397,148 @@ fn initialize_hooks_see_the_root_and_add_functions() {
     let mut refusing = Backend::new("test-backend");
     refusing.on_initialize(|_| Err(PluginError::new("test.notReady", "Not ready.").into()));
     let mut host = Host::start(refusing);
-    host.request(0, "initialize", json!({ "capabilities": {} }));
+    host.request(
+        0,
+        "initialize",
+        json!({ "capabilities": {"experimental": {"litheLogging": {"versions": [1]}}} }),
+    );
     assert_eq!(host.answer(0).0["error"]["data"]["code"], "test.notReady");
+    host.close();
+}
+
+#[test]
+fn typed_diagnostics_preserve_operation_and_suppress_only_success() {
+    let mut backend = Backend::new("test-backend");
+    backend
+        .function("work.inspect", |params, context| {
+            context
+                .diagnostics()
+                .degraded("work.inspect", "cache_unavailable", Some(2))?;
+            context
+                .diagnostics()
+                .recovered("work.inspect", "cache_restored", None)?;
+            if params["fail"] == true {
+                return Err(PluginError::new("work.failed", "private explanation").into());
+            }
+            Ok(Value::Null)
+        })
+        .unwrap();
+    backend
+        .suppress_success_diagnostics("work.inspect")
+        .unwrap();
+    let mut host = Host::start(backend);
+    host.initialize(json!([3]));
+    host.invoke(1, "work.inspect", json!({"fail": false}));
+    let (_, success) = host.answer(1);
+    assert_eq!(success.len(), 2);
+    assert_eq!(success[0]["params"]["operationId"], "op-1");
+    assert_eq!(success[0]["params"]["kind"], "degraded");
+    assert_eq!(success[1]["params"]["kind"], "recovered");
+    host.invoke(2, "work.inspect", json!({"fail": true}));
+    let (_, failure) = host.answer(2);
+    assert_eq!(failure.len(), 3);
+    assert_eq!(failure[2]["params"]["kind"], "operationFailed");
+    assert_eq!(failure[2]["params"]["code"], "work.failed");
+    assert!(failure[2]["params"]["durationMs"].as_u64().is_some());
+    assert!(!failure[2].to_string().contains("private explanation"));
+    host.close();
+}
+
+#[test]
+fn per_call_suppression_keeps_user_success_and_failures() {
+    let mut backend = Backend::new("test-backend");
+    backend
+        .function("database.call", |params, context| {
+            if params["readOnly"] == true {
+                context.suppress_success_diagnostics();
+            }
+            if params["fail"] == true {
+                return Err(FunctionError::internal("private failure"));
+            }
+            Ok(Value::Null)
+        })
+        .unwrap();
+    let mut host = Host::start(backend);
+    host.initialize(json!([3]));
+    host.invoke(1, "database.call", json!({"readOnly": true}));
+    assert!(host.answer(1).1.is_empty());
+    host.invoke(2, "database.call", json!({}));
+    assert_eq!(host.answer(2).1[0]["params"]["kind"], "operationFinished");
+    host.invoke(3, "database.call", json!({"readOnly": true,"fail": true}));
+    assert_eq!(host.answer(3).1[0]["params"]["kind"], "operationFailed");
+    host.close();
+}
+
+#[test]
+fn initialize_diagnostics_wait_for_capability_answer_and_stay_bounded() {
+    let mut backend = Backend::new("test-backend");
+    let diagnostics = backend.handle().diagnostics();
+    backend.on_initialize(move |_| {
+        for count in 0..10 {
+            diagnostics.degraded("initialize", "snapshot_unavailable", Some(count))?;
+        }
+        Ok(())
+    });
+    let mut host = Host::start(backend);
+    host.request(
+        0,
+        "initialize",
+        json!({"capabilities":{"experimental":{"litheLogging":{"versions":[1]}}}}),
+    );
+    let answer = host.next();
+    assert_eq!(
+        answer["id"], 0,
+        "no diagnostic before capability answer: {answer}"
+    );
+    assert_eq!(
+        answer["result"]["capabilities"]["experimental"]["litheLogging"]["version"],
+        1
+    );
+    for count in 0..8 {
+        let fact = host.next();
+        assert_eq!(fact["method"], "lithe/log");
+        assert_eq!(fact["params"]["count"], count);
+    }
+    host.request(1, "shutdown", Value::Null);
+    assert_eq!(
+        host.next()["id"],
+        1,
+        "initialization buffer is bounded to eight facts"
+    );
+    host.close();
+}
+
+#[test]
+fn diagnostics_use_original_rpc_id_when_operation_id_is_absent() {
+    let mut backend = Backend::new("test-backend");
+    backend
+        .function("work.inspect", |_, context| {
+            context
+                .diagnostics()
+                .degraded("work.inspect", "cache_unavailable", None)?;
+            Ok(Value::Null)
+        })
+        .unwrap();
+    let mut host = Host::start(backend);
+    host.initialize(json!([3]));
+    host.request(
+        42,
+        "lithe/function/invoke",
+        json!({"functionID":"work.inspect"}),
+    );
+    let (_, facts) = host.answer(42);
+    assert_eq!(facts.len(), 2);
+    assert!(facts
+        .iter()
+        .all(|fact| fact["params"]["operationId"] == "42"));
+    host.request(
+        "rpc-second",
+        "lithe/function/invoke",
+        json!({"functionID":"work.inspect", "operationID":"wire-original"}),
+    );
+    let (_, facts) = host.answer("rpc-second");
+    assert!(facts
+        .iter()
+        .all(|fact| fact["params"]["operationId"] == "wire-original"));
     host.close();
 }

@@ -27,6 +27,12 @@ export interface ProcessResult {
   truncated: boolean;
 }
 
+/** Typed facts for the host-owned litheLogging 1 event catalog. */
+export interface Diagnostics {
+  degraded(operation: string, code: string, count?: number): void;
+  recovered(operation: string, code: string, count?: number): void;
+}
+
 /** Shared by every handler. */
 export interface RequestContext {
   /** Aborted when the host cancels the call, the call times out, the session ends, or the call has settled. */
@@ -34,8 +40,10 @@ export interface RequestContext {
   throwIfCancelled(): void;
   /** `runProcess` bound to this call: its tree ends when the call is cancelled or settles. */
   run(command: string, args?: string[], options?: RunProcessOptions): Promise<ProcessResult>;
-  /** Writes a line to stderr, which the host keeps in its log. */
-  log(...parts: unknown[]): void;
+  /** Fixed facts, correlated with the host operation; never accepts payload text. */
+  readonly diagnostics: Diagnostics;
+  /** Omits only this call's successful fact; failures remain visible. */
+  suppressSuccessDiagnostics(): void;
   /** `backend.host` bound to this call: its unanswered host requests are cancelled when the call ends. */
   host: Host;
 }
@@ -529,7 +537,8 @@ export interface Backend {
   onShutdown(hook: () => unknown): Backend;
   sendRequest(method: string, params?: unknown): Promise<unknown>;
   sendNotification(method: string, params?: unknown): void;
-  log(...parts: unknown[]): void;
+  readonly diagnostics: Diagnostics;
+  suppressSuccessDiagnostics(operation: string): this;
   listen(options?: ListenOptions): Promise<number>;
 }
 

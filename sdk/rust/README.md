@@ -105,6 +105,18 @@ exact contents:
   Check the archive against the SHA-256 you pinned, unpack it into your
   repository, and use it as a `path` dependency.
 
+## Logging
+
+The new SDK requires `experimental.litheLogging` version 1 at initialization.
+See [plugin logging](../../guides/plugin-logging.md) for the typed diagnostics
+API, host-owned catalog, exact levels, operation correlation and `${logDir}`.
+Use `diagnostics.degraded/recovered` (Rust: `diagnostics().degraded/recovered`)
+for handled fallback or recovery facts. Function and build/VCS terminal facts
+are automatic; do not log a failure before returning it to the SDK. Suppress
+successful high-frequency reads with `suppressSuccessDiagnostics(operation)`
+(Rust: `suppress_success_diagnostics`). The old free-text `log` API is removed;
+there is no stderr fallback or plugin-owned file writer.
+
 ## API
 
 | API | Purpose |
@@ -134,7 +146,7 @@ context offers:
 | `progress(message, percentage)` | The message is cut to 1024 bytes and the percentage to 100; reports after the call ended are dropped. |
 | `host()` | Host services bound to the call: a request still waiting for the host when the call is cancelled ends at once. `credentials()` is `host().credentials()`. |
 | `workspace_context()` | From protocol 3, the `WorkspaceContext` of the window whose page made the call; `None` under older protocols or when no window made it. |
-| `backend()`, `function_id()`, `log(message)` | The handle, the function's ID, and a line on stderr. |
+| `backend()`, `function_id()`, `diagnostics()` | The handle, the function's ID, and typed diagnostics correlated with this call. |
 
 ## Host services
 
@@ -253,7 +265,7 @@ nothing is stored.
 | --- | --- |
 | `Ok(value)` (including `Value::Null`) | `result.value` |
 | `Err(PluginError)` | `plugin.function.failed` with your message and `pluginErrorCode`. The code is for your plugin's own UI; Lithe never branches on it. |
-| Any other error, or a panic | `plugin.function.failed` with a generic message, so paths, secrets, and stack traces never reach the UI. The details go to stderr. A panic ends only its call. |
+| Any other error, or a panic | `plugin.function.failed` with a generic message, so paths, secrets, and stack traces never reach the UI. Automatic SDK diagnostics record only a fixed failure category. A panic ends only its call; SDK catch boundaries suppress raw payload printing. |
 | `Err(Cancelled)`, or any outcome after cancellation | `requestCancelled` (or Lithe's timeout or revocation outcome) |
 
 `?` converts `PluginError`, `Cancelled`, `SdkError`, `std::io::Error`, and
@@ -270,9 +282,11 @@ panics on any other code.
    protocol to a duplicate of the stdout descriptor and points stdout at
    stderr, so a stray `println!` in your code or a dependency lands in the
    host's log. Elsewhere, never print to stdout.
-2. **The package is read-only.** Keep caches, databases, and logs under
-   `${stateDir}`, which Lithe also passes as the root and working directory.
-   Writing to the package breaks code signing and update deltas.
+2. **The package is read-only.** Keep caches and databases under `${stateDir}`,
+   which Lithe also passes as the root and working directory. Diagnostics use
+   the SDK and host; native log files require an explicitly supplied `${logDir}`
+   on a compatible local host. Writing to the package breaks code signing and
+   update deltas.
 3. **Secrets go to the credentials service.** Never write a password or
    token to `${stateDir}`, to a log line, or to a `PluginError` message.
 4. **Work ends with its call.** Check the cancellation in long loops, use

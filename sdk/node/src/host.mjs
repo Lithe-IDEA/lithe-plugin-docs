@@ -181,7 +181,7 @@ export class HostChannel {
       if (this.#early.length < MAX_EARLY_EVENTS) {
         this.#early.push({ subscriptionID, sequence, event });
       } else {
-        this.#transport.log(`Dropped an early event of subscription ${subscriptionID}.`);
+        this.#transport.log('Dropped an early subscription event: queue_full');
       }
     }
     // Otherwise the subscription was disposed; nothing follows a disposal.
@@ -233,7 +233,7 @@ export class HostChannel {
     subscription.lastSequence = sequence;
     Promise.resolve()
       .then(() => subscription.onEvent(event, { subscriptionID, sequence, gap }))
-      .catch((error) => this.#transport.log(`Subscription ${subscriptionID} failed to handle an event:`, error));
+      .catch(() => this.#transport.log('A subscription listener failed: internal_error'));
   }
 
   #drain() {

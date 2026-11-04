@@ -26,6 +26,9 @@ test('shortcut providers negotiate separately and read scoped snapshot inputs', 
     assert.equal(read.params.fileID, 'file-0');
     host.send({ id: read.id, result: { data: 'ZGF0YQ==' } });
     assert.deepEqual((await pending).result, { bindings: [{ commandID: 'find-next', keys: [{ key: 'f3', modifiers: [] }] }] });
+    // The terminal fact precedes the response and names the wire method Core accepts.
+    const facts = host.messages.filter((message) => message.method === 'lithe/log').map(({ params }) => [params.kind, params.operation]);
+    assert.deepEqual(facts, [['operationFinished', 'lithe/keymap/import']]);
     assert.ok((await host.request('lithe/keymap/import', { providerID: 'not-offered', snapshotID: 'snapshot-1' })).error);
     assert.ok((await host.request('lithe/keymap/import', { providerID: 'first', snapshotID: '../private' })).error);
   } finally { await host.close(); }

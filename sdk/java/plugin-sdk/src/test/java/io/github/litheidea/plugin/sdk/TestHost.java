@@ -100,6 +100,8 @@ final class TestHost {
     }
 
     Map<String, Object> initialize(Map<String, Object> experimental) {
+        experimental = new LinkedHashMap<>(experimental);
+        experimental.put("litheLogging", Fixtures.map("versions", Arrays.asList(1)));
         Map<String, Object> response = request("initialize", Fixtures.map(
                 "processId", null,
                 "rootUri", "file:///workspace",

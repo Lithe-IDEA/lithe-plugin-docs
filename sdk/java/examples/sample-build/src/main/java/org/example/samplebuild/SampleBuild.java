@@ -126,8 +126,7 @@ public final class SampleBuild {
                 command.add((String) part);
             }
             Processes.Result result = context.run(command, new Processes.Options()
-                    .directory(inside(workspaceRoot, (String) project.get("path")))
-                    .onStdout(text -> context.log("[" + name + "] " + text.trim())));
+                    .directory(inside(workspaceRoot, (String) project.get("path"))));
             results.add(object("name", name, "exitCode", result.exitCode()));
             if (result.exitCode() != 0) {
                 record(results, "failed");
@@ -167,7 +166,7 @@ public final class SampleBuild {
             return null;
         }).whenComplete((ignored, error) -> {
             if (error != null) {
-                backend.log("snapshot.clear stays unavailable: " + error.getMessage());
+                backend.diagnostics().degraded("initialize", "registration_failed");
             }
         });
     }

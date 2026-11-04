@@ -81,11 +81,12 @@ impl Host {
     }
 
     pub fn initialize(&mut self, versions: Value) -> Value {
-        let capabilities = if versions.is_null() {
+        let mut capabilities = if versions.is_null() {
             json!({})
         } else {
             json!({ "experimental": { "litheFunctions": { "versions": versions } } })
         };
+        capabilities["experimental"]["litheLogging"] = json!({ "versions": [1] });
         self.request(
             0,
             "initialize",

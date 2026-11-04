@@ -456,6 +456,7 @@ pub fn run_sample_scenario(sample: &Sample) {
         dependencies["dependencies"]["dependencies"][0]["name"], "left-pad",
         "{dependencies}"
     );
+    assert_log_facts(&plugin_id, &[("model", "plugins.operation.finished", "INFO"), ("dependencies", "plugins.operation.finished", "INFO")]);
 
     // A multi-step function: prepare, run the tool, record a snapshot.
     let built = session.call(
@@ -494,6 +495,8 @@ pub fn run_sample_scenario(sample: &Sample) {
         "{failed}"
     );
     assert_eq!(failed["error"]["pluginErrorCode"], "sample.buildFailed");
+
+    assert_log_facts(&plugin_id, &[("build-app", "plugins.operation.finished", "INFO"), ("build-broken", "plugins.operation.failed", "ERROR")]);
 
     // Cancelling a running build ends the tool the backend started.
     session.invoke(
@@ -580,4 +583,19 @@ pub fn run_sample_scenario(sample: &Sample) {
         state.is_empty(),
         "cleared state left files behind: {state:?}"
     );
+}
+
+/// Typed SDK notifications reach the Core-owned queue, with host operation correlation.
+fn assert_log_facts(plugin: &str, expected: &[(&str, &str, &str)]) {
+    let drained = core("diagnostics.drainCoreEvents", json!({}));
+    let records = drained["events"].as_array().expect("bounded catalog facts");
+    for (operation, event, level) in expected {
+        let matches: Vec<_> = records.iter().filter(|fact| fact["event"] == *event && fact["op"] == *operation).collect();
+        assert_eq!(matches.len(), 1, "one terminal {event} for {operation}: {drained}");
+        assert_eq!(matches[0]["level"], *level);
+        assert_eq!(matches[0]["channel"], format!("plugins/{plugin}/host"));
+        assert!(matches[0]["fields"]["duration_ms"].as_u64().is_some());
+        assert!(!matches[0].to_string().contains("built app"));
+        assert!(!matches[0].to_string().contains("s3cr3t"));
+    }
 }

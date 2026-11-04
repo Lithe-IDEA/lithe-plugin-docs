@@ -215,9 +215,7 @@ fn main() {
     // A backend that keeps state per workspace would refresh it here.
     let handle = backend.handle();
     backend.on_contexts_changed(move |_| {
-        let listed = handle.host().workspace().list_contexts()?;
-        let open = listed["contexts"].as_array().map_or(0, Vec::len);
-        handle.log(format_args!("{open} workspace(s) open"));
+        let _contexts = handle.host().workspace().list_contexts()?;
         Ok(())
     });
 
@@ -247,10 +245,14 @@ fn offer_clear(backend: &BackendHandle, state: &Arc<PathBuf>) {
         return;
     }
     let notes = Arc::clone(state);
-    if let Err(error) =
-        backend.register_function("note.clear", move |_, context| clear(&notes, context))
+    if backend
+        .register_function("note.clear", move |_, context| clear(&notes, context))
+        .is_err()
     {
-        backend.log(format_args!("note.clear stays unavailable: {error}"));
+        backend
+            .diagnostics()
+            .degraded("initialize", "registration_failed", None)
+            .expect("fixed diagnostic");
     }
 }
 
@@ -304,8 +306,11 @@ fn next_change(context: &Context) -> Result<Value, FunctionError> {
         }
     };
     // A subscription outlives the call until it is disposed.
-    if let Err(error) = watch.dispose() {
-        context.log(format_args!("could not dispose the watch: {error}"));
+    if watch.dispose().is_err() {
+        context
+            .diagnostics()
+            .degraded("files.nextChange", "subscription_dispose_failed", None)
+            .expect("fixed diagnostic");
     }
     outcome
 }

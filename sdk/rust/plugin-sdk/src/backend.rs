@@ -7,12 +7,14 @@
 //! Contract: `contract/v1/README.md` ("Plugin backend", "Plugin functions",
 //! and "Host services").
 
+use crate::diagnostics::{Diagnostics, OPERATIONS};
 use crate::error::{
     cancelled_response, internal_response, response_error, sdk_codes, Cancelled, FunctionError,
     SdkError,
 };
 use crate::framing::{read_frame, write_frame, Frame};
 use crate::host::{Channel, Credentials, Host, Outcome, Outgoing, WorkspaceContext};
+use crate::panic_boundary::catch as catch_unwind;
 use crate::protocol::{
     bounded_text, error_codes, is_command_id, is_function_id, methods, CONTEXT_VERSION,
     FUNCTIONS_VERSIONS, MAX_FUNCTIONS, MAX_MESSAGE_BYTES, MAX_RESULT_BYTES,
@@ -21,14 +23,13 @@ use base64::{engine::general_purpose::STANDARD as BASE64, Engine as _};
 use serde_json::{json, Map, Value};
 use std::any::Any;
 use std::collections::{BTreeMap, BTreeSet, HashMap};
-use std::fmt::Display;
 use std::io::{self, BufReader, Read, Write};
-use std::panic::{catch_unwind, AssertUnwindSafe};
+use std::panic::AssertUnwindSafe;
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Condvar, Mutex, MutexGuard, PoisonError};
 use std::thread;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 type Handler = Arc<dyn Fn(Value, &Context) -> Result<Value, FunctionError> + Send + Sync>;
 type InitializeHook = Box<dyn FnMut(&mut Initialize) -> Result<(), FunctionError> + Send>;
@@ -37,6 +38,9 @@ type CommandHandler =
     Arc<dyn Fn(&str, Option<WorkspaceContext>) -> Result<(), FunctionError> + Send + Sync>;
 type NotificationHandler = Arc<dyn Fn(Value) -> Result<(), FunctionError> + Send + Sync>;
 type Answer = Result<Value, Value>;
+
+/// Host request for one selected shortcut source; also the operation its diagnostic facts name.
+const KEYMAP_IMPORT_METHOD: &str = "lithe/keymap/import";
 
 /// `Idle` → `Listening` → `Initializing` → `Ready` → `ShuttingDown` → `Exited`.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -51,9 +55,13 @@ pub(crate) enum Phase {
 
 pub(crate) struct State {
     pub(crate) phase: Phase,
-    functions: BTreeMap<String, Handler>,
+    pub(crate) functions: BTreeMap<String, Handler>,
     keymap_providers: BTreeMap<String, Handler>,
     selected_keymap_providers: BTreeSet<String>,
+    pub(crate) logging: bool,
+    pub(crate) logging_ready: bool,
+    pub(crate) early_diagnostics: Vec<Value>,
+    quiet_success: std::collections::HashSet<String>,
     /// The negotiated plugin-function protocol version.
     functions_version: Option<u64>,
     /// Host requests being handled, by JSON-RPC ID.
@@ -138,6 +146,10 @@ impl Backend {
                     functions: BTreeMap::new(),
                     keymap_providers: BTreeMap::new(),
                     selected_keymap_providers: BTreeSet::new(),
+                    logging: false,
+                    logging_ready: false,
+                    early_diagnostics: Vec::new(),
+                    quiet_success: std::collections::HashSet::new(),
                     functions_version: None,
                     incoming: HashMap::new(),
                     outgoing: HashMap::new(),
@@ -156,6 +168,20 @@ impl Backend {
             contexts_changed: None,
             host_notifications: HashMap::new(),
         }
+    }
+
+    /// Omits successful terminal diagnostics for a registered high-frequency operation.
+    pub fn suppress_success_diagnostics(&mut self, operation: &str) -> Result<&mut Self, SdkError> {
+        let mut state = lock(&self.shared.state);
+        if !OPERATIONS.contains(&operation) && !state.functions.contains_key(operation) {
+            return Err(SdkError::new(
+                "sdk.logging.invalidOperation",
+                "Suppress a registered operation.",
+            ));
+        }
+        state.quiet_success.insert(operation.to_string());
+        drop(state);
+        Ok(self)
     }
 
     /// Reported as `serverInfo.version`.
@@ -343,8 +369,12 @@ impl Backend {
                     let code = i32::from(self.shared.phase() != Phase::ShuttingDown);
                     return self.shared.finish(code);
                 }
-                Err(error) => {
-                    self.shared.log(format_args!("Ending the session: {error}"));
+                Err(_) => {
+                    self.handle().diagnostics().terminal(
+                        "notification",
+                        Some(&FunctionError::internal("framing_error")),
+                        Instant::now(),
+                    );
                     return self.shared.finish(1);
                 }
                 Ok(Some(Frame::Malformed)) => self.shared.respond(
@@ -400,7 +430,7 @@ impl Backend {
                 Phase::Ready if method == methods::FUNCTION_INVOKE => {
                     Shared::invoke(&self.shared, id, &params)
                 }
-                Phase::Ready if method == "lithe/keymap/import" => {
+                Phase::Ready if method == KEYMAP_IMPORT_METHOD => {
                     Shared::invoke_keymap(&self.shared, id, &params)
                 }
                 Phase::Ready => self.shared.respond(
@@ -462,9 +492,7 @@ impl Backend {
             methods::COMMAND_DID_RUN => {
                 let command_id = params["commandID"].as_str().unwrap_or_default();
                 let Some(handler) = self.commands.get(command_id).cloned() else {
-                    return self
-                        .shared
-                        .log(format_args!("No handler for command {command_id}."));
+                    return self.shared.failed("notification", "command_unhandled");
                 };
                 let command_id = command_id.to_string();
                 let context = WorkspaceContext::from_reference(&params["context"]);
@@ -503,6 +531,23 @@ impl Backend {
         let keymap_offer = params
             .pointer("/capabilities/experimental/litheKeymapImport")
             .cloned();
+        let logging = params
+            .pointer("/capabilities/experimental/litheLogging/versions")
+            .and_then(Value::as_array)
+            .is_some_and(|versions| versions.iter().any(|v| v.as_u64() == Some(1)));
+        lock(&self.shared.state).logging = logging;
+        lock(&self.shared.state).logging_ready = false;
+        lock(&self.shared.state).early_diagnostics.clear();
+        if !logging {
+            lock(&self.shared.state).phase = Phase::Listening;
+            return self.shared.respond(
+                &id,
+                Err(rpc_error(
+                    error_codes::INVALID_REQUEST,
+                    "The backend requires litheLogging version 1.",
+                )),
+            );
+        }
         let offered = params
             .pointer("/capabilities/experimental/litheFunctions/versions")
             .and_then(Value::as_array);
@@ -520,15 +565,8 @@ impl Backend {
             let outcome = catch_unwind(AssertUnwindSafe(|| hook(&mut initialize)));
             let error = match outcome {
                 Ok(Ok(())) => continue,
-                Ok(Err(error)) => {
-                    self.shared.log(format_args!("initialize failed: {error}"));
-                    response_error(&error)
-                }
-                Err(panic) => {
-                    self.shared
-                        .log(format_args!("initialize failed: {}", panic_message(&panic)));
-                    internal_response()
-                }
+                Ok(Err(error)) => response_error(&error),
+                Err(_) => internal_response(),
             };
             lock(&self.shared.state).phase = Phase::Listening;
             return self.shared.respond(&id, Err(error));
@@ -540,6 +578,7 @@ impl Backend {
         state.functions.extend(initialize.added);
         state.functions_version = functions_version;
         let mut experimental = Map::new();
+        experimental.insert("litheLogging".into(), json!({ "version": 1 }));
         if let Some(offer) = keymap_offer {
             let version = offer
                 .get("versions")
@@ -578,9 +617,7 @@ impl Backend {
                     json!({ "version": version, "functions": functions }),
                 );
             }
-            None if !state.functions.is_empty() => self.shared.log(
-                "The host did not offer a litheFunctions version from 1 to 3; functions stay unavailable.",
-            ),
+            None if !state.functions.is_empty() => {}
             None => {}
         }
         let mut server_info = json!({ "name": self.shared.name });
@@ -592,6 +629,13 @@ impl Backend {
             &id,
             Ok(json!({ "capabilities": { "experimental": experimental }, "serverInfo": server_info })),
         );
+        state.logging_ready = true;
+        let early = std::mem::take(&mut state.early_diagnostics);
+        drop(state);
+        for params in early {
+            self.shared
+                .write(&json!({"jsonrpc":"2.0", "method":"lithe/log", "params":params}));
+        }
     }
 
     fn shutdown(&mut self, id: Value) {
@@ -615,11 +659,8 @@ impl Backend {
         };
         running.iter().for_each(Cancellation::cancel);
         for hook in &mut self.shutdown_hooks {
-            if let Err(panic) = catch_unwind(AssertUnwindSafe(&mut *hook)) {
-                self.shared.log(format_args!(
-                    "A shutdown hook failed: {}",
-                    panic_message(&panic)
-                ));
+            if catch_unwind(AssertUnwindSafe(&mut *hook)).is_err() {
+                self.shared.failed("shutdown", "panic");
             }
         }
         self.shared.respond(&id, Ok(Value::Null));
@@ -660,8 +701,12 @@ impl Shared {
         lock(&self.state).functions_version
     }
 
-    pub(crate) fn log(&self, message: impl Display) {
-        let _ = writeln!(io::stderr(), "[{}] {message}", self.name);
+    pub(crate) fn failed(&self, operation: &str, code: &str) {
+        self.write(
+            &json!({ "jsonrpc": "2.0", "method": "lithe/log", "params": {
+                "kind": "operationFailed", "operation": operation, "code": code, "durationMs": 0
+            }}),
+        );
     }
 
     fn finish(&self, code: i32) -> i32 {
@@ -689,16 +734,12 @@ impl Shared {
             .name(format!("lithe-notification-{method}"))
             .spawn(move || match catch_unwind(AssertUnwindSafe(handler)) {
                 Ok(Ok(())) => {}
-                Ok(Err(error)) => shared.log(format_args!("Notification {method} failed: {error}")),
-                Err(panic) => shared.log(format_args!(
-                    "Notification {method} panicked: {}",
-                    panic_message(&panic)
-                )),
+                Ok(Err(FunctionError::Cancelled)) => {}
+                Ok(Err(error)) => shared.failed("notification", failure_kind(&error)),
+                Err(_) => shared.failed("notification", "panic"),
             });
-        if let Err(error) = spawned {
-            self.log(format_args!(
-                "A notification handler could not start: {error}"
-            ));
+        if spawned.is_err() {
+            self.failed("notification", "worker_start_failed");
         }
     }
 
@@ -707,11 +748,11 @@ impl Shared {
         let Some(writer) = output.as_mut() else {
             return;
         };
-        if let Err(error) = write_frame(writer.as_mut(), message) {
+        if write_frame(writer.as_mut(), message).is_err() {
             // Every later write would fail the same way.
             *output = None;
             drop(output);
-            self.log(format_args!("The host stream failed: {error}"));
+            // The protocol pipe is gone; the host owns the process terminal fact.
         }
     }
 
@@ -731,7 +772,7 @@ impl Shared {
             .get("snapshotID")
             .and_then(Value::as_str)
             .unwrap_or_default();
-        if !params.as_object().is_some_and(|object| object.len() == 2)
+        if params.as_object().is_none_or(|object| object.len() != 2)
             || !valid_keymap_provider_id(provider)
             || !valid_snapshot_id(snapshot)
         {
@@ -781,10 +822,13 @@ impl Shared {
             .name("lithe-keymap-import".into())
             .spawn(move || {
                 let ended = Cancellation::new();
+                let diagnostic_operation_id =
+                    crate::diagnostics::request_operation_id(&Value::Null, &thread_id);
                 let context = Context {
                     shared: Arc::clone(&worker),
                     function_id: call_id,
                     operation_id: Value::Null,
+                    diagnostic_operation_id,
                     host: Host::new(
                         Arc::clone(&worker),
                         vec![cancellation.clone(), ended.clone()],
@@ -792,16 +836,20 @@ impl Shared {
                     cancellation,
                     workspace_context: None,
                     reporting: AtomicBool::new(false),
+                    quiet_success: AtomicBool::new(false),
                 };
+                let started = Instant::now();
                 let outcome = catch_unwind(AssertUnwindSafe(|| handler(call_params, &context)));
                 ended.cancel();
-                let answer = worker.function_answer(&context, outcome);
+                // Facts name the wire method Core registered, not the per-provider call id.
+                let answer =
+                    worker.function_answer(&context, KEYMAP_IMPORT_METHOD, outcome, started);
                 lock(&worker.state).incoming.remove(&thread_key);
                 worker.respond(&thread_id, answer);
             });
-        if let Err(error) = spawned {
+        if spawned.is_err() {
             lock(&shared.state).incoming.remove(&key);
-            shared.log(format_args!("The import could not start: {error}"));
+            shared.failed(KEYMAP_IMPORT_METHOD, "worker_start_failed");
             shared.respond(&id, Err(internal_response()));
         }
     }
@@ -855,10 +903,13 @@ impl Shared {
             .spawn(move || {
                 // Ends host requests the call left behind, on clones of its host.
                 let ended = Cancellation::new();
+                let diagnostic_operation_id =
+                    crate::diagnostics::request_operation_id(&operation_id, &thread_id);
                 let context = Context {
                     shared: Arc::clone(&worker),
                     function_id,
                     operation_id,
+                    diagnostic_operation_id,
                     host: Host::new(
                         Arc::clone(&worker),
                         vec![cancellation.clone(), ended.clone()],
@@ -866,61 +917,71 @@ impl Shared {
                     cancellation,
                     workspace_context,
                     reporting: AtomicBool::new(true),
+                    quiet_success: AtomicBool::new(false),
                 };
+                let started = Instant::now();
                 let outcome = catch_unwind(AssertUnwindSafe(|| handler(call_params, &context)));
                 context.reporting.store(false, Ordering::SeqCst);
                 ended.cancel();
-                let answer = worker.function_answer(&context, outcome);
+                let answer =
+                    worker.function_answer(&context, &context.function_id, outcome, started);
                 lock(&worker.state).incoming.remove(&thread_key);
                 worker.respond(&thread_id, answer);
             });
-        if let Err(error) = spawned {
+        if spawned.is_err() {
             lock(&shared.state).incoming.remove(&key);
-            shared.log(format_args!("The call could not start: {error}"));
+            shared.failed("function-call", "worker_start_failed");
             shared.respond(&id, Err(internal_response()));
         }
     }
 
     /// The answer to one call. A cancelled call answers as cancelled whatever
     /// the handler returned, and only failures the host never sees in full
-    /// are logged with their details.
+    /// are logged with a fixed category, without their private contents.
     fn function_answer(
         &self,
         context: &Context,
+        function: &str,
         outcome: Result<Result<Value, FunctionError>, Box<dyn Any + Send>>,
+        started: Instant,
     ) -> Answer {
         let cancelled = context.cancellation.is_cancelled();
-        let function = &context.function_id;
         match outcome {
             _ if cancelled => Err(cancelled_response()),
             Ok(Ok(value)) => {
                 let size = serde_json::to_vec(&value).map_or(usize::MAX, |bytes| bytes.len());
                 if size > MAX_RESULT_BYTES {
-                    self.log(format_args!(
-                        "Function {function} returned {size} bytes; results are limited to {MAX_RESULT_BYTES}."
-                    ));
+                    context.diagnostics().terminal(
+                        function,
+                        Some(&FunctionError::internal("result_limit")),
+                        started,
+                    );
                     Err(internal_response())
                 } else {
+                    let quiet = context.quiet_success.load(Ordering::SeqCst)
+                        || lock(&self.state).quiet_success.contains(function);
+                    if !quiet {
+                        context.diagnostics().terminal(function, None, started);
+                    }
                     Ok(value)
                 }
             }
             Ok(Err(error)) => {
-                match &error {
-                    FunctionError::Plugin(error) => {
-                        self.log(format_args!("Function {function} failed: {error}"))
-                    }
-                    FunctionError::Internal(details) => self.log(format_args!(
-                        "Function {function} failed unexpectedly: {details}"
-                    )),
-                    FunctionError::Cancelled => {}
+                if !matches!(error, FunctionError::Cancelled) {
+                    context
+                        .diagnostics()
+                        .terminal(function, Some(&error), started);
                 }
                 Err(response_error(&error))
             }
-            Err(panic) => {
-                self.log(format_args!(
-                    "Function {function} panicked: {}",
-                    panic_message(&panic)
-                ));
+            Err(_) => {
+                let _ = context.diagnostics().record(
+                    "operationFailed",
+                    function,
+                    Some("panic"),
+                    None,
+                    Some(started.elapsed().as_millis().min(9_007_199_254_740_991) as u64),
+                );
                 Err(internal_response())
             }
         }
@@ -954,12 +1015,14 @@ fn check_new_function(id: &str, functions: &BTreeMap<String, Handler>) -> Result
     Ok(())
 }
 
-fn panic_message(panic: &Box<dyn Any + Send>) -> String {
-    panic
-        .downcast_ref::<&str>()
-        .map(|message| message.to_string())
-        .or_else(|| panic.downcast_ref::<String>().cloned())
-        .unwrap_or_else(|| "a panic without a message".into())
+// Failure values can contain user data. Never format their messages or panic payloads
+// into diagnostics; preserve the existing response contract separately.
+fn failure_kind(error: &FunctionError) -> &'static str {
+    match error {
+        FunctionError::Plugin(_) => "plugin_error",
+        FunctionError::Internal(_) => "internal_error",
+        FunctionError::Cancelled => "cancelled",
+    }
 }
 
 /// What a hook sees of `initialize`, before the backend answers it.
@@ -1048,13 +1111,28 @@ pub struct Context {
     shared: Arc<Shared>,
     function_id: String,
     operation_id: Value,
+    diagnostic_operation_id: Option<String>,
     cancellation: Cancellation,
     host: Host,
     workspace_context: Option<WorkspaceContext>,
     reporting: AtomicBool,
+    quiet_success: AtomicBool,
 }
 
 impl Context {
+    /// Omits only this call's successful terminal fact; failures remain visible.
+    pub fn suppress_success_diagnostics(&self) {
+        self.quiet_success.store(true, Ordering::SeqCst);
+    }
+
+    /// Structured diagnostics correlated with the host's original operation ID.
+    pub fn diagnostics(&self) -> Diagnostics {
+        Diagnostics {
+            shared: Arc::clone(&self.shared),
+            operation_id: self.diagnostic_operation_id.clone(),
+        }
+    }
+
     pub fn function_id(&self) -> &str {
         &self.function_id
     }
@@ -1114,11 +1192,6 @@ impl Context {
         BackendHandle {
             shared: Arc::clone(&self.shared),
         }
-    }
-
-    /// Writes a diagnostic line to stderr, which the host keeps in its log.
-    pub fn log(&self, message: impl Display) {
-        self.shared.log(message);
     }
 }
 
@@ -1251,6 +1324,14 @@ pub struct BackendHandle {
 }
 
 impl BackendHandle {
+    /// Structured facts outside a call; no operation ID is fabricated.
+    pub fn diagnostics(&self) -> Diagnostics {
+        Diagnostics {
+            shared: Arc::clone(&self.shared),
+            operation_id: None,
+        }
+    }
+
     /// The negotiated plugin-function protocol version; `None` before
     /// `initialize` or when the host offered none this SDK speaks.
     pub fn functions_version(&self) -> Option<u64> {
@@ -1307,6 +1388,7 @@ impl BackendHandle {
         let running: Vec<_> = {
             let mut state = lock(&self.shared.state);
             state.functions.remove(id);
+            state.quiet_success.remove(id);
             state
                 .incoming
                 .values()
@@ -1327,11 +1409,6 @@ impl BackendHandle {
     /// `host().credentials()`.
     pub fn credentials(&self) -> Credentials {
         self.host().credentials()
-    }
-
-    /// Writes a diagnostic line to stderr, which the host keeps in its log.
-    pub fn log(&self, message: impl Display) {
-        self.shared.log(message);
     }
 }
 

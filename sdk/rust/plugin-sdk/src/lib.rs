@@ -19,14 +19,17 @@
 //! own, so handlers may block. A handler returns `Ok(value)` with a JSON
 //! result, a [`PluginError`] the plugin's UI can tell apart by its code, or
 //! any other error, which reaches the host only as a generic failure while
-//! its details go to stderr. A panic ends only its call.
+//! automatic diagnostics omit its contents. A panic ends only its call;
+//! SDK catch boundaries suppress raw panic payload printing.
 //!
 //! See [`Backend`] for a minimal backend.
 
 mod backend;
+mod diagnostics;
 mod error;
 mod framing;
 mod host;
+mod panic_boundary;
 mod protocol;
 mod stdio;
 
@@ -34,6 +37,7 @@ pub use backend::{
     Backend, BackendHandle, Cancellation, Context, Initialize, KeymapImportRequest,
     KeymapSourceFile,
 };
+pub use diagnostics::Diagnostics;
 pub use error::{sdk_codes, Cancelled, FunctionError, PluginError, SdkError, HOST_ERROR_CODES};
 pub use host::{
     Browser, Credentials, Documents, Editor, Event, Host, Preview, Subscription, Subscriptions,
