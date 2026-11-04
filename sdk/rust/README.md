@@ -15,14 +15,29 @@ platform. It speaks the LSP base protocol on stdio and implements, from
   by the host in the platform's secret store (the Keychain on macOS), and
   from version 3 workspace contexts, files, documents, editors, preview,
   the browser, window messages, commands, and subscriptions.
+- **`litheKeymapImport` 1** (unreleased): independently negotiated shortcut
+  import providers reading only explicitly selected source snapshots.
 
 The SDK owns the wire format, negotiation, cancellation, and error mapping.
-Your code supplies only handlers. It depends only on `serde_json`, runs
+Your code supplies only handlers. It depends on `serde_json` and `base64`, runs
 every call on a thread of its own, and needs Rust 1.87 or newer.
 
 Build providers and VCS providers are not part of this SDK yet; write build
 providers with the [Node.js](../node/README.md) or [Java](../java/README.md)
 SDK, and VCS providers with the Node.js SDK.
+
+## Shortcut import providers (unreleased)
+
+Declare `keymap_import_provider(id, handler)` before listening. The host
+negotiates IDs independently of plugin functions; a handler receives a
+`KeymapImportRequest` and a call-scoped `Context`. Use
+`request.list_inputs(context.host())` and `request.read_chunk(context.host(),
+file_id, offset, maximum_bytes)` to read declared files in bounded chunks.
+`KeymapSourceFile.path` is a relative label; the file ID is the authority.
+Return `{ "bindings": [...] }` in the normalized contract format. The host
+cancels the call on import cancellation and revokes the snapshot when it ends.
+Do not convert conditional or multi-stroke rules into global bindings. Product
+discovery and the import workflow are not available yet.
 
 ## A minimal backend
 

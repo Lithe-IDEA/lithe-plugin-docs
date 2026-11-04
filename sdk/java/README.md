@@ -4,7 +4,7 @@
 the process a plugin starts through a `runtime` launch
 (`{ "kind": "runtime", "tool": "java", "minimumVersion": "8", "entry": "backend/app.jar" }`).
 It is the Java twin of the [Node.js SDK](../node/README.md). Both implement the
-same two protocols from
+the following protocols from
 [plugin contract v1](../../contract/v1/README.md) with the
 same rules and error mapping:
 
@@ -16,10 +16,23 @@ same rules and error mapping:
   cancellation, and registration at runtime. From version 2 a backend may
   call [host services](#host-services); version 3 adds workspace, document,
   editor, and window services, command events, and workspace contexts.
+- **`litheKeymapImport` 1** (unreleased): independently negotiated shortcut
+  import providers reading only explicitly selected source snapshots.
 
 The SDK requires Java 8 or newer and has no runtime dependencies. JSON values
 are plain `Map<String, Object>`, `List<Object>`, `String`, `Long`, `Double`,
 `Boolean`, and `null` (see `Json`).
+
+## Shortcut import providers (unreleased)
+
+Declare `backend.keymapImportProvider(id, handler)` before listening. Its
+handler receives a `KeymapSnapshot` with `providerId()`, `snapshotId()`,
+`listInputs()` and `readChunk(fileId, offset, maximumBytes)`, plus the normal
+call context. Paths returned by `listInputs` are relative labels; reads use
+opaque file IDs. Return a normalized `{ bindings: [...] }` map and observe
+the call's cancellation. The host revokes the snapshot when the call ends.
+Do not turn conditional or multi-stroke rules into global bindings. Product
+discovery and the import workflow are not available yet.
 
 ## A minimal backend
 
@@ -75,7 +88,7 @@ JAR it starts must hold everything it loads.
 
 | API | Purpose |
 | --- | --- |
-| `Backend.create(name, version[, capabilities])` | Creates the backend. `capabilities` are standard LSP server capabilities. `experimental.litheBuild` and `experimental.litheFunctions` are reserved for the SDK. |
+| `Backend.create(name, version[, capabilities])` | Creates the backend. `capabilities` are standard LSP server capabilities; the SDK negotiates its experimental protocols. |
 | `onModel(handler)`, `onDependencies(handler)` | Implement the typed build requests. The SDK stamps `format` and `version`. Core validates the document. `litheBuild` is answered only when a handler exists. |
 | `onExecute(handler)` | Protocol 2+: a bounded provider-owned task, returning `{ exitCode, output }`. |
 | `onTest(handler)`, `onDiscoverTests(handler)` | Protocol 3+: exact execution and runnable selectors; discovery format/version are stamped. |

@@ -57,6 +57,14 @@ public final class SampleBuild {
     }
 
     private void serve() {
+        // Exercised only when the Core end-to-end harness offers this provider.
+        backend.keymapImportProvider("fixture", (snapshot, context) -> {
+            Backend.KeymapSourceFile file = snapshot.listInputs().get().get(0);
+            byte[] bytes = snapshot.readChunk(file.id(), 0, 4).get();
+            if (!"data".equals(new String(bytes, StandardCharsets.UTF_8))) throw new IllegalStateException("Unexpected fixture source");
+            return object("bindings", java.util.Collections.singletonList(object("commandID", "find-next", "keys",
+                    java.util.Collections.singletonList(object("key", "f3", "modifiers", java.util.Collections.emptyList())))));
+        });
         backend.onInitialize((params, negotiated) -> {
             // `Paths.get(URI)` accepts the trailing slash a directory URI may carry.
             workspaceRoot = Paths.get(URI.create((String) params.get("rootUri"))).toAbsolutePath().normalize();

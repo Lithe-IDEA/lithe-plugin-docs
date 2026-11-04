@@ -30,7 +30,10 @@ mod host;
 mod protocol;
 mod stdio;
 
-pub use backend::{Backend, BackendHandle, Cancellation, Context, Initialize};
+pub use backend::{
+    Backend, BackendHandle, Cancellation, Context, Initialize, KeymapImportRequest,
+    KeymapSourceFile,
+};
 pub use error::{sdk_codes, Cancelled, FunctionError, PluginError, SdkError, HOST_ERROR_CODES};
 pub use host::{
     Browser, Credentials, Documents, Editor, Event, Host, Preview, Subscription, Subscriptions,

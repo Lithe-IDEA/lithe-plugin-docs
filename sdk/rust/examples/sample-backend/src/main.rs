@@ -38,6 +38,14 @@ fn main() {
     let mut backend =
         lithe_plugin_sdk::Backend::new("sample-backend").version(env!("CARGO_PKG_VERSION"));
 
+    // Exercised only when the Core end-to-end harness offers this provider.
+    backend.keymap_import_provider("fixture", |snapshot, context| {
+        let files = snapshot.list_inputs(context.host())?;
+        let bytes = snapshot.read_chunk(context.host(), &files[0].id, 0, 4)?;
+        if bytes != b"data" { return Err(FunctionError::internal("Unexpected fixture source")); }
+        Ok(json!({"bindings": [{"commandID": "find-next", "keys": [{"key": "f3", "modifiers": []}]}]}))
+    }).expect("valid fixture provider");
+
     let notes = Arc::clone(&state);
     backend
         .function("note.save", move |params, context| {

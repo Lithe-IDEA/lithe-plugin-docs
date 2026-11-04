@@ -9,6 +9,12 @@
 mod plugin_sdk;
 
 #[test]
+fn the_rust_sdk_import_provider_reads_a_selected_source_through_core() {
+    let Some(executable) = std::env::var_os("LITHE_PLUGIN_SDK_RUST_SAMPLE") else { return; };
+    plugin_sdk::keymap::run("rust-keymap", &executable.to_string_lossy(), &[]);
+}
+
+#[test]
 fn the_rust_sdk_sample_backend_serves_functions_and_host_services() {
     let Some(executable) = std::env::var_os("LITHE_PLUGIN_SDK_RUST_SAMPLE") else {
         eprintln!("skipped: set LITHE_PLUGIN_SDK_RUST_SAMPLE to run the Rust SDK end-to-end check");

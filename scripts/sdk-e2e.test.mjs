@@ -4,7 +4,13 @@ import { mkdtemp, mkdir, readFile, writeFile, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { test } from 'node:test';
-import { copyWorkingTree, includesNativeWorkflows } from './sdk-e2e.mjs';
+import { copyWorkingTree, includesKeymapImport, includesNativeWorkflows } from './sdk-e2e.mjs';
+
+test('shortcut import coverage follows the selected host capability', () => {
+  assert.equal(includesKeymapImport({}), false);
+  assert.equal(includesKeymapImport({ properties: { requires: { properties: { keymapImportProviders: { const: 1 } } } } }), true);
+  assert.equal(includesKeymapImport({ properties: { requires: { properties: { keymapImportProviders: { const: 2 } } } } }), false);
+});
 
 test('the pinned contract turns native workflow coverage on after protocol 6 is published', () => {
   const schema = versions => ({ properties: { requires: { properties: { buildProviders: { enum: versions } } } } });
