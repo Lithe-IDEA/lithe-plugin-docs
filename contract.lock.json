@@ -3,12 +3,12 @@
   "source": {
     "repository": "https://github.com/1lck/Lithe-IDEA",
     "directory": "shared/contracts/plugins/v1",
-    "revision": "ced042289b5fbf9b6562eacd8da1f15428b5849d"
+    "revision": "7a24126eca3a26775daeb84db38ae04bec938d1a"
   },
   "files": [
     {
       "path": "README.md",
-      "sha256": "b30695e1c297812ad009937b78daf12f23b74d4c111c602614e393c25d5b5693"
+      "sha256": "ceb7d20d4c47fa48154813727c5c8e06563cf0fbdcd7d62ed45f36cb7c6913c3"
     },
     {
       "path": "fixtures/backend-workspace.plugin.json",
@@ -193,6 +193,10 @@
     {
       "path": "fixtures/node-runtime.plugin.json",
       "sha256": "3cbc80303dca796302653982d3f55fdc2072aea69a2517286a06e73fbc3c4499"
+    },
+    {
+      "path": "fixtures/plugin-logging.json",
+      "sha256": "ada9fe4b6a030466fc3ed8819683e645007720cf2310b709ff0c1873c80025a5"
     },
     {
       "path": "fixtures/project-generator-templates/.gitattributes",
