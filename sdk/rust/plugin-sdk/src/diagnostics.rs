@@ -54,10 +54,11 @@ pub(crate) fn request_operation_id(
         .filter(|id| id.unsigned_abs() <= MAX_INTEGER)
     {
         id.to_string()
-    } else if let Some(id) = request_id.as_u64().filter(|id| *id <= MAX_INTEGER) {
-        id.to_string()
     } else {
-        return None;
+        request_id
+            .as_u64()
+            .filter(|id| *id <= MAX_INTEGER)?
+            .to_string()
     };
     token(&fallback, 128).then_some(fallback)
 }
