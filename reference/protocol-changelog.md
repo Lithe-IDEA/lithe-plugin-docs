@@ -5,7 +5,7 @@
 - **收录范围**：Lithe 主仓库 `preview` 分支上的 PR，只要它修改了下面三处中的任意一处：插件契约 `shared/contracts/plugins/v1/`、Core 能力表 [`capabilities.rs`](https://github.com/1lck/Lithe-IDEA/blob/preview/rust/lithe-core/src/plugins/capabilities.rs)、插件函数协议 [`plugin_function.rs`](https://github.com/1lck/Lithe-IDEA/blob/preview/rust/lithe-core/src/lsp/interface/plugin_function.rs)。三处都没改、只改宿主内部实现的 PR 不收录。
 - **日期**：PR 合入 `preview` 的日期。
 - **修改人**：原 PR 的作者（GitHub 账号）。登记这些 PR 的同步 PR 会在描述里 @ 他们，请他们核对自己那一行。
-- **记录到**：`preview` 的 [`644afdaac`](https://github.com/1lck/Lithe-IDEA/commit/644afdaac9087b276cb8f7902658b85ae1792d6d)（[#1747](https://github.com/1lck/Lithe-IDEA/pull/1747)），即本仓库 `contract/v1/` 当前副本的来源。
+- **记录到**：`preview` 的 [`5d38352a1`](https://github.com/1lck/Lithe-IDEA/commit/5d38352a1757a70fd5fa297d7aa3e43bb2e33607)（[#1752](https://github.com/1lck/Lithe-IDEA/pull/1752)），即本仓库 `contract/v1/` 当前副本的来源。
 - **每一版的内容和宿主现状**：见[能力与协议版本对照](capabilities-and-versions.md)。字段和行为以 [`contract/v1/README.md`](../contract/v1/README.md) 为准，官方 SDK 的发版见 [SDK 发版历史](capabilities-and-versions.md#sdk-发版历史)。
 
 时间线的“协议 / API”一列里，**加粗**的是这个 PR 新增的版本号；没有加粗的，是同一版本内的补充、宿主接入或说明修正。
@@ -58,6 +58,7 @@
 | `executableResolution` | 2 | 2026-11-01 | [#1581](https://github.com/1lck/Lithe-IDEA/pull/1581) |
 | `vcsProviders` | 1 | 2026-10-23 | [#1430](https://github.com/1lck/Lithe-IDEA/pull/1430) |
 | `projectGenerators` | 1 | 2026-10-24 | [#1452](https://github.com/1lck/Lithe-IDEA/pull/1452) |
+| `projectGenerators` | 2 | 2026-11-05 | [#1740](https://github.com/1lck/Lithe-IDEA/pull/1740) |
 | `backend` | 1 | 2026-10-24 | [#1470](https://github.com/1lck/Lithe-IDEA/pull/1470) |
 | `backend` | 2 | 2026-10-30 | [#1595](https://github.com/1lck/Lithe-IDEA/pull/1595) |
 | `debugAdapters` | 1 | 2026-10-26 | [#1510](https://github.com/1lck/Lithe-IDEA/pull/1510) |
@@ -78,7 +79,7 @@
 | `litheBuild` | 2–6 | 2026-10-28 | [#1517](https://github.com/1lck/Lithe-IDEA/pull/1517) |
 | `litheBuild` | 7–11 | 2026-11-04 | [#1558](https://github.com/1lck/Lithe-IDEA/pull/1558) |
 | `litheVcs` | 1 | 2026-10-23 | [#1430](https://github.com/1lck/Lithe-IDEA/pull/1430) |
-| `litheToolchains` | 1（提案） | 2026-11-01 | [#1581](https://github.com/1lck/Lithe-IDEA/pull/1581) |
+| `litheToolchains` | 1 | 2026-11-01 | [#1581](https://github.com/1lck/Lithe-IDEA/pull/1581) 实现；正式契约由 [#1752](https://github.com/1lck/Lithe-IDEA/pull/1752) 写入 |
 | `litheKeymapImport` | 1 | 2026-11-03 | [#1695](https://github.com/1lck/Lithe-IDEA/pull/1695) |
 | `litheLogging` | 1 | 2026-11-04 | [#1699](https://github.com/1lck/Lithe-IDEA/pull/1699) |
 
@@ -88,6 +89,8 @@
 
 | PR | 修改人 | 协议 / API | 改了什么 |
 | --- | --- | --- | --- |
+| [#1752](https://github.com/1lck/Lithe-IDEA/pull/1752) | [@xiaoyumuxi](https://github.com/xiaoyumuxi) | `litheToolchains` 1：写入正式契约 | 删除工具链设计草案 `toolchains/proposal/` 和 `fixtures/toolchains/proposal/`。草案里已实现的部分写进正式契约 `toolchains/README.md`：新增“Provider backend negotiation”一节（`initialize` 里的 `experimental.litheToolchains` 协商、`lsp.toolchainRequest`、超时）和“Error replies”小节（错误回复格式与 11 个稳定失败码的数字码对照）。Core 测试改用内联数据 `toolchain_vectors.rs`。协议行为没有变化。 |
+| [#1740](https://github.com/1lck/Lithe-IDEA/pull/1740) | [@xiaoyumuxi](https://github.com/xiaoyumuxi) | **`projectGenerators` 2**（API-33） | 生成器新增 `tool` 字段：从插件声明的工具定义的已有安装里选一个（`tool`、`minimumVersion`、`pinAs`、`optional`），模板可用 `${field.<id>.executable}`；`pinAs: "project"` 时计划返回 `toolPins`，宿主把它存为新项目的工具固定。表单输入加 `tools`，结果字段带 `installations`，新增问题码 `toolTooOld`；目录条目带 `tools`（声明该工具的插件）。版本 2 不能用 `runtime` 字段，版本 1 不能用 `tool` 字段。macOS 声明 1、2，Windows 不声明。新增示例 `project-generator-tool-field.plugin.json`、12 个计划用例和 9 个清单拒绝用例。 |
 | [#1747](https://github.com/1lck/Lithe-IDEA/pull/1747) | [@xiaoyumuxi](https://github.com/xiaoyumuxi) | 清单 schema：`requires.buildSystems` | schema 的枚举补齐到 1–4（Core 从 #1558 起已经支持 3、4，schema 当时只写到 3）。fixtures 按功能分目录，工具链提案移到 `toolchains/proposal/`，契约 README 的能力版本表随之修正。 |
 
 ### 2026-11-04
