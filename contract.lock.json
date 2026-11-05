@@ -3,7 +3,7 @@
   "source": {
     "repository": "https://github.com/1lck/Lithe-IDEA",
     "directory": "shared/contracts/plugins/v1",
-    "revision": "22c14a96b3e6a8152686e2abdd6cb075e2849365"
+    "revision": "5cc06d5f44cfe94956b174720d34445b027f51d7"
   },
   "files": [
     {
@@ -368,7 +368,7 @@
     },
     {
       "path": "plugin-manifest.schema.json",
-      "sha256": "b540f9906e1eb36130bb12cca245d044445eee95614b1e452824696edfd4fa53"
+      "sha256": "1043bc27aa0afd190e57bfda419eb068d19d8e653309f935e1483b348e022e6e"
     },
     {
       "path": "toolchains/README.md",
