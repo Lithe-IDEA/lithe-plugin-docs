@@ -5,7 +5,7 @@ import { createBackend, HOST_ERRORS, HostError, LIMITS, PluginSdkError } from '.
 import { gate, TestHost, withTimeout } from './harness.mjs';
 
 const fixture = JSON.parse(
-  readFileSync(new URL('../../../contract/v1/fixtures/function-protocol.json', import.meta.url), 'utf8'),
+  readFileSync(new URL('../../../contract/v1/fixtures/backend/function-protocol.json', import.meta.url), 'utf8'),
 );
 
 const CONTEXT = Object.freeze({ contextID: 'w1', generation: 2 });

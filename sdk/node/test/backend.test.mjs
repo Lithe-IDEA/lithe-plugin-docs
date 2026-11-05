@@ -5,7 +5,7 @@ import { createBackend, isFunctionId, PluginError, PluginSdkError } from '../src
 import { gate, TestHost, withTimeout } from './harness.mjs';
 
 const fixture = JSON.parse(
-  readFileSync(new URL('../../../contract/v1/fixtures/function-protocol.json', import.meta.url), 'utf8'),
+  readFileSync(new URL('../../../contract/v1/fixtures/backend/function-protocol.json', import.meta.url), 'utf8'),
 );
 
 function functionBackend() {

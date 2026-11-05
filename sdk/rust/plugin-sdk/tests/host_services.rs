@@ -22,7 +22,7 @@ const QUIET: Duration = Duration::from_millis(200);
 fn fixture() -> Value {
     // Read at run time: the packaged crate has no contract directory.
     let path = Path::new(env!("CARGO_MANIFEST_DIR"))
-        .join("../../../contract/v1/fixtures/function-protocol.json");
+        .join("../../../contract/v1/fixtures/backend/function-protocol.json");
     let text =
         fs::read_to_string(&path).unwrap_or_else(|error| panic!("{}: {error}", path.display()));
     serde_json::from_str(&text).expect("the fixture is JSON")

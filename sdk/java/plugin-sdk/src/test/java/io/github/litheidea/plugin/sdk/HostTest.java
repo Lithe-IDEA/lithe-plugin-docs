@@ -40,7 +40,7 @@ class HostTest {
     private static Map<String, Object> loadFixture() {
         try {
             return object(Json.parse(new String(Files.readAllBytes(
-                    Paths.get("../../../contract/v1/fixtures/function-protocol.json")), StandardCharsets.UTF_8)));
+                    Paths.get("../../../contract/v1/fixtures/backend/function-protocol.json")), StandardCharsets.UTF_8)));
         } catch (IOException error) {
             throw new UncheckedIOException(error);
         }

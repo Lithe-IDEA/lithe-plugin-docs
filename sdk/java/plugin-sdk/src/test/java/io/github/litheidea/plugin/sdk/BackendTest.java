@@ -96,7 +96,7 @@ class BackendTest {
         // Every ID the fixture accepts is accepted locally, and the fixture's
         // malformed ID refused, so the SDK never declares what Core rejects.
         Map<String, Object> fixture = object(Json.parse(new String(Files.readAllBytes(
-                Paths.get("../../../contract/v1/fixtures/function-protocol.json")), StandardCharsets.UTF_8)));
+                Paths.get("../../../contract/v1/fixtures/backend/function-protocol.json")), StandardCharsets.UTF_8)));
         for (Object entry : (List<?>) fixture.get("negotiation")) {
             Map<String, Object> testCase = object(entry);
             List<String> ids = new ArrayList<>();

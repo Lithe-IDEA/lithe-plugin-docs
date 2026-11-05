@@ -1,12 +1,16 @@
-# 插件接入统一日志
+# 插件接入统一日志 / Plugin logging
+
+[中文](#中文) · [English](#english)
+
+## 中文
 
 新版本插件使用 `litheLogging` 1 与 `lithe/log` 发送受限的操作事实，由宿主的共享事件目录、脱敏、队列和文件写入器落盘。三个 SDK 不再提供自由文本 `log` 接口，也没有 stderr 回退。插件无需实现 v2 文件格式、文件轮转、脱敏器或后台写入线程。
 
 宿主必须在 initialize 中提供 `capabilities.experimental.litheLogging.versions: [1]`，SDK 回复 `capabilities.experimental.litheLogging.version: 1`。缺少协议时，SDK 拒绝初始化；不自动退回旧日志。初始化尚未协商时的失败只通过原有 RPC 错误与宿主进程生命周期记录，不能提前发送未协商的日志通知。
 
-本文的 API 从 Node.js SDK 0.3.0、Java SDK 0.3.0 和 Rust SDK 0.2.0 开始提供。插件在构建输入中锁定对应的 release tag 与 SHA-256，不要引用开发机的绝对 path 依赖。用这些版本构建的插件只能在提供 `litheLogging` 1 的 Lithe 版本上启动。
+本文的 API 从 Node.js SDK 0.3.0、Java SDK 0.3.0 和 Rust SDK 0.2.0 开始提供。插件在构建输入中锁定对应的 release tag 与 SHA-256，不要引用开发机的绝对 path 依赖。用这些版本构建的插件只能在提供 `litheLogging` 1 的 Lithe 版本上启动，主仓库最新 `preview` 已提供。还要在不提供它的 Lithe 版本上运行的插件，继续用 Node.js/Java SDK 0.2.0 或 Rust SDK 0.1.0；用新版本 SDK 构建的插件，在 Lithe 稳定版提供 `litheLogging` 1 之前把 GitHub Release 标为预发布。
 
-## 每种事实与级别
+### 每种事实与级别
 
 | `kind` | v2 目录事件 | 级别与用途 |
 | --- | --- | --- |
@@ -21,7 +25,7 @@
 
 通道由宿主从已校验的安装插件 ID 得到 `plugins/<plugin>/host`，插件不能更改通道或拼接路径。上下文诊断优先携带宿主原始 `operationID`，缺少合法值时沿用当前请求原始 JSON-RPC ID（安全字符串或整数的十进制字符串），wire 名为 `operationId`，只保留最长 128 字节的受控 ASCII 标识；无真实身份时省略。通知没有请求 ID，不生成回退身份。后台共享任务可以使用 backend/handle 的无 op 诊断，不能伪造一个操作 ID。
 
-## 三个 SDK 的用法
+### 三个 SDK 的用法
 
 ```js
 backend.function('project.refresh', async (params, context) => {
@@ -55,7 +59,7 @@ SDK 在函数与受管 build/VCS 请求的结果边界自动发送一次终态�
 
 Rust SDK 用一次安装的 panic hook 包装器，仅在线程处于 SDK 拥有的 catch 边界时屏蔽原始 payload 输出，随后发送固定 `panic` 类别。其他线程和边界外的 panic 继续执行原 hook。不要把用户内容放进 panic，插件也不要在 SDK 启动后替换该 hook 来恢复正文输出。
 
-## 上游诊断与文件位置
+### 上游诊断与文件位置
 
 上游语言服务器的 stderr、`window/logMessage` 继续由宿主接收；它们不是插件自己的结构化日志入口。插件不得把源码、协议载荷、SQL、HTTP body 或构建输出复制进上游诊断，以为脱敏与截断能使其安全。控制台输出走已有 Build、Run、Test、VCS 或插件界面结果。
 
@@ -70,10 +74,92 @@ macOS 的日志窗口与导出读取 v2。Windows 的持久化仍是 v1，新的
 - 原生文件不自动变成 v2 时间线事件，不能再把整个文件打印进 stderr。
 - app bundle、插件包、Windows 安装目录运行时只读；日志与锁文件不得改变签名或 Sparkle 增量更新基线。
 
-## 最小验证
+### 最小验证
 
 1. 用已有有界协议测试确认 logging v1 协商、四类事实、级别、原始操作关联、成功抑制、取消和非法参数拒绝。
 2. 触发真实失败，确认原有用户错误码与提示保持不变，诊断只有固定类别，不含请求正文、原始异常或堆栈。
 3. 使用真实 Core 查询 `diagnostics.drainCoreEvents`，核对目录事件与 `op`；不要把 v1 poll 中的旧 detail 当作新结构化记录。
 4. 在目标宿主中安装并执行对应工作流，核对日志窗口。SDK 组件通过不能替代产品验收。
 5. 原生日志位置有变化时比较工作流前后安装目录清单或哈希，确认发行资源不变；结束后清理本轮进程。
+
+---
+
+## English
+
+Current plugins use `litheLogging` 1 and `lithe/log` to send restricted operation facts. The host's shared event catalog, redaction, queue, and file writer persist them. The three SDKs no longer offer a free-text `log` interface and have no stderr fallback. A plugin does not implement the v2 file format, file rotation, a redactor, or a background writer thread.
+
+The host must offer `capabilities.experimental.litheLogging.versions: [1]` in initialize, and the SDK replies with `capabilities.experimental.litheLogging.version: 1`. When the protocol is missing, the SDK refuses to initialize; it does not fall back to the old logging. A failure before initialization has negotiated logging is recorded only through the existing RPC error and the host's process lifecycle; the plugin must not send a log notification before negotiation.
+
+The APIs in this guide ship from Node.js SDK 0.3.0, Java SDK 0.3.0, and Rust SDK 0.2.0. Pin the matching release tag and SHA-256 in your build inputs; do not depend on an absolute path on a development machine. Plugins built with these versions start only on Lithe versions that offer `litheLogging` 1, which the latest `preview` of the Lithe repository does. For a plugin that must also run on Lithe versions without it, stay on Node.js/Java SDK 0.2.0 or Rust SDK 0.1.0; for a plugin built with the newer SDKs, mark its GitHub Release as a prerelease until a stable Lithe release offers `litheLogging` 1.
+
+### Facts and levels
+
+| `kind` | v2 catalog event | Level and use |
+| --- | --- | --- |
+| `operationFinished` | `plugins.operation.finished` | INFO, the real successful end of a key user operation |
+| `operationFailed` | `plugins.operation.failed` | ERROR, a failure that affects the request's result; the SDK sends it once at the boundary that owns the result |
+| `degraded` | `plugins.operation.fallback_selected` | WARN, a failure that was handled by choosing a fallback |
+| `recovered` | `plugins.operation.recovery_finished` | WARN, a real recovery after an earlier failure |
+
+`operationFinished` and `operationFailed` must carry a `durationMs` measured with a monotonic clock. Failure, degradation, and recovery use a controlled `code`; success has no `code`. The optional `count` and `durationMs` are integers from 0 to 9007199254740991. The API does not accept raw messages, stacks, requests, URLs, SQL, command output, or field dictionaries.
+
+`operation` accepts only function IDs registered with this SDK or closed protocol operations; a registered function ID longer than 64 bytes is reported as `function-call`. The public protocol operations are initialize, shutdown, notification, function-call, and result-encoding, the `lithe/build/*` and `lithe/vcs/*` methods the SDK knows, and the shortcut import request `lithe/keymap/import` (all three SDKs report its end state automatically). Arbitrary user text is not accepted even when its characters are valid. `code` is an ASCII category identifier of at most 64 bytes, not an error message.
+
+The host derives the channel `plugins/<plugin>/host` from the validated installed plugin ID; the plugin cannot change the channel or build a path. Contextual diagnostics carry the host's original `operationID` first; without a valid one they reuse the current request's original JSON-RPC ID (a safe string, or an integer as a decimal string). The wire name is `operationId`, and only a controlled ASCII identifier of at most 128 bytes is kept; it is omitted when there is no real identity. Notifications have no request ID, and no fallback identity is generated for them. Shared background work can use the backend or handle diagnostics without an operation, but must not invent an operation ID.
+
+### Using the three SDKs
+
+```js
+backend.function('project.refresh', async (params, context) => {
+  // Call only in a real degraded branch that decides to continue; never pass exception text to the log.
+  context.diagnostics.degraded('project.refresh', 'cache_unavailable', 1);
+  return refreshWithoutCache(params);
+});
+// High-frequency reads or polling produce no INFO success noise; failures are still recorded automatically.
+backend.function('project.inspect', (params) => inspectProject(params));
+backend.suppressSuccessDiagnostics('project.inspect');
+backend.diagnostics.recovered('project.refresh', 'cache_restored');
+```
+
+```java
+context.diagnostics().degraded("lithe/build/model", "snapshot_unavailable", 1L);
+backend.diagnostics().recovered("lithe/build/model", "snapshot_restored");
+backend.suppressSuccessDiagnostics("lithe/build/dependencies");
+```
+
+```rust
+context.diagnostics().degraded("query.run", "rows_truncated", Some(1))?;
+handle.diagnostics().recovered("query.run", "connection_restored", None)?;
+backend.suppress_success_diagnostics("query.inspect")?;
+```
+
+The operation passed to `degraded` and `recovered` must be registered, so put static examples after registration has actually finished. A Rust error return means only that the call's arguments are invalid. Protocol writes reuse the existing writer, and a failed diagnostic send never turns a successful user operation into a failure. There is no extra writer or background queue.
+
+A single entry point that mixes user operations with high-frequency reads can call `context.suppressSuccessDiagnostics()` (in Rust, `context.suppress_success_diagnostics()`) for the current call. That decision affects only this call's success fact, not other calls or failures.
+
+The SDK sends one end state automatically at the result boundary of functions and managed build and VCS requests. The notification goes out before the RPC response so the host can relate it to the still-active request. Do not send a failure from a handler and then return or throw the same failure. Cancellation produces no failure event, and a normally absent cleanup object should not produce a WARN. High-frequency reads, previews, statistics, and polling turn off success facts with `suppressSuccessDiagnostics` / `suppress_success_diagnostics`; failures and real degradations are kept.
+
+The Rust SDK installs a panic hook wrapper once. It suppresses the raw payload output only while the thread is inside a catch boundary the SDK owns, and then sends the fixed `panic` category. Panics on other threads and outside the boundary still run the original hook. Do not put user content in a panic, and do not replace the hook after the SDK starts to restore message output.
+
+### Upstream diagnostics and file locations
+
+The host still receives an upstream language server's stderr and `window/logMessage`; they are not the plugin's own structured logging path. A plugin must not copy source code, protocol payloads, SQL, HTTP bodies, or build output into upstream diagnostics in the belief that redaction and truncation make them safe. Console output goes through the existing Build, Run, Test, VCS, or plugin UI results.
+
+On macOS the log window and export read v2. Windows still persists v1: the new Core intake and catalog events do not mean the Windows log window has migrated. Declare a platform verified only after running the workflow on that target platform.
+
+Use `${logDir}` only when an upstream tool really can write only to files. The host explicitly provides the current session's `plugins/<id>/files/`, created through the writable storage adapter; it is never derived from the plugin's install path or the app bundle:
+
+- The log directory belongs only to the current session. It holds no databases, indexes, downloads, or workspace state and is not shared across worktrees.
+- Caches and state keep using `${stateDir}` and `${workspaceStateDir}`.
+- When log storage is unavailable, the host does not provide the variable. Remote processes cannot use a local log directory; a launch plan that references `${logDir}` without an absolute `logDirectory` fails.
+- A plugin that needs no native files should not add this launch dependency. Check that the target host and platform support it before changing the launch template.
+- Native files do not become v2 timeline events automatically, and the whole file must not be printed to stderr instead.
+- The app bundle, plugin packages, and the Windows install directory are read-only at run time; logs and lock files must not change the signature or the Sparkle delta update baseline.
+
+### Minimum verification
+
+1. Use the existing bounded protocol tests to confirm logging v1 negotiation, the four facts, levels, original operation correlation, success suppression, cancellation, and rejection of invalid arguments.
+2. Trigger a real failure and confirm that the existing user error code and message are unchanged and that diagnostics contain only fixed categories, with no request body, raw exception, or stack.
+3. Query `diagnostics.drainCoreEvents` against a real Core and check the catalog events and `op`; do not mistake the old detail in a v1 poll for a new structured record.
+4. Install the plugin in the target host, run the matching workflow, and check the log window. Passing SDK component tests does not replace product acceptance.
+5. When the native log location changes, compare the install directory listing or hashes before and after the workflow to confirm the release resources are unchanged, and clean up this run's processes afterwards.
