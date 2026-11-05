@@ -52,7 +52,7 @@ Lithe 的插件公共 API 按 [API 实施计划](https://github.com/1lck/Lithe-I
 | API-29 | 构建、任务、测试、运行准备 | 部分完成 | [`buildSystems` 1–4](../contract/v1/README.md#api-level-3-build-systems)、[`buildProviders` 1–11](../contract/v1/README.md#build-providers)、`buildModelInputs` 1 | 开发指南还不完整 | [声明式构建](domains/build-systems.md)、[构建提供者](domains/build-providers.md) |
 | API-30 | 调试适配器 | 既有能力 | [`debugAdapters` 1、2](../contract/v1/README.md#api-level-4-debug-adapters) 与宿主的 DAP 会话 | — | [调试适配器](domains/debug-adapters.md) |
 | API-31 | VCS 提供者 | 既有能力 | [`vcsProviders` 1](../contract/v1/README.md#api-level-3-vcs-providers) | 不含内置 Git 的公共读取（见 API-42） | [VCS](domains/vcs.md) |
-| API-33 | 项目生成器 | 既有能力 | [`projectGenerators` 1](../contract/v1/README.md#project-generators) | — | [项目生成器](domains/project-generators.md) |
+| API-33 | 项目生成器 | 既有能力 | [`projectGenerators` 1、2](../contract/v1/README.md#project-generators) | — | [项目生成器](domains/project-generators.md) |
 | API-37 | 环境信息与语言包 | 部分完成 | `getCapabilities` 返回协议版本、可用方法、限制和后端运行位置（`backendAuthority`） | 语言包、环境和主题变化事件 | [插件后端](domains/backend.md) |
 | API-40 | 工作区 authority | 部分完成 | 工作区上下文带 `local` 或 `remote`；文件和编辑器方法对远程上下文明确返回 `plugin.host.authorityUnsupported` | 远程执行 | [插件后端](domains/backend.md) |
 | API-41 | 激活事件与启动预算 | 部分完成 | [`onWorkspaceOpen`](../contract/v1/README.md#permissions-and-activation)、`onCommand`、后台两路并发启动、`initialize` 超时、有界通知队列 | 按工作区内容匹配激活、全局冷启动预算 | [插件后端](domains/backend.md) |
@@ -175,7 +175,7 @@ Status meanings:
 | API-29 | Build, tasks, tests, run preparation | Partial | [`buildSystems` 1–4](../contract/v1/README.md#api-level-3-build-systems), [`buildProviders` 1–11](../contract/v1/README.md#build-providers), `buildModelInputs` 1 | The developer guides are incomplete | [Build systems](domains/build-systems.md), [Build providers](domains/build-providers.md) |
 | API-30 | Debug adapters | Existing | [`debugAdapters` 1 and 2](../contract/v1/README.md#api-level-4-debug-adapters) and the host's DAP sessions | — | [Debug adapters](domains/debug-adapters.md) |
 | API-31 | VCS providers | Existing | [`vcsProviders` 1](../contract/v1/README.md#api-level-3-vcs-providers) | Public reads of built-in Git are not included (see API-42) | [VCS](domains/vcs.md) |
-| API-33 | Project generators | Existing | [`projectGenerators` 1](../contract/v1/README.md#project-generators) | — | [Project generators](domains/project-generators.md) |
+| API-33 | Project generators | Existing | [`projectGenerators` 1, 2](../contract/v1/README.md#project-generators) | — | [Project generators](domains/project-generators.md) |
 | API-37 | Environment info and l10n | Partial | `getCapabilities` returns the protocol version, usable methods, limits, and where the backend runs (`backendAuthority`) | Language packs, environment and theme change events | [Plugin backend](domains/backend.md) |
 | API-40 | Workspace authority | Partial | Workspace contexts carry `local` or `remote`; file and editor methods refuse a remote context with `plugin.host.authorityUnsupported` | Remote execution | [Plugin backend](domains/backend.md) |
 | API-41 | Activation events and startup budget | Partial | [`onWorkspaceOpen`](../contract/v1/README.md#permissions-and-activation), `onCommand`, two concurrent background starts, `initialize` timeout, bounded notification queues | Activation by workspace content, a global cold-start budget | [Plugin backend](domains/backend.md) |
