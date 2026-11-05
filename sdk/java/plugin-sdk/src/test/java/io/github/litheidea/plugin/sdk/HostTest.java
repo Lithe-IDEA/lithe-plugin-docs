@@ -31,7 +31,7 @@ import java.util.stream.Collectors;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.Timeout;
 
-/** Host services of plugin-function protocols 2 and 3; mirrors {@code sdk/node/test/host.test.mjs}. */
+/** Host services of plugin-function protocols 2 to 4; mirrors {@code sdk/node/test/host.test.mjs}. */
 @Timeout(value = 30, unit = TimeUnit.SECONDS)
 class HostTest {
     private static final Map<String, Object> CONTEXT = Collections.unmodifiableMap(map("contextID", "w1", "generation", 2L));
@@ -134,7 +134,8 @@ class HostTest {
     @Test
     void theSdkAnswersTheHighestPluginFunctionVersionTheHostOffers() {
         Object offer = object(FIXTURE.get("offer")).get("versions");
-        Object[][] cases = {{offer, 3}, {Arrays.asList(1L, 2L), 2}, {Arrays.asList(1L), 1}, {Arrays.asList(2L, 99L), 2}};
+        Object[][] cases = {{offer, 4}, {Arrays.asList(1L, 2L, 3L), 3}, {Arrays.asList(1L, 2L), 2}, {Arrays.asList(1L), 1},
+                {Arrays.asList(2L, 99L), 2}, {Arrays.asList(4L, 5L), 4}};
         for (Object[] testCase : cases) {
             Backend backend = Backend.create(null, null).function("query.run", (params, context) -> null);
             TestHost host = new TestHost(backend);
@@ -146,7 +147,7 @@ class HostTest {
             assertEquals(expected, backend.host().version());
             host.close();
         }
-        // The fixture's answers of versions 2 and 3 have the shape the SDK sends.
+        // The fixture's answers of versions 2 to 4 have the shape the SDK sends.
         for (Map<String, Object> testCase : cases("negotiation")) {
             Object version = object(testCase.get("expected")).get("version");
             if (version instanceof Number && ((Number) version).intValue() >= 2) {
@@ -215,7 +216,12 @@ class HostTest {
         for (Map<String, Object> testCase : cases("hostRequests")) {
             String name = (String) testCase.get("name");
             String method = (String) testCase.get("method");
-            Map<String, Object> params = object(testCase.get("params"));
+            Object rawParams = testCase.get("params");
+            if (!(rawParams instanceof Map)) {
+                // Array params and absent params carry no key or context to compare.
+                continue;
+            }
+            Map<String, Object> params = object(rawParams);
             Map<String, Object> expected = object(testCase.get("expected"));
             if (method.startsWith("lithe/host/credentials/")) {
                 String key = (String) params.get("key");
@@ -504,11 +510,19 @@ class HostTest {
             }
         }
         Set<List<Object>> expected = new HashSet<>();
+        // Run exits and language server events have no dedicated API: onHostNotification routes them.
+        Set<String> otherMethods = new HashSet<>();
         for (Map<String, Object> testCase : delivered) {
             Map<String, Object> params = object(testCase.get("params"));
-            expected.add(Protocol.HOST_COMMAND_DID_RUN.equals(testCase.get("method"))
-                    ? Arrays.asList("command", params.get("commandID"), params.get("context"))
-                    : Arrays.asList("contexts", params));
+            String deliveredMethod = (String) testCase.get("method");
+            if (Protocol.HOST_COMMAND_DID_RUN.equals(deliveredMethod)) {
+                expected.add(Arrays.asList("command", params.get("commandID"), params.get("context")));
+            } else if (Protocol.HOST_DID_CHANGE_CONTEXTS.equals(deliveredMethod)) {
+                expected.add(Arrays.asList("contexts", params));
+            } else {
+                expected.add(Arrays.asList("host", deliveredMethod, params));
+                otherMethods.add(deliveredMethod);
+            }
         }
         expected.add(Arrays.asList("later", map("value", 1L)));
         Set<List<Object>> seen = Collections.synchronizedSet(new HashSet<>());
@@ -526,6 +540,12 @@ class HostTest {
                     seen.add(Arrays.asList("later", params));
                     all.countDown();
                 });
+        for (String otherMethod : otherMethods) {
+            backend.onHostNotification(otherMethod, params -> {
+                seen.add(Arrays.asList("host", otherMethod, params));
+                all.countDown();
+            });
+        }
         assertEquals("sdk.method.reserved", assertThrows(PluginSdkError.class,
                 () -> backend.onHostNotification(Protocol.HOST_COMMAND_DID_RUN, params -> {})).code());
         assertEquals("sdk.method.invalid", assertThrows(PluginSdkError.class,
@@ -544,5 +564,349 @@ class HostTest {
         assertEquals(expected, new HashSet<>(seen));
         assertEquals(expected.size(), seen.size());
         host.close();
+    }
+
+    /** {@code base} as a new map, with {@code overrides} (alternating keys and values) replacing or adding entries. */
+    private static Map<String, Object> with(Map<String, Object> base, Object... overrides) {
+        Map<String, Object> copy = map();
+        copy.putAll(base);
+        copy.putAll(map(overrides));
+        return copy;
+    }
+
+    private static String repeat(char character, int count) {
+        StringBuilder text = new StringBuilder();
+        for (int index = 0; index < count; index++) {
+            text.append(character);
+        }
+        return text.toString();
+    }
+
+    /** Makes one relayed call, lets the host answer it, and returns the params the host received. */
+    private static Map<String, Object> relayed(Backend backend, TestHost host, Set<Object> taken, Map<String, Object> call) {
+        CompletableFuture<Map<String, Object>> pending = backend.host().functions().invoke(CONTEXT, call);
+        Map<String, Object> request = nextRequest(host, Protocol.HOST_FUNCTIONS_INVOKE, taken);
+        host.send(map("id", request.get("id"), "result", map("value", null)));
+        assertEquals(map("value", null), value(pending));
+        return object(request.get("params"));
+    }
+
+    @Test
+    void aVersionFourFunctionSeesTheCallingPluginCoreWroteAndOlderSessionsSeeNone() {
+        for (Map<String, Object> testCase : cases("invocationCallers")) {
+            String name = (String) testCase.get("name");
+            int version = ((Number) testCase.get("version")).intValue();
+            Map<String, Object> expectedParams = object(object(testCase.get("expected")).get("params"));
+            // Core writes the caller into what a version 4 callee gets; an older session is sent it too and ignores it.
+            Map<String, Object> wire = with(expectedParams);
+            if (testCase.get("caller") != null) {
+                wire.put("caller", map("pluginID", testCase.get("caller")));
+            }
+            AtomicReference<Object> seen = new AtomicReference<>("unset");
+            AtomicReference<Object> seenPluginId = new AtomicReference<>("unset");
+            Backend backend = Backend.create(null, null).function((String) wire.get("functionID"), (arguments, context) -> {
+                seen.set(context.caller());
+                seenPluginId.set(context.callerPluginId());
+                return null;
+            });
+            TestHost host = session(version, backend);
+            assertNull(host.request(Protocol.FUNCTION_INVOKE, wire).get("error"), name);
+            Object expectedCaller = version >= 4 ? expectedParams.get("caller") : null;
+            assertEquals(expectedCaller, seen.get(), name);
+            assertEquals(expectedCaller == null ? null : object(expectedCaller).get("pluginID"), seenPluginId.get(), name);
+            host.close();
+        }
+
+        // Only exactly { pluginID: non-empty string } is a caller, and it cannot be changed.
+        AtomicReference<Object> seen = new AtomicReference<>("unset");
+        AtomicReference<Object> seenPluginId = new AtomicReference<>("unset");
+        Backend backend = Backend.create(null, null).function("project.describe", (arguments, context) -> {
+            seen.set(context.caller());
+            seenPluginId.set(context.callerPluginId());
+            return null;
+        });
+        TestHost host = session(4, backend);
+        List<Object> notCallers = Arrays.<Object>asList("dev.lithe.fixture.python", Collections.emptyList(), map(),
+                map("pluginID", ""), map("pluginID", 7L), map("plugin", "dev.lithe.fixture.python"),
+                map("pluginID", "dev.lithe.fixture.python", "name", "python"));
+        for (Object notCaller : notCallers) {
+            assertNull(host.request(Protocol.FUNCTION_INVOKE,
+                    map("functionID", "project.describe", "operationID", "7", "params", map(), "caller", notCaller)).get("error"));
+            assertNull(seen.get(), String.valueOf(notCaller));
+            assertNull(seenPluginId.get(), String.valueOf(notCaller));
+        }
+        assertNull(host.request(Protocol.FUNCTION_INVOKE, map("functionID", "project.describe", "operationID", "7")).get("error"));
+        assertNull(seen.get());
+        assertNull(host.request(Protocol.FUNCTION_INVOKE, map("functionID", "project.describe", "operationID", "7",
+                "caller", map("pluginID", "dev.lithe.fixture.python"))).get("error"));
+        Map<String, Object> caller = object(seen.get());
+        assertEquals(map("pluginID", "dev.lithe.fixture.python"), caller);
+        assertEquals("dev.lithe.fixture.python", seenPluginId.get());
+        assertThrows(UnsupportedOperationException.class, () -> caller.put("pluginID", "dev.lithe.fixture.other"));
+        // A caller key inside the params is ordinary data, not the calling plugin.
+        assertNull(host.request(Protocol.FUNCTION_INVOKE, map("functionID", "project.describe", "operationID", "7",
+                "params", map("caller", map("pluginID", "dev.lithe.fixture.other")))).get("error"));
+        assertNull(seen.get());
+        host.close();
+    }
+
+    @Test
+    void relayRequestsCarryTheContractParamsAndAnswerTheHostsResultUnchanged() {
+        Backend backend = Backend.create(null, null);
+        TestHost host = session(4, backend);
+        Set<Object> taken = new HashSet<>();
+        int relayCases = 0;
+        for (Map<String, Object> testCase : cases("hostRequests")) {
+            String method = (String) testCase.get("method");
+            if (!Boolean.TRUE.equals(object(testCase.get("expected")).get("relay"))) {
+                continue;
+            }
+            String name = (String) testCase.get("name");
+            assertEquals(4, ((Number) testCase.get("version")).intValue(), name);
+            Map<String, Object> wire = object(testCase.get("params"));
+            CompletableFuture<Map<String, Object>> pending;
+            Object answer;
+            if (Protocol.HOST_FUNCTIONS_PROVIDERS.equals(method)) {
+                pending = backend.host().functions().providers((String) wire.get("functionID"));
+                answer = map("providers", Arrays.asList(map("pluginID", "dev.lithe.fixture.go", "version", 1L)));
+            } else {
+                assertEquals(Protocol.HOST_FUNCTIONS_INVOKE, method, name);
+                Map<String, Object> call = with(wire);
+                call.remove("context");
+                pending = backend.host().functions().invoke(object(wire.get("context")), call);
+                answer = map("value", map("settings", Arrays.asList("a")));
+            }
+            Map<String, Object> request = nextRequest(host, method, taken);
+            assertEquals(wire, request.get("params"), name);
+            host.send(map("id", request.get("id"), "result", answer));
+            assertEquals(answer, value(pending), name);
+            relayCases++;
+        }
+        assertEquals(3, relayCases);
+        // A provider's null result is a result.
+        CompletableFuture<Map<String, Object>> nothing = backend.host().functions().invoke(CONTEXT,
+                map("pluginID", "dev.lithe.fixture.go", "functionID", "languageImport.settings"));
+        host.send(map("id", nextRequest(host, Protocol.HOST_FUNCTIONS_INVOKE, taken).get("id"), "result", map("value", null)));
+        assertEquals(map("value", null), value(nothing));
+        host.close();
+    }
+
+    @Test
+    void theRelayNeedsProtocolFourAndOlderSessionsFailLocallyWithoutSendingAnything() {
+        Map<String, Object> wire = null;
+        for (Map<String, Object> testCase : cases("hostRequests")) {
+            if (Protocol.HOST_FUNCTIONS_INVOKE.equals(testCase.get("method"))
+                    && ((Number) testCase.get("version")).intValue() == 3
+                    && "plugin.host.unavailable".equals(object(testCase.get("expected")).get("code"))) {
+                wire = object(testCase.get("params"));
+            }
+        }
+        assertTrue(wire != null, "The fixture has no version 3 relay case.");
+        for (int version : new int[] {3, 2, 1}) {
+            Backend backend = Backend.create(null, null);
+            TestHost host = session(version, backend);
+            int before = host.messages().size();
+            Map<String, Object> call = with(wire);
+            call.remove("context");
+            List<CompletableFuture<?>> attempts = new ArrayList<>();
+            attempts.add(backend.host().functions().providers("languageImport.settings"));
+            attempts.add(backend.host().functions().invoke(object(wire.get("context")), call));
+            attempts.add(backend.host().request(Protocol.HOST_FUNCTIONS_PROVIDERS, map("functionID", "languageImport.settings")));
+            attempts.add(backend.host().request(Protocol.HOST_FUNCTIONS_INVOKE, wire));
+            for (CompletableFuture<?> attempt : attempts) {
+                Throwable error = failure(attempt);
+                assertTrue(error instanceof HostError, "version " + version + ": " + error);
+                assertEquals("plugin.host.unavailable", ((HostError) error).code(), "version " + version);
+                assertEquals(Integer.valueOf(-32601), ((HostError) error).rpcCode(), "version " + version);
+            }
+            assertEquals(before, host.messages().size(), "version " + version);
+            host.close();
+        }
+    }
+
+    @Test
+    void relayFailuresKeepTheirCodeNumberAndTheProvidersOwnErrorCode() {
+        Backend backend = Backend.create(null, null);
+        TestHost host = session(4, backend);
+        Set<Object> taken = new HashSet<>();
+        Map<String, Object> call = map("pluginID", "dev.lithe.fixture.go", "functionID", "languageImport.settings");
+        java.util.function.Function<Map<String, Object>, HostError> refused = wire -> {
+            CompletableFuture<Map<String, Object>> pending = backend.host().functions().invoke(CONTEXT, call);
+            Map<String, Object> request = nextRequest(host, Protocol.HOST_FUNCTIONS_INVOKE, taken);
+            host.send(map("id", request.get("id"), "error", wire));
+            Throwable error = failure(pending);
+            assertTrue(error instanceof HostError, String.valueOf(error));
+            return (HostError) error;
+        };
+        int failures = 0;
+        for (Map<String, Object> testCase : cases("relayErrors")) {
+            String name = (String) testCase.get("name");
+            String code = (String) testCase.get("code");
+            long rpcCode = ((Number) testCase.get("rpcCode")).longValue();
+            assertEquals(Integer.valueOf((int) rpcCode), HostError.CODES.get(code), name);
+            HostError named = refused.apply(map("code", rpcCode, "message", "Refused.", "data", map("code", code)));
+            assertEquals(code, named.code(), name);
+            assertEquals((int) rpcCode, named.rpcCode().intValue(), name);
+            assertEquals(Protocol.HOST_FUNCTIONS_INVOKE, named.method(), name);
+            // The number alone names the code.
+            assertEquals(code, refused.apply(map("code", rpcCode, "message", "Refused.")).code(), name);
+            failures++;
+        }
+        assertEquals(15, failures);
+
+        HostError providerFailed = refused.apply(map("code", -32070L, "message", "The provider failed.",
+                "data", map("code", "plugin.function.failed", "details", map("pluginErrorCode", "go.parse.failed"))));
+        assertEquals("plugin.function.failed", providerFailed.code());
+        assertEquals("go.parse.failed", providerFailed.pluginErrorCode());
+        assertEquals(map("pluginErrorCode", "go.parse.failed"), providerFailed.details());
+        // Only a provider's failure has a provider error code, and only a text one.
+        assertNull(refused.apply(map("code", -32070L, "message", "The provider failed.",
+                "data", map("code", "plugin.function.failed"))).pluginErrorCode());
+        assertNull(refused.apply(map("code", -32070L, "message", "The provider failed.",
+                "data", map("code", "plugin.function.failed", "details", map("pluginErrorCode", 7L)))).pluginErrorCode());
+        assertNull(refused.apply(map("code", -32071L, "message", "No result.",
+                "data", map("code", "plugin.function.invalidResult", "details", map("pluginErrorCode", "go.parse.failed")))).pluginErrorCode());
+        host.close();
+    }
+
+    @Test
+    void aCallToAnotherPluginNamesTheFunctionCallItIsMadeInAsItsParentUnlessTheCallerSaysOtherwise() {
+        Backend backend = Backend.create(null, null).function("relay.run", (arguments, context) -> {
+            Host used = Boolean.TRUE.equals(arguments.get("scoped"))
+                    ? context.host().withCancellation(new Cancellation())
+                    : context.host();
+            return used.functions().invoke(CONTEXT, object(arguments.get("call"))).join();
+        });
+        TestHost host = session(4, backend);
+        Set<Object> taken = new HashSet<>();
+        Map<String, Object> call = map("pluginID", "dev.lithe.fixture.go", "functionID", "languageImport.settings");
+        String longest = repeat('p', Protocol.MAX_PARENT_OPERATION_ID_BYTES);
+        String tooLong = repeat('p', Protocol.MAX_PARENT_OPERATION_ID_BYTES + 1);
+        // The invoke request's operationID (null: none), the call, whether the Host is
+        // narrowed with withCancellation, and the parentOperationID the host must receive (null: none).
+        Object[][] cases = {
+            {"7", call, false, "7"},
+            {"7", with(call, "parentOperationID", "17"), false, "17"},
+            {"7", with(call, "parentOperationID", null), false, "7"},
+            {"7", call, true, "7"},
+            {longest, call, false, longest},
+            {tooLong, call, false, null},
+            {"", call, false, null},
+            {7L, call, false, null},
+            {null, call, false, null},
+        };
+        long id = 60;
+        for (Object[] testCase : cases) {
+            String name = "operationID " + testCase[0] + ", call " + testCase[1] + ", narrowed " + testCase[2];
+            Map<String, Object> invocation = map("functionID", "relay.run",
+                    "params", map("call", testCase[1], "scoped", testCase[2]));
+            if (testCase[0] != null) {
+                invocation.put("operationID", testCase[0]);
+            }
+            id++;
+            CompletableFuture<Map<String, Object>> serving = host.requestAsync(Protocol.FUNCTION_INVOKE, invocation, id);
+            Map<String, Object> request = nextRequest(host, Protocol.HOST_FUNCTIONS_INVOKE, taken);
+            Map<String, Object> expected = with(call, "context", CONTEXT);
+            if (testCase[3] != null) {
+                expected.put("parentOperationID", testCase[3]);
+            }
+            // The JSON-RPC request ID and the diagnostic operation ID are never the parent.
+            assertEquals(expected, request.get("params"), name);
+            host.send(map("id", request.get("id"), "result", map("value", map("ok", true))));
+            Map<String, Object> response = Fixtures.await(serving, "the serving call");
+            assertNull(response.get("error"), name);
+            assertEquals(map("value", map("ok", true)), response.get("result"), name);
+        }
+        // A Host that belongs to no function call has no parent to name; an explicit one is still sent.
+        assertFalse(relayed(backend, host, taken, call).containsKey("parentOperationID"));
+        assertEquals("17", relayed(backend, host, taken, with(call, "parentOperationID", "17")).get("parentOperationID"));
+        host.close();
+    }
+
+    @Test
+    void malformedRelayArgumentsFailLocallyAndNeverReachTheHost() {
+        Backend backend = Backend.create(null, null);
+        TestHost host = session(4, backend);
+        Host.Functions functions = backend.host().functions();
+        int before = host.messages().size();
+        Map<String, Object> call = map("pluginID", "dev.lithe.fixture.go", "functionID", "languageImport.settings");
+
+        List<Map<String, Object>> malformed = new ArrayList<>();
+        for (Object pluginId : new Object[] {null, "", 7L}) {
+            malformed.add(with(call, "pluginID", pluginId));
+        }
+        for (Object functionId : new Object[] {null, "", "Not-Valid", 7L}) {
+            malformed.add(with(call, "functionID", functionId));
+        }
+        for (Object params : new Object[] {Arrays.asList(1L), "text"}) {
+            malformed.add(with(call, "params", params));
+        }
+        for (Object timeout : new Object[] {0L, -1L, 1.5, "5000", 9007199254740992L, Double.NaN}) {
+            malformed.add(with(call, "timeoutMilliseconds", timeout));
+        }
+        // 128 bytes is the longest parent ID: 65 two-byte characters are 130.
+        for (Object parent : new Object[] {17L, "", repeat('p', 129), repeat('é', 65)}) {
+            malformed.add(with(call, "parentOperationID", parent));
+        }
+        for (Map<String, Object> bad : malformed) {
+            assertEquals("sdk.functions.invalidCall", code(functions.invoke(CONTEXT, bad)), String.valueOf(bad));
+        }
+        assertEquals("sdk.functions.invalidCall", code(functions.invoke(CONTEXT, null)));
+        for (String functionId : new String[] {null, "", "Not-Valid"}) {
+            assertEquals("sdk.functions.invalidCall", code(functions.providers(functionId)), String.valueOf(functionId));
+        }
+        assertEquals("sdk.host.invalidContext", code(functions.invoke(null, call)));
+        assertEquals("sdk.host.invalidContext", code(functions.invoke(map("contextID", "w1"), call)));
+        assertEquals(before, host.messages().size());
+
+        // What is well formed is sent as given: no cap on the timeout, which is Core's to apply.
+        Set<Object> taken = new HashSet<>();
+        Map<String, Object> bare = relayed(backend, host, taken, with(call, "params", null, "timeoutMilliseconds", null, "parentOperationID", null));
+        assertEquals(map("pluginID", "dev.lithe.fixture.go", "functionID", "languageImport.settings", "context", CONTEXT), bare);
+        Map<String, Object> full = relayed(backend, host, taken, with(call, "params", map(), "timeoutMilliseconds", 700000L,
+                "parentOperationID", repeat('é', 64)));
+        assertEquals(map(), full.get("params"));
+        assertEquals(700000L, full.get("timeoutMilliseconds"));
+        assertEquals(repeat('é', 64), full.get("parentOperationID"));
+        assertEquals(5000L, relayed(backend, host, taken, with(call, "timeoutMilliseconds", 5000.0)).get("timeoutMilliseconds"));
+        assertEquals(5000L, relayed(backend, host, taken, with(call, "timeoutMilliseconds", 5000)).get("timeoutMilliseconds"));
+        assertEquals(repeat('p', 128), relayed(backend, host, taken, with(call, "parentOperationID", repeat('p', 128))).get("parentOperationID"));
+        // Only the fields of the method are sent; a caller cannot be chosen from here.
+        Map<String, Object> only = relayed(backend, host, taken, with(call, "caller", map("pluginID", "dev.lithe.fixture.other"), "extra", true));
+        assertEquals(map("pluginID", "dev.lithe.fixture.go", "functionID", "languageImport.settings", "context", CONTEXT), only);
+        host.close();
+    }
+
+    @Test
+    void cancellingTheCallingFunctionCancelsItsRelayedCallOnTheWire() {
+        CountDownLatch started = new CountDownLatch(1);
+        AtomicReference<Throwable> outcome = new AtomicReference<>();
+        Backend backend = Backend.create(null, null).function("relay.run", (arguments, context) -> {
+            CompletableFuture<Map<String, Object>> relayed = context.host().functions().invoke(CONTEXT, object(arguments.get("call")));
+            started.countDown();
+            try {
+                return relayed.join();
+            } catch (CompletionException error) {
+                outcome.set(error.getCause());
+                throw error;
+            }
+        });
+        TestHost host = session(4, backend);
+        CompletableFuture<Map<String, Object>> call = host.requestAsync(Protocol.FUNCTION_INVOKE,
+                map("functionID", "relay.run", "operationID", "c",
+                        "params", map("call", map("pluginID", "dev.lithe.fixture.go", "functionID", "languageImport.settings"))), 51L);
+        Fixtures.await(started, "the relayed call");
+        Map<String, Object> request = nextRequest(host, Protocol.HOST_FUNCTIONS_INVOKE);
+        assertEquals("c", object(request.get("params")).get("parentOperationID"));
+        host.notify(Protocol.CANCEL_REQUEST, map("id", 51L));
+        Map<String, Object> response = Fixtures.await(call, "the cancelled call");
+        assertEquals((long) Protocol.REQUEST_CANCELLED, object(response.get("error")).get("code"));
+        assertTrue(outcome.get() instanceof CancelledException, String.valueOf(outcome.get()));
+        assertEquals(Arrays.asList(map("id", request.get("id"))),
+                sent(host, Protocol.CANCEL_REQUEST).stream().map(message -> message.get("params")).collect(Collectors.toList()));
+        // Core's late answer is dropped; the session continues.
+        host.send(map("id", request.get("id"), "error",
+                map("code", -32800L, "message", "Cancelled.", "data", map("code", "plugin.host.cancelled"))));
+        assertEquals(1, host.close());
     }
 }

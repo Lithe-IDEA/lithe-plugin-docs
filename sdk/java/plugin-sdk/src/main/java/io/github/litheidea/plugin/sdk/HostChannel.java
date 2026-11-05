@@ -13,7 +13,7 @@ import java.util.concurrent.CompletionException;
 import java.util.concurrent.RejectedExecutionException;
 
 /**
- * The session's host-request state for plugin-function protocols 2 and 3. The
+ * The session's host-request state for plugin-function protocols 2 to 4. The
  * backend owns the wire; this class owns what Core expects of a well-behaved
  * client -- at most 16 unanswered host requests, cancellation through
  * {@code $/cancelRequest} from version 3, and subscription events routed by
@@ -145,6 +145,10 @@ final class HostChannel {
             // The answer Core would give, without the round trip.
             return failed(unavailable(method,
                     "The host did not negotiate plugin-function protocol 2 or later, which offers host services."));
+        }
+        if (Protocol.isRelayMethod(method) && transport.version() < Protocol.RELAY_VERSION) {
+            // Also the answer Core would give; a general request() is gated the same way.
+            return failed(unavailable(method, "The relay needs plugin-function protocol 4."));
         }
         for (Cancellation cancellation : scope) {
             try {

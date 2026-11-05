@@ -10,11 +10,12 @@ import java.util.concurrent.CompletableFuture;
 import java.util.function.BooleanSupplier;
 
 /**
- * Host services ({@code lithe/host/*}) of plugin-function protocols 2 and 3:
+ * Host services ({@code lithe/host/*}) of plugin-function protocols 2 to 4:
  * credentials from version 2; workspace contexts, files, documents, the
  * editor, previews, the browser, messages, and capability discovery from
- * version 3. Every method answers with a future and never blocks; failures
- * the host reports arrive as {@link HostError}.
+ * version 3; calls to other plugins' functions from version 4. Every method
+ * answers with a future and never blocks; failures the host reports arrive as
+ * {@link HostError}.
  *
  * <p>{@link Backend#host()} is usable once the session is ready. A handler's
  * {@link CallContext#host()} belongs to its call: requests still unanswered
@@ -97,6 +98,8 @@ public final class Host {
 
     private final HostChannel channel;
     private final List<Cancellation> scope;
+    /** The wire operation ID of the function call this Host belongs to, or null; the default parent of {@link Functions#invoke}. */
+    private final String parentOperationId;
     private final Credentials credentials = new Credentials();
     private final Subscriptions subscriptions = new Subscriptions();
     private final Workspace workspace = new Workspace();
@@ -105,10 +108,12 @@ public final class Host {
     private final Preview preview = new Preview();
     private final Browser browser = new Browser();
     private final Window window = new Window();
+    private final Functions functions = new Functions();
 
-    Host(HostChannel channel, List<Cancellation> scope) {
+    Host(HostChannel channel, List<Cancellation> scope, String parentOperationId) {
         this.channel = channel;
         this.scope = Collections.unmodifiableList(new ArrayList<>(scope));
+        this.parentOperationId = parentOperationId;
     }
 
     /** The negotiated plugin-function version, or 0 before or without one. */
@@ -118,7 +123,8 @@ public final class Host {
 
     /**
      * The same services, with requests also cancelled by {@code cancellation},
-     * for work a plugin may stop for its own reasons.
+     * for work a plugin may stop for its own reasons. Calls to other plugins
+     * keep the parent call of this Host.
      */
     public Host withCancellation(Cancellation cancellation) {
         if (cancellation == null) {
@@ -126,7 +132,7 @@ public final class Host {
         }
         List<Cancellation> combined = new ArrayList<>(scope);
         combined.add(cancellation);
-        return new Host(channel, combined);
+        return new Host(channel, combined, parentOperationId);
     }
 
     /**
@@ -195,6 +201,11 @@ public final class Host {
 
     public Window window() {
         return window;
+    }
+
+    /** Calls to functions other plugins export (protocol 4). */
+    public Functions functions() {
+        return functions;
     }
 
     /**
@@ -469,6 +480,115 @@ public final class Host {
         public CompletableFuture<Map<String, Object>> showError(Map<String, ?> context, Map<String, ?> params) {
             return scoped(Protocol.HOST_WINDOW_SHOW_ERROR, context, params);
         }
+    }
+
+    /**
+     * Calls to functions other plugins export, relayed by Core (protocol 4).
+     * The plugin's manifest must declare each function it calls. Both methods
+     * fail with a {@link HostError} {@code plugin.host.unavailable} before
+     * protocol 4, without sending anything, and a malformed argument fails
+     * with {@code sdk.functions.invalidCall} (a malformed context with
+     * {@code sdk.host.invalidContext}), also without sending anything.
+     *
+     * <p>A provider's own failure arrives as a {@link HostError} with code
+     * {@code plugin.function.failed}; {@link HostError#pluginErrorCode()} is
+     * its error code. Other relay failures have their own
+     * {@code plugin.function.*} codes, see {@link HostError#CODES}.
+     */
+    public final class Functions {
+        private Functions() {}
+
+        /**
+         * {@code { providers: [{ pluginID, version }] }}: the enabled plugins
+         * other than this one that export {@code functionId}, sorted by plugin
+         * ID. A listed provider's backend need not be running.
+         */
+        public CompletableFuture<Map<String, Object>> providers(String functionId) {
+            if (!Protocol.isFunctionId(functionId)) {
+                return failed(invalidCall("A functionID is dot-separated lowerCamelCase segments of at most 128 bytes."));
+            }
+            return object(Protocol.HOST_FUNCTIONS_PROVIDERS, channel.request(
+                    Protocol.HOST_FUNCTIONS_PROVIDERS, params("functionID", functionId), scope));
+        }
+
+        /**
+         * Calls one provider's exported function in the workspace {@code context}
+         * (a reference from {@link CallContext#workspaceContext()}, or a context
+         * from {@code workspace().listContexts()}) and answers {@code { value }},
+         * the provider's result, where {@code value} may be null. Only the
+         * fields listed here are sent. {@code call}:
+         * <ul>
+         * <li>{@code pluginID}: the provider, a non-empty string; required;</li>
+         * <li>{@code functionID}: the exported function; required;</li>
+         * <li>{@code params}: an object, omitted when absent;</li>
+         * <li>{@code timeoutMilliseconds}: a positive integer; Core defaults to
+         * 60 000 and caps it at 600 000;</li>
+         * <li>{@code parentOperationID}: a string of 1-128 bytes. When absent
+         * and this Host belongs to a function call, that call's wire operation
+         * ID is sent, so Core knows the new call belongs to it; otherwise the
+         * field is omitted and Core counts the new call as a child of every
+         * relayed call this backend is serving.</li>
+         * </ul>
+         * When the call this Host belongs to is cancelled or ends, the relayed
+         * call is cancelled on the wire and the future fails with
+         * {@link CancelledException}.
+         */
+        public CompletableFuture<Map<String, Object>> invoke(Map<String, ?> context, Map<String, ?> call) {
+            Map<String, Object> message;
+            try {
+                message = relayParams(context, call);
+            } catch (PluginSdkError error) {
+                return failed(error);
+            }
+            return object(Protocol.HOST_FUNCTIONS_INVOKE, channel.request(Protocol.HOST_FUNCTIONS_INVOKE, message, scope));
+        }
+    }
+
+    /** The wire params of a relayed call: the listed fields of {@code call}, never another one. */
+    private Map<String, Object> relayParams(Map<String, ?> context, Map<String, ?> call) {
+        if (call == null) {
+            throw invalidCall("A call is { pluginID, functionID, params?, timeoutMilliseconds?, parentOperationID? }.");
+        }
+        Object pluginId = call.get("pluginID");
+        if (!(pluginId instanceof String) || ((String) pluginId).isEmpty()) {
+            throw invalidCall("A call's pluginID is a non-empty string.");
+        }
+        Object functionId = call.get("functionID");
+        if (!(functionId instanceof String) || !Protocol.isFunctionId((String) functionId)) {
+            throw invalidCall("A functionID is dot-separated lowerCamelCase segments of at most 128 bytes.");
+        }
+        Map<String, Object> message = new LinkedHashMap<>();
+        message.put("pluginID", pluginId);
+        message.put("functionID", functionId);
+        message.put("context", contextReference(context));
+        Object params = call.get("params");
+        if (params != null) {
+            if (!(params instanceof Map)) {
+                throw invalidCall("A call's params is an object.");
+            }
+            message.put("params", params);
+        }
+        Object timeout = call.get("timeoutMilliseconds");
+        if (timeout != null) {
+            if (!Protocol.isGeneration(timeout)) {
+                throw invalidCall("A call's timeoutMilliseconds is a positive integer.");
+            }
+            message.put("timeoutMilliseconds", ((Number) timeout).longValue());
+        }
+        Object parent = call.get("parentOperationID");
+        if (parent == null) {
+            parent = parentOperationId;
+        } else if (!Protocol.isParentOperationId(parent)) {
+            throw invalidCall("A call's parentOperationID is a string of 1-128 bytes.");
+        }
+        if (parent != null) {
+            message.put("parentOperationID", parent);
+        }
+        return message;
+    }
+
+    private static PluginSdkError invalidCall(String message) {
+        return new PluginSdkError("sdk.functions.invalidCall", message);
     }
 
     /** A method whose params name a workspace context. */
