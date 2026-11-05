@@ -28,6 +28,7 @@ import {
   isVcsId,
   LIMITS,
   METHODS,
+  RELAY_VERSION,
   VCS_OPERATIONS,
   VCS_REQUIRED_OPERATIONS,
   VCS_VERSION,
@@ -104,7 +105,7 @@ class Backend {
   build;
 
   /**
-   * Host services (`lithe/host/*`) of plugin-function protocols 2 and 3,
+   * Host services (`lithe/host/*`) of plugin-function protocols 2 to 4,
    * usable once the session is ready. A handler's `context.host` is the
    * same object bound to its call.
    */
@@ -152,7 +153,7 @@ class Backend {
   /** Selected build protocol version, or null when unavailable. */
   get buildVersion() { return this.#buildVersion; }
 
-  /** Selected plugin-function protocol version (1-3), or null when unavailable. */
+  /** Selected plugin-function protocol version (1-4), or null when unavailable. */
   get functionsVersion() { return this.#functionsVersion; }
 
   /** The host's `initialize` params, or null before it arrives. */
@@ -682,7 +683,7 @@ class Backend {
     this.#run(id, null, (context) => handler(keymapSnapshot(params, context.host), context), functionResult, undefined, 'lithe/keymap/import');
   }
 
-  #invokeFunction(id, { functionID, operationID, params, context: workspaceContext }) {
+  #invokeFunction(id, { functionID, operationID, params, context: workspaceContext, caller }) {
     const handler = this.#negotiated.functions ? this.#functions.get(functionID) : undefined;
     if (!handler) {
       this.#respond(id, undefined, { code: ERROR_CODES.invalidParams, message: `Function ${functionID} is not registered.` });
@@ -696,6 +697,10 @@ class Backend {
       if (Number.isFinite(percentage)) report.percentage = Math.min(100, Math.max(0, Math.round(percentage)));
       this.#write({ jsonrpc: '2.0', method: METHODS.functionProgress, params: report });
     };
+    // Calls this handler makes through the relay belong to this call. Core
+    // needs a string of 1-128 bytes; without one the calls carry no parent.
+    const parentOperationId = typeof operationID === 'string' && operationID.length > 0
+      && Buffer.byteLength(operationID) <= LIMITS.maxParentOperationIdBytes ? operationID : undefined;
     this.#run(
       id,
       functionID,
@@ -705,6 +710,9 @@ class Backend {
         operationID,
         // The page's window, from protocol 3; null for a call without one.
         workspaceContext: isContextReference(workspaceContext) ? workspaceContext : null,
+        // The calling plugin, from protocol 4 and only for a relayed call; null otherwise.
+        caller: (this.#functionsVersion ?? 0) >= RELAY_VERSION ? callerReference(caller) : null,
+        host: createHost(this.#channel, context.signal, parentOperationId),
         progress,
       }),
       functionResult,
@@ -985,6 +993,14 @@ function buildResult(method, result) {
 
 function isObject(value) {
   return value !== null && typeof value === 'object' && !Array.isArray(value);
+}
+
+/** `{ pluginID }` for the exact top-level `caller` Core writes into a relayed call, else null. */
+function callerReference(value) {
+  if (!isObject(value) || Object.keys(value).length !== 1) return null;
+  return typeof value.pluginID === 'string' && value.pluginID.length > 0
+    ? Object.freeze({ pluginID: value.pluginID })
+    : null;
 }
 
 function validKeymapProvider(id) {

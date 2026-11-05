@@ -10,12 +10,13 @@ on stdio and implements Lithe's backend protocols from
   whose `model` or `dependencies` source is `provider`: models and dependency
   trees (1), bounded task execution (2), tests (3), run (4) and debug (5)
   preparation, and read-only model inputs (6).
-- **`litheFunctions` 1–3**: plugin functions, which are plugin-private actions
+- **`litheFunctions` 1–4**: plugin functions, which are plugin-private actions
   that Lithe invokes for the same plugin, with progress, cancellation, and
-  registration at runtime (1); host services such as credentials (2); and
+  registration at runtime (1); host services such as credentials (2);
   workspace contexts, capability discovery, host notifications, and the
-  public document, file, editor, and window methods (3). See
-  [Host services](#host-services).
+  public document, file, editor, and window methods (3); and calls between
+  plugins, relayed by Core (4). See [Host services](#host-services) and
+  [Calling other plugins](#calling-other-plugins-protocol-4).
 - **`litheVcs` 1**: typed `lithe/vcs/*` requests, for a plugin's
   `vcsProviders` entry, from the
   [VCS provider contract](https://github.com/1lck/Lithe-IDEA/blob/preview/shared/contracts/vcs-provider-v1.md).
@@ -117,6 +118,13 @@ real Core session.
 Releases are published on [this repository's Releases page](https://github.com/Lithe-IDEA/lithe-plugin-docs/releases) and
 tagged `sdk-node-v<version>`. Version 0.3.0 adds shortcut import providers, native terminals, and typed
 diagnostics through `litheLogging` 1, and removes the free-text `log` API.
+Version 0.4.0 adds calls between plugins (`litheFunctions` 4):
+`host.functions.providers` and `host.functions.invoke`, `context.caller` in the
+function that is called, and the `plugin.function.*` relay error codes in
+`HOST_ERRORS`. The number-only fallback table of `HostError` is complete: it
+now also names the five host error codes -32022 to -32026
+(`plugin.host.languageServerUnavailable`, `languageServerError`,
+`methodNotDeclared`, `toolUnresolved` and `foreignContribution`).
 A release ships
 `lithe-plugin-sdk-node-<version>.tgz` and a `.sha256` file holding the
 archive's SHA-256. The SDK is not published to the npm registry. Use it like
@@ -156,7 +164,7 @@ there is no stderr fallback or plugin-owned file writer.
 | `backend.build.test(handler)`, `backend.build.discoverTests(handler)` | Protocol 3+: exact test execution and runnable selectors; discovery gets `format: "litheTestDiscovery"`, `version: 1`. |
 | `backend.build.prepareRun(handler)` | Protocol 4: returns a portable launch plan after upstream synchronization/build; the host owns the application process. |
 | `backend.buildVersion` | Highest common negotiated build version (1–6), or `null`; methods newer than that version are refused before their handler runs. |
-| `backend.functionsVersion` | Highest common negotiated plugin-function version (1–3), or `null`. |
+| `backend.functionsVersion` | Highest common negotiated plugin-function version (1–4), or `null`. |
 | `backend.host` | [Host services](#host-services) (`lithe/host/*`), usable once the session is ready. |
 | `backend.onCommand(commandID, handler)` | Protocol 3: one of the plugin's commands ran; the handler gets `{ commandID, workspaceContext }`. |
 | `backend.onContextsChanged(handler)` | Protocol 3: workspace contexts opened, closed, or changed; the handler gets `{ revision }`. |
@@ -170,7 +178,7 @@ there is no stderr fallback or plugin-owned file writer.
 | `backend.diagnostics.degraded(operation, code, count?)`, `.recovered(...)` | Typed handled fallback/recovery; no payload text. |
 | `backend.listen()` | Serves stdio until `exit` or the end of input. |
 | `PluginError(code, message)` | A failure meant for your own UI, or with a `VCS_ERRORS` code, for the host's. |
-| `HostError` | The host refused or failed a host request: `code` (`error.data.code`), `rpcCode`, and protocol 3 `details`. `HOST_ERRORS` maps each code to its number. |
+| `HostError` | The host refused or failed a host request: `code` (`error.data.code`), `rpcCode`, and protocol 3 `details`. `HOST_ERRORS` maps each code, including the `plugin.function.*` codes of the relay, to its number. |
 | `runProcess(command, args, options)` | Runs a process without a shell, as one cancellable process tree. |
 | `openStateStore(directory)` | A small atomic JSON store in a host-provided directory. |
 
@@ -185,6 +193,7 @@ Every handler receives a context:
 | `host` | `backend.host` bound to the call: host requests it left unanswered are cancelled when the call ends. |
 | `functionID` | Functions only. |
 | `workspaceContext` | Functions only, protocol 3: `{ contextID, generation }` of the page's window, or `null`. |
+| `caller` | Functions only, protocol 4: `{ pluginID }` of the plugin whose relayed call this is, or `null` for a call Lithe started, under protocol 3 or earlier, or when the field is not exactly `{ pluginID }`. Core writes it; it is read-only. |
 | `operationID` | Functions and bounded build/test/run-preparation calls. Opaque wire identity chosen by Core; never derive anything from it. |
 | `progress({ message?, percentage?, output? })` | Functions use messages up to 1024 UTF-8 bytes. Build/test/run preparation use messages up to 4096 bytes and output up to 64 KiB per report. Percentages are clamped to 0–100; cancelled or settled build calls cannot report. Model/dependency/discovery contexts have no progress. |
 
@@ -237,6 +246,8 @@ backend.onCommand('db.refresh', async ({ workspaceContext }) => {
 | `workspace.readDirectory`, `.stat`, `.readFile`, `.findFiles`, `.findText`, `.watch` | 3 | Files of a local context, addressed as `{ rootID, path }` from `getFolders`. |
 | `documents.list`, `.getSnapshot`; `editor.getActive`, `.getSelections`, `.applyEdits`, `.replaceSelections`, `.insertText`, `.open`, `.reveal`, `.registerActions` | 3 | Live documents and editors. Edits name the `expectedVersion` they were computed against. |
 | `preview.openHTML`, `browser.openExternal`, `window.showInformation`, `.showWarning`, `.showError` | 3 | Preview, browser, and messages. |
+| `functions.providers(functionID)` | 4 | The enabled plugins that export a function: `{ providers: [{ pluginID, version }] }`. See [Calling other plugins](#calling-other-plugins-protocol-4). |
+| `functions.invoke(context, call)` | 4 | Calls one provider's exported function in a workspace context: `{ value }`. `call` is `{ pluginID, functionID, params?, timeoutMilliseconds?, parentOperationID? }`. |
 | `request(method, params?)`, `subscribe(method, params, onEvent?)` | 2 / 3 | Any `lithe/host/*` method, including ones a later host adds. |
 | `subscriptions.dispose(id)` | 3 | Ends a subscription; `Subscription.dispose()` does the same. |
 
@@ -270,6 +281,104 @@ What the SDK does for you, and what it leaves to you:
 - **Commands are events.** `onCommand` runs when the user runs one of the
   plugin's commands; the host waits for no result. A stopped backend is
   started for it only when the manifest declares `onCommand:<commandID>`.
+
+### Calling other plugins (protocol 4)
+
+A plugin can call a function another enabled plugin exports. Core relays
+every call: your backend never reaches the provider's process, and the
+provider learns only the call it serves. The rules of the relay are in
+[the contract](../../contract/v1/README.md#cross-plugin-calls-protocol-version-4).
+
+- **Declare the call in the manifest.** The caller lists
+  `pluginFunctions.calls` (`{ id, version }`, the function and the contract
+  version it was written against) and `requires.pluginFunctions: 1`, with
+  `backend: 2` and `serverProcess: 1`. The provider lists
+  `pluginFunctions.exports` and registers the function with
+  `backend.function`. The calls are the consent; there is no permission.
+- **Check `supports()` first.** `await backend.host.supports('lithe/host/functions/invoke')`
+  is true only in a version 4 session of a plugin that declares a call.
+  Under protocol 3 or earlier, `functions.providers`, `functions.invoke`, and
+  the same methods through `host.request` fail at once with `HostError`
+  `plugin.host.unavailable` (-32601) and send nothing.
+
+```js
+backend.function('report.build', async (params, context) => {
+  const workspace = context.workspaceContext;
+  if (!workspace || !(await context.host.supports('lithe/host/functions/invoke'))) {
+    throw new PluginError('report.noRelay', 'This Lithe cannot call other plugins.');
+  }
+  const { providers } = await context.host.functions.providers('project.describe');
+  if (providers.length === 0) throw new PluginError('report.noProvider', 'Install a plugin that describes projects.');
+  const { value } = await context.host.functions.invoke(workspace, {
+    pluginID: providers[0].pluginID,
+    functionID: 'project.describe',
+    params: { project: params.project },
+    timeoutMilliseconds: 10000,
+  });
+  return summarize(value);
+});
+```
+
+- **Results are raw.** `providers` returns `{ providers: [{ pluginID, version }] }`
+  and `invoke` returns `{ value }`, where `null` is a result. A call is
+  `{ pluginID, functionID, params?, timeoutMilliseconds?, parentOperationID? }`;
+  `params` is a JSON object, not sent when omitted (Core reads `{}`).
+  `timeoutMilliseconds` is a positive integer. Core defaults it to 60000
+  and caps it at 600000 (`LIMITS.relayDefaultTimeoutMilliseconds`,
+  `LIMITS.relayMaxTimeoutMilliseconds`); the SDK passes it on as given.
+- **Mistakes fail locally, with no frame sent.** A `call` that is not an
+  object, or a bad `pluginID`, `functionID`, `params`, `timeoutMilliseconds`
+  or `parentOperationID`, rejects with `PluginSdkError`
+  `sdk.functions.invalidCall`; a bad workspace context rejects with
+  `sdk.host.invalidContext`, as for every other host method. The SDK sends only
+  the fields above and drops any other, such as `caller`, which Core writes
+  itself and refuses in a request.
+- **`parentOperationID` is filled in inside a function.** In a function
+  handler, `context.host` sets it to the `operationID` of the call being
+  served (when that is a string of 1–128 bytes), so Core knows which call the
+  new one belongs to and can cancel it with its parent, detect cycles, and
+  bound the chain at 4 calls. An explicit `parentOperationID` wins. Everything
+  else has no parent: `backend.host`, host notification callbacks
+  (`onCommand`, `onContextsChanged`, `onHostNotification`), build, VCS, and
+  shortcut import handlers, plain `onRequest` handlers, and async work left
+  running after a call ended. Without a parent Core treats the call as a
+  child of every relayed call the backend is serving at that moment. Never
+  pass the `operationID` of a call that has finished: Core refuses it with
+  `plugin.host.cancelled`.
+- **A relayed call fills a host request slot.** It counts among the 16
+  unanswered host requests until Core answers, which can take the whole
+  timeout, and a caller has at most 8 relayed calls running. Start calls
+  together only when they are independent.
+- **Read the caller from `context.caller`.** In a provider's function,
+  `context.caller.pluginID` is the plugin that called, written by Core and
+  impossible to forge; `null` means the host started the call. Never decide by
+  a plugin ID in `params`, which any caller can write. Do not accept an
+  executable path, command line, or script from a caller and run it: take a
+  request you interpret, and choose the executable yourself.
+
+A failed relayed call rejects with a `HostError` whose `code` is one of these
+(the `HOST_ERRORS` keys):
+
+| Code | Number | Meaning |
+| --- | --- | --- |
+| `plugin.function.notDeclared` | -32027 | The manifest does not declare this call. |
+| `plugin.function.notExported` | -32028 | The provider does not export the function, or its backend has not registered it. |
+| `plugin.function.providerDisabled` | -32029 | The provider is not installed or enabled. |
+| `plugin.function.versionMismatch` | -32030 | The declared and exported contract versions differ. |
+| `plugin.function.callCycle` | -32065 | The provider is already on the call chain. |
+| `plugin.function.depthExceeded` | -32066 | The call chain is longer than 4 calls. |
+| `plugin.function.tooManyCalls` | -32067 | The caller already has 8 relayed calls running. |
+| `plugin.function.payloadTooLarge` | -32068 | The params, or a result, exceeds 256 KiB. |
+| `plugin.function.providerUnavailable` | -32069 | The provider's backend exited, withdrew the function, or did not start in time. |
+| `plugin.function.failed` | -32070 | The provider's function answered with an error. |
+| `plugin.function.invalidResult` | -32071 | The provider answered without a result, or with one over 1 MiB. |
+
+The host codes `plugin.host.timeout`, `plugin.host.cancelled`,
+`plugin.host.contextExpired`, `plugin.host.authorityUnsupported`,
+`plugin.host.permissionDenied` and `plugin.host.invalidParams` also occur. On
+`plugin.function.failed`, `error.message` is the provider's message and
+`error.details.pluginErrorCode` is the code the provider's function threw;
+only branch on a code its provider documents.
 
 ## Results and errors
 
