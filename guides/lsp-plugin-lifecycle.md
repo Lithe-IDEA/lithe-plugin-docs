@@ -19,7 +19,8 @@ Lua 模板目前只提供 macOS arm64、x64 两个包。各能力版本见[版�
 
 LSP（Language Server Protocol，语言服务器协议）让编辑器通过独立进程获得补全、诊断、
 跳转等能力。Lithe 的声明式插件用 JSON 描述要启动的程序；宿主读取清单、发现运行时并管理
-进程及 LSP 会话。你不需要编写宿主内的 Swift/JavaScript 插件入口。
+进程及 LSP 会话。你不需要编写宿主内的 Swift/JavaScript 插件入口。命令行要到启动时才能确定的服务器，
+可以改由插件后端在每次启动时解析，见第 3 节的“由插件后端驱动的语言服务器”。
 
 ```text
 开发与构建：固定上游版本 → 下载并校验 → 组装各平台插件包 → 发布 zip → 索引收录
@@ -153,6 +154,7 @@ API 1 的服务器参数是字面量，宿主原样传给进程、不展开模�
 | API 1 `packaged` | 随包提供原生服务器或启动器 | 声明相对路径，打包全部资源并保留可执行权限 |
 | API 1 `systemCommand` | 明确要求用户自行安装的服务器 | 声明裸命令候选和正确探测参数，记录用户安装要求 |
 | API 2 `runtime` | 包内 JS/JAR 由 Node.js/Java 启动 | 声明包内入口及发现的运行时最低版本，或声明随包运行时 |
+| `serverProcess` 3 `backend` | 命令行取决于启动时才能确定的内容（解析版本、引导工具、按项目派生选项） | 声明解析命令行的后端函数；见下文“由插件后端驱动的语言服务器” |
 
 例如，下面是 `languageServers[]` 中一个服务器声明的替代方案，要求用户预先安装 `gopls`，
 完整清单还必须声明 `go` 语言及相应权限、事件：
@@ -173,6 +175,53 @@ API 1 的服务器参数是字面量，宿主原样传给进程、不展开模�
 随包分发时优先使用固定、可复验的服务器。`systemCommand` 不会替用户安装工具，也不能作为
 启动时下载服务器的变通方案。运行时依赖与主入口是两回事：例如随包服务器调用 Go 时，
 `runtimeDependencies` 让宿主发现 Go 并传递环境；API 1 支持 `node`、`go`，API 2 增加 `java`。
+
+#### 由插件后端驱动的语言服务器（`serverProcess` 3 与 `languageServers` 3）
+
+上面几种方式都由清单直接写出命令行。命令行要到启动时才能确定（解析某个版本、引导一个工具、按项目派生选项），
+或者插件需要在服务器运行期间向它发请求、接收它的通知时，可以让插件后端参与。进程、LSP 会话和停止仍归宿主；
+后端只回答命令行，并通过宿主方法与**自己的**服务器交谈。
+
+- **后端决定启动方式。** `launch` 写 `{"kind": "backend", "function": "launch.resolve", "timeoutMilliseconds": 30000}`。
+  每次启动时，宿主调用这个插件函数，后端返回可执行文件（包内文件，或插件自己定义的工具）、参数、环境变量等，宿主按答案启动。
+  这类服务器不再声明 `arguments`、`validationArguments`、`runtimeDependencies`、`initializationOptions` 和 `hostIntegration`。
+  它要求 `pluginAPIVersion` 4、`backend` 2、`serverProcess` 3（同时列出 `requiresTools` 时为 4），并声明 `backend.launch` 权限。
+- **会话字段（`languageServers` 3）。** 后端只能做服务器条目声明过的事：
+  `requestMethods`（允许用 `languageServer/request`、`languageServer/notify` 发的 LSP 方法）、
+  `commands`（允许执行的 `workspace/executeCommand` 命令，与 `requestMethods` 是否列出该方法一一对应）、
+  `serializedCommands`（`commands` 的子集：同一命令同时只跑一个，后来的请求并入并得到同一个结果）、
+  `forwardNotifications`（宿主转给后端的服务器通知）、
+  `state`（按工作区的状态目录及 `retention` 的 `maxEntries`、`maxAgeDays`，宿主据此在后台回收旧目录）、
+  `remote`（`supported` 或 `unsupported`，后者不在远程工作区启动）。
+  这些声明由 Core 的会话策略强制执行：宿主不能放宽，后端也越不过去。
+- **权限 `languageServer.request`。** 只有服务器列出 `requestMethods` 或 `forwardNotifications` 时才能声明，反过来也一样；需要 `backend` 2。
+  它只授予本插件自己服务器的 `languageServer/*` 宿主方法和下面两个通知。
+
+宿主方法和通知（前缀 `lithe/host/`；方法都要带 `context` 和 `serverID`，`serverID` 是本插件某个服务器的 `languageID`，
+别的插件的服务器返回 `plugin.host.foreignContribution`）：
+
+| 方法或通知 | API | 权限 | 用途 |
+| --- | --- | --- | --- |
+| `languageServer/request` | API-25 | `languageServer.request` | 向自己的服务器发 JSON-RPC 请求，返回服务器的 `result`；超时默认 60 秒、最长 300 秒 |
+| `languageServer/notify` | API-25 | `languageServer.request` | 向自己的服务器发通知 |
+| `languageServer/setStatus` | API-22、API-25 | `languageServer.request` | 在宿主状态界面显示插件自己的准备状态（`preparing`、`ready`、`degraded`、`failed`，可带消息和百分比），用于导入工程、建索引 |
+| `languageServer/didChangeState`（通知） | API-25 | `languageServer.request` | 服务器状态变化（`starting`、`running`、`stopped`、`crashed`），带 `generation` |
+| `languageServer/didReceiveNotification`（通知） | API-25 | `languageServer.request` | 转发服务器发出、`forwardNotifications` 列出的通知；过大时只送 `truncated: true` |
+| `documents/registerContentProvider` | API-12 | `documents.contentProvider` | 把一个 URI scheme 绑定到后端函数，见下 |
+
+服务器交出的文档没有对应文件（例如反编译的库类）时，用 `documents/registerContentProvider` 提供：用户打开该 scheme 的文档时，
+宿主调用绑定的函数取只读内容（最多 1 MiB，宿主等 30 秒）。每个工作区窗口每个 scheme 只能有一个 provider，用 `subscriptions/dispose` 撤销。
+
+边界：仅 macOS。后端决定启动方式的服务器不会在远程工作区启动（远程后端启动未支持）；Windows 宿主不提供 `backend`，也就没有这种启动方式。
+官方 Node、Java、Rust SDK 还没有这些方法的封装，可以先用 SDK 的通用宿主请求，以完整方法名调用，
+例如 Node SDK 的 `backend.host.request(method, params?)`，见 [Host services](../sdk/node/README.md#host-services)。
+
+细节见[语言、语言服务器与运行/测试](../reference/domains/languages.md)、[编辑器、文档与预览](../reference/domains/editor.md)，
+以及契约的 [Backend-resolved launch](../contract/v1/README.md#backend-resolved-launch-serverprocess-3)、
+[Plugin-owned sessions](../contract/v1/README.md#plugin-owned-sessions-languageservers-3)、
+[Language server host methods](../contract/v1/README.md#language-server-host-methods)、
+[Content providers](../contract/v1/README.md#content-providers)。
+示例包：[`languages/language-server-backend-launch.plugin.json`](../contract/v1/fixtures/languages/language-server-backend-launch.plugin.json)。
 
 ### 4. 在构建阶段准备完整语言服务器
 
@@ -427,7 +476,8 @@ The Lua template ships only macOS arm64 and x64 packages. For capability version
 
 LSP (Language Server Protocol) lets an editor get completion, diagnostics, navigation, and more
 from a separate process. A Lithe declarative plugin describes the program to start in JSON; the host reads the manifest, discovers runtimes, and manages
-the process and the LSP session. You do not write a Swift or JavaScript entry point inside the host.
+the process and the LSP session. You do not write a Swift or JavaScript entry point inside the host. A server whose command line is only known at launch
+can have the plugin backend resolve it at each start; see "Language servers driven by the plugin backend" in section 3.
 
 ```text
 Develop and build: pin upstream version → download and verify → assemble per-platform packages → publish zips → index entry
@@ -561,6 +611,7 @@ A file extension is not the LSP document identifier; set `languageIdentifier` se
 | API 1 `packaged` | A native server or launcher shipped in the package | Declare the relative path, package every resource, and keep the executable bit |
 | API 1 `systemCommand` | A server the user is explicitly expected to install | Declare bare command candidates and a correct probe, and document the install requirement |
 | API 2 `runtime` | A packaged JS file or JAR started by Node.js or Java | Declare the packaged entry and the discovered runtime's minimum version, or declare a packaged runtime |
+| `serverProcess` 3 `backend` | A command line that is only known at launch (resolving a version, bootstrapping a tool, deriving options from the project) | Declare the backend function that resolves the command line; see "Language servers driven by the plugin backend" below |
 
 For example, this is an alternative server declaration in `languageServers[]` that expects the user to have installed `gopls`;
 the full manifest must also declare the `go` language and the matching permission and event:
@@ -581,6 +632,54 @@ use an empty array as the Lua template does, and let the LSP handshake decide. P
 When shipping a server, prefer a pinned, reproducible one. `systemCommand` does not install tools for the user, and it is not a workaround for
 downloading a server at launch. Runtime dependencies are separate from the main entry: for example, when a packaged server calls Go,
 `runtimeDependencies` makes the host discover Go and pass the environment. API 1 supports `node` and `go`; API 2 adds `java`.
+
+#### Language servers driven by the plugin backend (`serverProcess` 3 and `languageServers` 3)
+
+The kinds above all write the command line into the manifest. When the command line is only known at launch (resolving a version, bootstrapping a tool,
+deriving options from the project), or when the plugin needs to send requests to the running server and receive its notifications, the plugin backend can take part.
+The process, the LSP session, and stopping still belong to the host; the backend only answers the command line and talks to **its own** server
+through host methods.
+
+- **The backend decides how to launch.** Write `launch` as `{"kind": "backend", "function": "launch.resolve", "timeoutMilliseconds": 30000}`.
+  At each start the host calls that plugin function, the backend returns the executable (a file in the package, or a tool the plugin defines), the arguments, the environment, and so on,
+  and the host starts the server from the answer. Such a server no longer declares `arguments`, `validationArguments`, `runtimeDependencies`, `initializationOptions`, or `hostIntegration`.
+  It requires `pluginAPIVersion` 4, `backend` 2, and `serverProcess` 3 (4 when the manifest also lists `requiresTools`), and declares the `backend.launch` permission.
+- **Session fields (`languageServers` 3).** The backend may do only what the server entry declares:
+  `requestMethods` (the LSP methods `languageServer/request` and `languageServer/notify` may send),
+  `commands` (the `workspace/executeCommand` commands it may run; declared exactly when `requestMethods` lists that method),
+  `serializedCommands` (a subset of `commands`: one runs at a time, and a later request joins it and gets the same result),
+  `forwardNotifications` (server notifications the host forwards to the backend),
+  `state` (per-workspace state directories with a `retention` of `maxEntries` and `maxAgeDays`, which the host uses to prune old directories in the background),
+  and `remote` (`supported` or `unsupported`; the latter is not started for a remote workspace).
+  Core's session policy enforces these declarations: the host cannot widen them and the backend cannot step outside them.
+- **The `languageServer.request` permission.** It can be declared only when a server lists `requestMethods` or `forwardNotifications`, and the other way round; it needs `backend` 2.
+  It grants only the `languageServer/*` host methods and the two notifications below, for the plugin's own servers.
+
+Host methods and notifications (prefix `lithe/host/`; every method takes `context` and `serverID`, the `languageID` of one of the plugin's servers;
+a server of another plugin returns `plugin.host.foreignContribution`):
+
+| Method or notification | API | Permission | Purpose |
+| --- | --- | --- | --- |
+| `languageServer/request` | API-25 | `languageServer.request` | Send a JSON-RPC request to your own server and get the server's `result`; the timeout defaults to 60 s and is at most 300 s |
+| `languageServer/notify` | API-25 | `languageServer.request` | Send a notification to your own server |
+| `languageServer/setStatus` | API-22, API-25 | `languageServer.request` | Show the plugin's own preparation state in the host's status UI (`preparing`, `ready`, `degraded`, `failed`, with an optional message and percentage), for importing a project or indexing |
+| `languageServer/didChangeState` (notification) | API-25 | `languageServer.request` | The server's state changed (`starting`, `running`, `stopped`, `crashed`), with a `generation` |
+| `languageServer/didReceiveNotification` (notification) | API-25 | `languageServer.request` | A notification the server sent and `forwardNotifications` lists; only `truncated: true` is delivered when it is too large |
+| `documents/registerContentProvider` | API-12 | `documents.contentProvider` | Bind a URI scheme to a backend function; see below |
+
+When the server hands out documents that have no file (for example the decompiled source of a library class), serve them with `documents/registerContentProvider`: when the user opens a document of that scheme,
+the host calls the bound function for its read-only content (at most 1 MiB; the host waits 30 seconds). Each workspace window can have one provider per scheme; revoke it with `subscriptions/dispose`.
+
+Limits: macOS only. A server whose launch the backend resolves does not start in a remote workspace (remote backend launch is not supported); the Windows host does not offer `backend`, so it has no such launch kind.
+The official Node, Java, and Rust SDKs do not wrap these methods yet; until they do, call them with the SDK's generic host request using the full method name,
+for example `backend.host.request(method, params?)` in the Node SDK, see [Host services](../sdk/node/README.md#host-services).
+
+For details, see [Languages, language servers, and run and test](../reference/domains/languages.md) and [Editor, documents, and previews](../reference/domains/editor.md),
+and these contract sections: [Backend-resolved launch](../contract/v1/README.md#backend-resolved-launch-serverprocess-3),
+[Plugin-owned sessions](../contract/v1/README.md#plugin-owned-sessions-languageservers-3),
+[Language server host methods](../contract/v1/README.md#language-server-host-methods), and
+[Content providers](../contract/v1/README.md#content-providers).
+Example package: [`languages/language-server-backend-launch.plugin.json`](../contract/v1/fixtures/languages/language-server-backend-launch.plugin.json).
 
 ### 4. Prepare the complete language server at build time
 

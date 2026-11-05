@@ -4,7 +4,7 @@
 
 ## 中文
 
-本页把插件会碰到的所有版本号放在一起：每个能力、每个进程协议、每个文档格式的**全部版本**，以及 Rust Core、macOS、Windows、三个官方 SDK 各自支持到哪一版。规范以 [`contract/v1/README.md`](../contract/v1/README.md) 为准；本页与契约不一致时以契约为准，并请提 Issue。本页以主仓库最新 `preview` 为基准：Core、macOS、Windows 列按 `preview` 上的代码核对（2026-11-05，`644afdaac`），契约链接对应 [`contract.lock.json`](../contract.lock.json) 锁定的修订。Lithe 稳定版可能还没有其中的部分版本，发布插件前以目标版本的发行说明为准。
+本页把插件会碰到的所有版本号放在一起：每个能力、每个进程协议、每个文档格式的**全部版本**，以及 Rust Core、macOS、Windows、三个官方 SDK 各自支持到哪一版。规范以 [`contract/v1/README.md`](../contract/v1/README.md) 为准；本页与契约不一致时以契约为准，并请提 Issue。本页以主仓库最新 `preview` 为基准：Core、macOS、Windows 列按 `preview` 上的代码核对（2026-11-05，`5cc06d5f4`），契约链接对应 [`contract.lock.json`](../contract.lock.json) 锁定的修订。Lithe 稳定版可能还没有其中的部分版本，发布插件前以目标版本的发行说明为准。
 
 ### 四类版本号
 
@@ -47,8 +47,11 @@
 | `languages` | 2 | [`grammar` 与 `configuration`](../contract/v1/README.md#grammars-and-editor-configuration-languages-2)：包内 Monarch 语法和编辑器配置 | ✅ | ✅ | — | [语言](domains/languages.md) |
 | `languageServers` | 1 | `languageServers[]`（启动字段之外的部分） | ✅ | ✅ | ✅ | [语言](domains/languages.md) |
 | `languageServers` | 2 | [`workspaceConfiguration`](../contract/v1/README.md#workspace-configuration-languageservers-2)：向语言服务器推送工作区配置 | ✅ | ✅ | ✅ | [语言](domains/languages.md) |
+| `languageServers` | 3 | [插件自有服务器的会话字段](../contract/v1/README.md#plugin-owned-sessions-languageservers-3)：`requestMethods`、`commands`、`serializedCommands`、`forwardNotifications`、`state`、`remote`，供后端经[语言服务器宿主方法](../contract/v1/README.md#language-server-host-methods)与自己的服务器交谈 | ✅ | ✅ | — | [语言](domains/languages.md) |
 | `serverProcess` | 1 | 进程启动字段：`launch`、`arguments`、`validationArguments`、`runtimeDependencies`、`initializationOptions`；语言服务器、自有进程的构建提供者、VCS 提供者、插件后端共用 | ✅ | ✅ | ✅ | [语言](domains/languages.md) |
 | `serverProcess` | 2 | `runSelectedRuntime`，供[调试适配器](../contract/v1/README.md#api-level-4-debug-adapters)使用；需要级别 4 | ✅ | — | — | [调试适配器](domains/debug-adapters.md) |
+| `serverProcess` | 3 | [后端决定启动方式](../contract/v1/README.md#backend-resolved-launch-serverprocess-3)：语言服务器的 `launch.kind: "backend"`，命令行由插件后端在每次启动时回答；只有语言服务器能用，需要 `backend` 2 和插件 API 级别 4 | ✅ | ✅ | — | [语言](domains/languages.md) |
+| `serverProcess` | 4 | [按工具定义 ID 引用运行时](../contract/v1/README.md#tool-references-serverprocess-4)：清单 `requiresTools` 列出工具定义 ID，`launch.tool`、`runtimeDependencies[].tool`、`runSelectedRuntime.tool` 按它们引用，不再用宿主的封闭运行时列表 | ✅ | — | — | [语言](domains/languages.md) |
 | `executionProviders` | 1 | `executionProviders[]`：运行和测试提供者 | ✅ | ✅ | — | [语言](domains/languages.md) |
 | `settings` | 1 | `settings[]` 与 `settingActions[]` | ✅ | ✅ | ✅ | [设置](domains/settings.md) |
 | `settings` | 2 | [放置位置、作用域、生效方式、页面按钮](../contract/v1/README.md#settings-v2-placement-scope-effect-and-page-buttons) | ✅ | ✅ | ✅ | [设置](domains/settings.md) |
@@ -75,6 +78,8 @@
 | `vcsProviders` | 1 | [`vcsProviders[]`](../contract/v1/README.md#api-level-3-vcs-providers) | ✅ | ✅ | — | [VCS](domains/vcs.md) |
 | `debugAdapters` | 1 | [`debugAdapters[]`](../contract/v1/README.md#api-level-4-debug-adapters)；需要级别 4 | ✅ | ✅ | — | [调试适配器](domains/debug-adapters.md) |
 | `debugAdapters` | 2 | 调试目标的参数和环境变量 | ✅ | ✅ | — | [调试适配器](domains/debug-adapters.md) |
+| `debugAdapters` | 3 | [适配器声明的 `features` 与 `defaults`](../contract/v1/README.md#adapter-features-and-defaults-debugadapters-3)：热代码替换、步进过滤器及其默认值 | ✅ | ✅ | — | [调试适配器](domains/debug-adapters.md) |
+| `outputLinkMatchers` | 1 | [`outputLinkMatchers[]`](../contract/v1/README.md#output-link-matchers-outputlinkmatchers-1)：插件声明的匹配规则让 Run 和测试控制台的输出出现链接；Core 负责匹配，`resolve` 函数在点击时才调用 | ✅ | ✅ | — | [语言](domains/languages.md) |
 | `projectGenerators` | 1 | [`projectGenerators[]`](../contract/v1/README.md#project-generators)：新建项目窗口里的条目 | ✅ | ✅ | — | [项目生成器](domains/project-generators.md) |
 | `projectGenerators` | 2 | [`tool` 字段](../contract/v1/README.md#tool-fields)：从插件声明的工具的已有安装里选一个，可存为新项目的工具固定；不能再用 `runtime` 字段 | ✅ | ✅ | — | [项目生成器](domains/project-generators.md) |
 | `backend` | 1 | [插件后端](../contract/v1/README.md#plugin-backend)：插件自己的长驻进程，从插件页面启动 | ✅ | ✅ | — | [插件后端](domains/backend.md) |
@@ -82,11 +87,14 @@
 | `packageTrust` | 1 | `vendor.bundledSignatureRequirement`：随宿主发布的发布者签名插件副本按来源信任 | ✅ | ✅ | — | [包信任](domains/package-trust.md) |
 | `toolDefinitions` | 1 | [工具身份、布局、发现和四层候选](../contract/v1/toolchains/README.md) | ✅ | ✅（只读设置、构建与运行工具） | — | [工具链](domains/toolchains.md) |
 | `toolchainProviders` | 1 | [工具链提供者声明和按权限校验应答](../contract/v1/toolchains/README.md) | ✅ | ✅（只读设置、构建与运行工具） | — | [工具链](domains/toolchains.md) |
+| `pluginFunctions` | 1 | [跨插件调用](../contract/v1/README.md#cross-plugin-calls-protocol-version-4)：清单顶层 `pluginFunctions` 段声明导出的函数（`exports`）和要调用的其他插件函数（`calls`）；需要插件 API 级别 3 及以上、`backend` 2、`serverProcess` 1，不授予任何清单权限；调用经 Core 中转，调用方后端需协商函数协议 4 | ✅ | ✅（中转调用） | — | [插件后端](domains/backend.md) |
 | `executableResolution` | 1 | [共享可执行文件候选](../contract/v1/README.md#shared-executable-candidates-executableresolution-12)：候选排序和严格选择 | ✅ | ✅ | — | [工具链](domains/toolchains.md) |
 | `executableResolution` | 2 | 工具定义候选、项目/子项目工具链注册表绑定；不改变已有构建候选集 | ✅ | ✅（只读设置、构建与运行工具） | — | [工具链](domains/toolchains.md) |
 | `keymapImportProviders` | 1 | [快捷键导入提供者](../contract/v1/README.md#shortcut-import-providers-core-foundation) | ✅ | ✅ | — | [快捷键导入](domains/keymap-import.md) |
 
 `requires` 必须**恰好**列出用到的能力：漏一个或多列一个都是 `plugin.manifest.invalid`。每个语言服务器、每个自有进程的构建提供者、每个 VCS 提供者和 `backend` 都要带上 `serverProcess`。
+
+macOS 目前只声明 `serverProcess` 1 和 3：版本 4 已由 Core 校验，但宿主尚未声明，需要它的插件版本暂时装不上。Windows 不声明本页新增的 `languageServers` 3、`serverProcess` 3 和 4、`debugAdapters` 3、`outputLinkMatchers` 1、`pluginFunctions` 1。
 
 ### 进程协议版本
 
@@ -96,7 +104,8 @@
 | --- | --- | --- | --- | --- |
 | `litheFunctions` | 1 | 插件函数：注册、撤回、调用、结果、进度、取消；不提供宿主服务，所有 `lithe/host/*` 请求返回 `plugin.host.unavailable` | 插件拥有的会话 | [Plugin functions](../contract/v1/README.md#plugin-functions) |
 | `litheFunctions` | 2 | 宿主服务：凭据 `credentials/get`、`set`、`delete` | 同上 | [Host services](../contract/v1/README.md#host-services-protocol-version-2) |
-| `litheFunctions` | 3 | 工作区上下文与能力发现、宿主通知、公共文档/文件/窗口方法、独立编辑器动作、插件自有原生终端 | 同上 | [Protocol 3](../contract/v1/README.md#workspace-contexts-and-capability-discovery-protocol-version-3) |
+| `litheFunctions` | 3 | 工作区上下文与能力发现、宿主通知、公共文档/文件/窗口方法、独立编辑器动作、编辑器语言功能 Provider、插件自有原生终端 | 同上 | [Protocol 3](../contract/v1/README.md#workspace-contexts-and-capability-discovery-protocol-version-3) |
+| `litheFunctions` | 4 | 跨插件调用：后端经 `functions/providers` 列出导出函数的插件、经 `functions/invoke` 调用它们；被调函数收到 Core 写入的 `caller`，嵌套调用用 `parentOperationID` 指明所属调用链（对应被服务调用的 `operationID`） | 同上 | [Cross-plugin calls](../contract/v1/README.md#cross-plugin-calls-protocol-version-4) |
 | `litheBuild` | 1 | `lithe/build/model` 与 `lithe/build/dependencies` | 构建提供者 | [Build providers](../contract/v1/README.md#build-providers) |
 | `litheBuild` | 2 | 类型化任务执行（`lithe/build/execute`） | 同上 | [Task execution](../contract/v1/README.md#provider-task-execution-buildproviders-2) |
 | `litheBuild` | 3 | 类型化测试执行和发现（`lithe/build/test`、`lithe/build/discoverTests`） | 同上 | [Test execution](../contract/v1/README.md#provider-test-execution-buildproviders-3) |
@@ -115,7 +124,8 @@
 
 - `litheBuild` 各版本新增的内容与同号的 `buildProviders` 能力版本一致。
 - `litheFunctions` 3 内部还有两个子版本号：宿主服务版本 `HOST_SERVICES_VERSION = 2`、上下文版本 `CONTEXT_VERSION = 3`，SDK 用它们判断能调用哪些宿主方法；运行时以 `lithe/host/getCapabilities` 的返回为准。
-- 宿主侧：上表的协议都由 Rust Core 实现；macOS 运行全部会话类型。Windows 没有插件后端宿主，也不运行构建提供者和 VCS 提供者。
+- `litheFunctions` 4 保留版本 3 的全部内容，只新增跨插件中转；协商到版本 3 或更低的后端不能调用 `functions/*`；它导出的函数仍可被中转调用，但收不到 `caller`。
+- 宿主侧：上表的协议都由 Rust Core 实现，Core 支持 `litheFunctions` 1–4；macOS 运行全部会话类型并中转跨插件调用。Windows 没有插件后端宿主（不提供 `backend`），也不运行构建提供者和 VCS 提供者。
 
 ### 宿主与官方 SDK 对照
 
@@ -123,7 +133,7 @@
 
 | 协议 | Core 提供 | Node SDK 0.3.0 | Java SDK 0.3.0 | Rust SDK 0.2.0 |
 | --- | --- | --- | --- | --- |
-| `litheFunctions` | 1、2、3 | 3 | 3 | 3、2、1 |
+| `litheFunctions` | 1、2、3、4 | 3 | 3 | 3、2、1 |
 | `litheBuild` | 1–11 | 1–6 | 1–6 | — |
 | `litheVcs` | 1 | 1 | — | — |
 | `litheKeymapImport` | 1 | 1 | 1 | 1 |
@@ -131,6 +141,7 @@
 | `litheLogging` | 1 | 1（必需） | 1（必需） | 1（必需） |
 
 - Node 和 Java SDK 的构建方法按协商结果启用：`model`、`dependencies` 需要 1，`execute` 需要 2，`test`、`discoverTests` 需要 3，`prepareRun` 需要 4，`prepareDebug` 需要 5。版本 7–11 的内容目前没有 SDK 封装。
+- 宿主支持函数协议 1–4，三个官方 SDK（Node、Java、Rust）目前只协商 1–3，所以用它们构建的后端不会协商到协议 4。协议 4 的 `functions/*` 和 `caller`，以及协议 3 宿主方法中的 `run/*`、`debug/start`、`languageServer/*`、`documents/registerContentProvider`，目前都没有 SDK 封装；插件可以先用 SDK 的通用宿主请求调用这些协议 3 的方法。
 - 当前 SDK 要求宿主提供 `litheLogging` 1，否则拒绝初始化；用这些 SDK 构建的后端只能在提供该协议的 Lithe 版本中启动。
 
 ### SDK 发版历史
@@ -164,7 +175,7 @@
 
 ## English
 
-This page puts every version number a plugin meets in one place: **every version** of each capability, each process protocol, and each document format, and how far Rust Core, macOS, Windows, and the three official SDKs support each. [`contract/v1/README.md`](../contract/v1/README.md) is normative; where this page disagrees with it, the contract wins, and please open an issue. This page tracks the latest `preview` of the Lithe repository: the Core, macOS, and Windows columns are checked against the code on `preview` (2026-11-05, `644afdaac`), and contract links follow the revision pinned in [`contract.lock.json`](../contract.lock.json). A stable Lithe release may lack some of these versions, so check your target version's release notes before publishing.
+This page puts every version number a plugin meets in one place: **every version** of each capability, each process protocol, and each document format, and how far Rust Core, macOS, Windows, and the three official SDKs support each. [`contract/v1/README.md`](../contract/v1/README.md) is normative; where this page disagrees with it, the contract wins, and please open an issue. This page tracks the latest `preview` of the Lithe repository: the Core, macOS, and Windows columns are checked against the code on `preview` (2026-11-05, `5cc06d5f4`), and contract links follow the revision pinned in [`contract.lock.json`](../contract.lock.json). A stable Lithe release may lack some of these versions, so check your target version's release notes before publishing.
 
 ### Four kinds of version
 
@@ -207,8 +218,11 @@ Each row is one version of one capability. The Core column is what Core can vali
 | `languages` | 2 | [`grammar` and `configuration`](../contract/v1/README.md#grammars-and-editor-configuration-languages-2): packaged Monarch grammars and editor configuration | ✅ | ✅ | — | [Languages](domains/languages.md) |
 | `languageServers` | 1 | `languageServers[]` apart from their launch fields | ✅ | ✅ | ✅ | [Languages](domains/languages.md) |
 | `languageServers` | 2 | [`workspaceConfiguration`](../contract/v1/README.md#workspace-configuration-languageservers-2): workspace configuration pushed to the server | ✅ | ✅ | ✅ | [Languages](domains/languages.md) |
+| `languageServers` | 3 | [Session fields for a plugin's own server](../contract/v1/README.md#plugin-owned-sessions-languageservers-3): `requestMethods`, `commands`, `serializedCommands`, `forwardNotifications`, `state`, `remote`, so a backend can talk to its own server through the [language server host methods](../contract/v1/README.md#language-server-host-methods) | ✅ | ✅ | — | [Languages](domains/languages.md) |
 | `serverProcess` | 1 | Launch fields `launch`, `arguments`, `validationArguments`, `runtimeDependencies`, `initializationOptions`, shared by language servers, own-process build providers, VCS providers, and the plugin backend | ✅ | ✅ | ✅ | [Languages](domains/languages.md) |
 | `serverProcess` | 2 | `runSelectedRuntime` for [debug adapters](../contract/v1/README.md#api-level-4-debug-adapters); needs level 4 | ✅ | — | — | [Debug adapters](domains/debug-adapters.md) |
+| `serverProcess` | 3 | [Backend-resolved launch](../contract/v1/README.md#backend-resolved-launch-serverprocess-3): a language server's `launch.kind: "backend"`, whose command line the plugin backend answers at each start; only language servers can use it, and it needs `backend` 2 and plugin API level 4 | ✅ | ✅ | — | [Languages](domains/languages.md) |
+| `serverProcess` | 4 | [Runtimes named by tool-definition ID](../contract/v1/README.md#tool-references-serverprocess-4): the manifest's `requiresTools` lists tool-definition IDs, which `launch.tool`, `runtimeDependencies[].tool`, and `runSelectedRuntime.tool` refer to instead of the host's closed runtime list | ✅ | — | — | [Languages](domains/languages.md) |
 | `executionProviders` | 1 | `executionProviders[]`: run and test providers | ✅ | ✅ | — | [Languages](domains/languages.md) |
 | `settings` | 1 | `settings[]` and `settingActions[]` | ✅ | ✅ | ✅ | [Settings](domains/settings.md) |
 | `settings` | 2 | [Placement, scope, effect, page buttons](../contract/v1/README.md#settings-v2-placement-scope-effect-and-page-buttons) | ✅ | ✅ | ✅ | [Settings](domains/settings.md) |
@@ -235,6 +249,8 @@ Each row is one version of one capability. The Core column is what Core can vali
 | `vcsProviders` | 1 | [`vcsProviders[]`](../contract/v1/README.md#api-level-3-vcs-providers) | ✅ | ✅ | — | [VCS](domains/vcs.md) |
 | `debugAdapters` | 1 | [`debugAdapters[]`](../contract/v1/README.md#api-level-4-debug-adapters); needs level 4 | ✅ | ✅ | — | [Debug adapters](domains/debug-adapters.md) |
 | `debugAdapters` | 2 | Debug target arguments and environment | ✅ | ✅ | — | [Debug adapters](domains/debug-adapters.md) |
+| `debugAdapters` | 3 | [Adapter `features` and `defaults`](../contract/v1/README.md#adapter-features-and-defaults-debugadapters-3): hot code replace, step filters, and their defaults | ✅ | ✅ | — | [Debug adapters](domains/debug-adapters.md) |
+| `outputLinkMatchers` | 1 | [`outputLinkMatchers[]`](../contract/v1/README.md#output-link-matchers-outputlinkmatchers-1): plugin-declared patterns that turn Run and Test console output into links; Core does the matching, and the `resolve` function is called only on click | ✅ | ✅ | — | [Languages](domains/languages.md) |
 | `projectGenerators` | 1 | [`projectGenerators[]`](../contract/v1/README.md#project-generators): entries of the New Project window | ✅ | ✅ | — | [Project generators](domains/project-generators.md) |
 | `projectGenerators` | 2 | [`tool` fields](../contract/v1/README.md#tool-fields): pick an existing installation of a plugin-declared tool, optionally saved as the new project's tool pin; `runtime` fields are no longer allowed | ✅ | ✅ | — | [Project generators](domains/project-generators.md) |
 | `backend` | 1 | [Plugin backend](../contract/v1/README.md#plugin-backend): the plugin's own long-lived process, started from its pages | ✅ | ✅ | — | [Plugin backend](domains/backend.md) |
@@ -242,11 +258,14 @@ Each row is one version of one capability. The Core column is what Core can vali
 | `packageTrust` | 1 | `vendor.bundledSignatureRequirement`: origin-scoped trust for a host-sealed bundled copy of a publisher-signed plugin | ✅ | ✅ | — | [Package trust](domains/package-trust.md) |
 | `toolDefinitions` | 1 | [Tool identities, layouts, discovery, and four-layer candidates](../contract/v1/toolchains/README.md) | ✅ | ✅ (read-only settings, Build and run tools) | — | [Toolchains](domains/toolchains.md) |
 | `toolchainProviders` | 1 | [Provider declarations and permission-bound answer validation](../contract/v1/toolchains/README.md) | ✅ | ✅ (read-only settings, Build and run tools) | — | [Toolchains](domains/toolchains.md) |
+| `pluginFunctions` | 1 | [Cross-plugin calls](../contract/v1/README.md#cross-plugin-calls-protocol-version-4): the manifest's top-level `pluginFunctions` section declares the functions the plugin exports (`exports`) and the functions of other plugins it calls (`calls`); needs plugin API level 3 or later, `backend` 2, and `serverProcess` 1, grants no manifest permission; Core relays the calls, and a calling backend must negotiate function protocol 4 | ✅ | ✅ (relays calls) | — | [Plugin backend](domains/backend.md) |
 | `executableResolution` | 1 | [Shared executable candidates](../contract/v1/README.md#shared-executable-candidates-executableresolution-12): candidate ordering and strict selection | ✅ | ✅ | — | [Toolchains](domains/toolchains.md) |
 | `executableResolution` | 2 | Tool-definition candidates and project/subproject toolchain registry bindings, without changing existing build candidate sets | ✅ | ✅ (read-only settings, Build and run tools) | — | [Toolchains](domains/toolchains.md) |
 | `keymapImportProviders` | 1 | [Shortcut import providers](../contract/v1/README.md#shortcut-import-providers-core-foundation) | ✅ | ✅ | — | [Shortcut import](domains/keymap-import.md) |
 
 `requires` lists **exactly** the capabilities a manifest uses: leaving one out or listing an unused one is `plugin.manifest.invalid`. Every language server, own-process build provider, VCS provider, and `backend` also needs `serverProcess`.
+
+macOS currently advertises only `serverProcess` 1 and 3: version 4 is validated by Core, but the host does not advertise it yet, so a plugin version that needs it cannot be installed for now. Windows advertises none of the versions this page adds: `languageServers` 3, `serverProcess` 3 and 4, `debugAdapters` 3, `outputLinkMatchers` 1, and `pluginFunctions` 1.
 
 ### Process protocol versions
 
@@ -256,7 +275,8 @@ These protocols are negotiated when a process starts and never appear in the man
 | --- | --- | --- | --- | --- |
 | `litheFunctions` | 1 | Plugin functions: register, withdraw, invoke, results, progress, cancellation; no host services, every `lithe/host/*` request is `plugin.host.unavailable` | Plugin-owned sessions | [Plugin functions](../contract/v1/README.md#plugin-functions) |
 | `litheFunctions` | 2 | Host services: credentials `credentials/get`, `set`, `delete` | Same | [Host services](../contract/v1/README.md#host-services-protocol-version-2) |
-| `litheFunctions` | 3 | Workspace contexts and capability discovery, host notifications, public document/file/window methods, independent editor actions, plugin-owned native terminals | Same | [Protocol 3](../contract/v1/README.md#workspace-contexts-and-capability-discovery-protocol-version-3) |
+| `litheFunctions` | 3 | Workspace contexts and capability discovery, host notifications, public document/file/window methods, independent editor actions, editor language-feature providers, plugin-owned native terminals | Same | [Protocol 3](../contract/v1/README.md#workspace-contexts-and-capability-discovery-protocol-version-3) |
+| `litheFunctions` | 4 | Cross-plugin calls: a backend lists the plugins that export a function with `functions/providers` and calls them with `functions/invoke`; the called function receives a Core-written `caller`, and a nested call names its call chain with `parentOperationID` (the `operationID` of the call being served) | Same | [Cross-plugin calls](../contract/v1/README.md#cross-plugin-calls-protocol-version-4) |
 | `litheBuild` | 1 | `lithe/build/model` and `lithe/build/dependencies` | Build providers | [Build providers](../contract/v1/README.md#build-providers) |
 | `litheBuild` | 2 | Typed task execution (`lithe/build/execute`) | Same | [Task execution](../contract/v1/README.md#provider-task-execution-buildproviders-2) |
 | `litheBuild` | 3 | Typed test execution and discovery (`lithe/build/test`, `lithe/build/discoverTests`) | Same | [Test execution](../contract/v1/README.md#provider-test-execution-buildproviders-3) |
@@ -275,7 +295,8 @@ These protocols are negotiated when a process starts and never appear in the man
 
 - Each `litheBuild` version adds what the `buildProviders` capability version of the same number adds.
 - `litheFunctions` 3 carries two sub-versions: host services `HOST_SERVICES_VERSION = 2` and contexts `CONTEXT_VERSION = 3`, which SDKs use to decide which host methods they may call; at runtime, `lithe/host/getCapabilities` is authoritative.
-- Hosts: Rust Core implements every protocol above, and macOS runs every session kind. Windows has no plugin backend host and runs no build or VCS providers.
+- `litheFunctions` 4 keeps everything in version 3 and only adds the cross-plugin relay; a backend that negotiated version 3 or lower cannot call `functions/*`; the functions it exports can still be called through the relay, but it never receives `caller`.
+- Hosts: Rust Core implements every protocol above and supports `litheFunctions` 1–4, and macOS runs every session kind and relays cross-plugin calls. Windows has no plugin backend host (it does not offer `backend`) and runs no build or VCS providers.
 
 ### Host and official SDKs
 
@@ -283,7 +304,7 @@ These protocols are negotiated when a process starts and never appear in the man
 
 | Protocol | Core offers | Node SDK 0.3.0 | Java SDK 0.3.0 | Rust SDK 0.2.0 |
 | --- | --- | --- | --- | --- |
-| `litheFunctions` | 1, 2, 3 | 3 | 3 | 3, 2, 1 |
+| `litheFunctions` | 1, 2, 3, 4 | 3 | 3 | 3, 2, 1 |
 | `litheBuild` | 1–11 | 1–6 | 1–6 | — |
 | `litheVcs` | 1 | 1 | — | — |
 | `litheKeymapImport` | 1 | 1 | 1 | 1 |
@@ -291,6 +312,7 @@ These protocols are negotiated when a process starts and never appear in the man
 | `litheLogging` | 1 | 1 (required) | 1 (required) | 1 (required) |
 
 - The Node and Java SDKs enable each build method from the negotiated version: `model` and `dependencies` need 1, `execute` 2, `test` and `discoverTests` 3, `prepareRun` 4, `prepareDebug` 5. Versions 7–11 have no SDK wrappers yet.
+- The host supports function protocols 1–4, while the three official SDKs (Node, Java, Rust) negotiate only 1–3 today, so a backend built on them never negotiates protocol 4. The protocol 4 `functions/*` methods and `caller` field, and the protocol 3 host methods `run/*`, `debug/start`, `languageServer/*`, and `documents/registerContentProvider`, have no SDK wrappers yet; a plugin can call those protocol 3 methods through the SDK's generic host request meanwhile.
 - The current SDKs require the host to offer `litheLogging` 1 and refuse to initialize otherwise, so a backend built on them starts only in a Lithe release that offers it.
 
 ### SDK release history

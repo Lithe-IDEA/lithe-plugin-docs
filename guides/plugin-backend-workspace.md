@@ -13,7 +13,8 @@
 > 只提供 `backend: [1]` 的旧宿主会以 `plugin.api.unsupported` 拒绝 `backend` 2 的插件，所以老版本 Lithe
 > 不会启动一个期待工作区上下文的进程。三个官方 SDK 都实现了协议 3：Node.js SDK 0.2.0、Java SDK 0.2.0 和 Rust SDK 0.1.0 起
 > （见各自 README 的 Host services：[Node.js](../sdk/node/README.md#host-services)、[Java](../sdk/java/README.md#host-services)、
-> [Rust](../sdk/rust/README.md#host-services)）。用其他语言或更早的 SDK 需要自己处理下文的请求和通知。
+> [Rust](../sdk/rust/README.md#host-services)）。宿主还支持函数协议 4（跨插件调用，见第 10 节），三个官方 SDK 目前只实现到协议 3。
+> 用其他语言或更早的 SDK 需要自己处理下文的请求和通知。
 > 各宿主支持到哪一版，见按最新 preview 核对的[版本对照](../reference/capabilities-and-versions.md)。
 
 ### 1. 三个版本号各管什么
@@ -21,7 +22,7 @@
 | 写在哪里 | 值 | 决定什么 |
 | --- | --- | --- |
 | `requires.backend` | `1` 或 `2` | 后端进程**什么时候启动**、能不能声明 `workspace.metadata` 和 `onWorkspaceOpen` |
-| `initialize` 应答的 `litheFunctions.version` | `1`、`2` 或 `3` | 进程启动后**线路协议**的规则：`2` 起有宿主服务（凭据），`3` 起有能力发现、工作区上下文、宿主通知和带类型的失败码 |
+| `initialize` 应答的 `litheFunctions.version` | `1`、`2`、`3` 或 `4` | 进程启动后**线路协议**的规则：`2` 起有宿主服务（凭据），`3` 起有能力发现、工作区上下文、宿主通知和带类型的失败码，`4` 起有跨插件调用（第 10 节） |
 | `getCapabilities.services` | 运行时查询结果 | 本次会话**实际能调用**哪些宿主方法、会收到哪些通知 |
 
 清单只做声明，宿主读清单决定装不装、什么时候启动；进程起来以后能做什么，靠协商和 `getCapabilities` 判断。
@@ -65,7 +66,7 @@
 
 ### 4. 协商协议 3
 
-宿主在 `initialize` 里提供 `capabilities.experimental.litheFunctions: { "versions": [1, 2, 3] }`。后端从中选自己实现的最高版本作答：
+宿主在 `initialize` 里提供 `capabilities.experimental.litheFunctions: { "versions": [1, 2, 3, 4] }`。后端从中选自己实现的最高版本作答（本篇讲协议 3，协议 4 见第 10 节）：
 
 ```json
 "experimental": { "litheFunctions": { "version": 3, "functions": [{ "id": "orders.refresh" }] } }
@@ -203,7 +204,13 @@
 - 后台没有挂载编辑器的文档可以列出和读取，但编辑与选区可能返回 `busy`。
 - 消息有频率和排队上限（每插件 10 秒 5 条、最多 3 条待答），用户回答前请求一直挂起。
 
-协议 3 还包括插件自有的编辑器动作（`editor.actions`）和原生终端（`terminal.create`），分别见[编辑器、文档与预览](../reference/domains/editor.md)和[从插件打开 Lithe 原生终端](native-terminals.md)。
+协议 3 还包括插件自有的编辑器动作（`editor.actions`）、编辑器语言功能 Provider（`editor.providers`）和原生终端（`terminal.create`），分别见[编辑器、文档与预览](../reference/domains/editor.md)和[从插件打开 Lithe 原生终端](native-terminals.md)。
+
+协议 3 里还有三组方法，同样只有 macOS 宿主实现，调用前同样先查 `getCapabilities.services`。它们的权限都要求 `backend` 2，各自的清单条件见对应的契约章节：
+
+- 运行与调试会话（权限 `run.start`、`debug.start`）：`run/start`、`run/stop` 启动并停止由宿主拥有的 Run 会话（Run 窗口条目、控制台、停止按钮、退出状态），`debug/start` 在本插件自己声明的调试适配器上启动调试会话，`run/didExit` 通知运行结束；见[插件后端与插件函数](../reference/domains/backend.md)、[调试适配器](../reference/domains/debug-adapters.md)和契约的[运行与调试会话](../contract/v1/README.md#run-and-debug-sessions-protocol-version-3)。
+- 自有语言服务器（权限 `languageServer.request`）：`languageServer/request`、`languageServer/notify` 向本插件自己声明的语言服务器发送请求和通知，`languageServer/setStatus` 在宿主状态界面显示它的准备状态，服务器状态变化和转发的通知经 `languageServer/didChangeState`、`languageServer/didReceiveNotification` 送达；见[语言、语言服务器与运行/测试](../reference/domains/languages.md)和契约的[语言服务器宿主方法](../contract/v1/README.md#language-server-host-methods)。
+- 内容 Provider（权限 `documents.contentProvider`）：`documents/registerContentProvider` 把一个 URI scheme 绑定到后端函数，用户打开该 scheme 的文档时宿主调用这个函数取只读内容；见[编辑器、文档与预览](../reference/domains/editor.md)和契约的[内容 Provider](../contract/v1/README.md#content-providers)。
 
 ### 9. 宿主失败与错误码
 
@@ -234,7 +241,7 @@
 
 从协议 3 起，宿主再开放新能力（新服务及其方法和通知、可选参数、结果字段、错误码）都在协议 3 内新增，
 不再升协议版本；只有会让已有后端读错的改动（删除或改名、改字段含义或类型、把可选参数改成必填、改错误码号码）
-才会出协议 4。这样插件只要实现一次协议 3，就能在今后所有协议 3 宿主上工作，前提是遵守下面四条：
+才会出新的协议版本，与旧版本并行提供。这样插件只要实现一次协议 3，就能在今后所有协议 3 宿主上工作，前提是遵守下面四条：
 
 1. **只调用 `getCapabilities.services` 列出的方法。** 其他方法会得到 `-32601` `plugin.host.unavailable`。
 2. **忽略不认识的字段和通知。** 结果、通知、`details`、`limits` 里多出来的字段，以及不认识的 `lithe/host/*` 通知，都直接忽略。
@@ -245,6 +252,24 @@
 
 新服务总是配一个新的清单权限。旧宿主不认识这个权限时，会在安装时以 `plugin.permission.unknown` 拒绝整个插件包，
 权限不会被悄悄授予或忽略。
+
+#### 协议 4：跨插件调用
+
+协议 4 只为[跨插件调用](../contract/v1/README.md#cross-plugin-calls-protocol-version-4)增加两样东西，协议 3 的内容全部保留，上面四条规则照旧：
+
+- 调用方用的两个中转方法：先用 `functions/providers` 找到导出某个函数的插件，再用 `functions/invoke` 调用其中一个。
+  调用由 Core 中转，调用方接触不到被调方的进程。只有协商到协议 4、且清单至少声明了一个调用（`pluginFunctions.calls`）的后端能发这两个请求：
+  协商到 3 或更早得到 `-32601` `plugin.host.unavailable`，没有声明调用得到 `-32010` `plugin.host.permissionDenied`。
+- 被中转调用里的 `caller`：被调方收到的 `lithe/function/invoke` 顶层多一个 `caller`，是 Core 按调用方会话写入的插件 ID；
+  没有这个字段就表示宿主发起的调用。要按调用方判断的被调方只读这个顶层字段，不读 `params` 里自称的插件 ID。
+  被调方在处理中转调用时再发起嵌套调用，要把这次调用顶层的 `operationID` 填进 `parentOperationID`，Core 才知道嵌套调用属于哪条调用链。
+
+使用时要记住：
+
+- 只协商到 3 的后端照常工作。它不能调用 `functions/*`；它导出的函数仍可被中转调用，但收不到 `caller`，要按调用方判断就必须协商 4。
+- 导出或调用跨插件函数，清单要声明 `pluginFunctions`：`pluginAPIVersion` 不低于 3，`requires` 里写 `pluginFunctions: 1`、`backend: 2`、`serverProcess: 1`。
+  它不授予任何清单权限；清单声明了导出，后端仍要用 `lithe/function/register` 注册该函数。
+- 目前只有 macOS 宿主实现；三个官方 SDK 还只协商到协议 3，没有 `functions/*` 的封装，也读不到 `caller`。
 
 ### 11. 验证
 
@@ -268,7 +293,8 @@ The [contract](../contract/v1/README.md#backend-2-workspace-contexts) is normati
 > An older host that offers only `backend: [1]` refuses a `backend` 2 plugin with `plugin.api.unsupported`, so an older Lithe
 > never starts a process that expects workspace contexts. All three official SDKs implement protocol 3 from Node.js SDK 0.2.0, Java SDK 0.2.0, and Rust SDK 0.1.0
 > (see Host services in each README: [Node.js](../sdk/node/README.md#host-services), [Java](../sdk/java/README.md#host-services),
-> [Rust](../sdk/rust/README.md#host-services)). With another language or an earlier SDK, handle the requests and notifications below yourself.
+> [Rust](../sdk/rust/README.md#host-services)). The host also supports function protocol 4 (cross-plugin calls, see section 10); the three official SDKs implement only up to protocol 3 so far.
+> With another language or an earlier SDK, handle the requests and notifications below yourself.
 > For how far each host supports each version, see the [version tables](../reference/capabilities-and-versions.md), which track the latest preview.
 
 ### 1. What each of the three version numbers controls
@@ -276,7 +302,7 @@ The [contract](../contract/v1/README.md#backend-2-workspace-contexts) is normati
 | Where | Value | Controls |
 | --- | --- | --- |
 | `requires.backend` | `1` or `2` | **When** the backend process starts, and whether it may declare `workspace.metadata` and `onWorkspaceOpen` |
-| `litheFunctions.version` in the `initialize` answer | `1`, `2`, or `3` | The **wire protocol** rules once the process runs: `2` adds host services (credentials); `3` adds capability discovery, workspace contexts, host notifications, and typed failure codes |
+| `litheFunctions.version` in the `initialize` answer | `1`, `2`, `3`, or `4` | The **wire protocol** rules once the process runs: `2` adds host services (credentials); `3` adds capability discovery, workspace contexts, host notifications, and typed failure codes; `4` adds cross-plugin calls (section 10) |
 | `getCapabilities.services` | Runtime query result | Which host methods this session **can actually call**, and which notifications it receives |
 
 The manifest only declares. The host reads it to decide whether to install and when to start; what the running process can do is decided by negotiation and `getCapabilities`.
@@ -320,7 +346,7 @@ The manifest only declares. The host reads it to decide whether to install and w
 
 ### 4. Negotiating protocol 3
 
-The host offers `capabilities.experimental.litheFunctions: { "versions": [1, 2, 3] }` in `initialize`. The backend answers with the highest version it implements:
+The host offers `capabilities.experimental.litheFunctions: { "versions": [1, 2, 3, 4] }` in `initialize`. The backend answers with the highest version it implements (this guide covers protocol 3; for protocol 4 see section 10):
 
 ```json
 "experimental": { "litheFunctions": { "version": 3, "functions": [{ "id": "orders.refresh" }] } }
@@ -458,7 +484,13 @@ The [contract](../contract/v1/README.md#public-document-file-and-window-methods-
 - Documents open in the background without a mounted editor can be listed and read, but edits and selections may return `busy`.
 - Messages have rate and queue limits (5 per 10 seconds per plugin, at most 3 awaiting an answer), and the request stays pending until the user answers.
 
-Protocol 3 also includes the plugin's own editor actions (`editor.actions`) and native terminals (`terminal.create`); see [Editor, documents, and previews](../reference/domains/editor.md) and [Open a native Lithe terminal from a plugin](native-terminals.md).
+Protocol 3 also includes the plugin's own editor actions (`editor.actions`), editor language-feature providers (`editor.providers`), and native terminals (`terminal.create`); see [Editor, documents, and previews](../reference/domains/editor.md) and [Open a native Lithe terminal from a plugin](native-terminals.md).
+
+Protocol 3 has three more groups of methods. Only the macOS host implements them, and you should likewise check `getCapabilities.services` before calling. Every one of their permissions requires `backend` 2; the manifest conditions of each are in its contract section:
+
+- Run and debug sessions (permissions `run.start`, `debug.start`): `run/start` and `run/stop` start and stop a host-owned Run session (Run window entry, console, Stop button, exit status), `debug/start` starts a debug session on a debug adapter the plugin itself declares, and the `run/didExit` notification reports that a run ended; see [Plugin backend and plugin functions](../reference/domains/backend.md), [Debug adapters](../reference/domains/debug-adapters.md), and the contract's [Run and debug sessions](../contract/v1/README.md#run-and-debug-sessions-protocol-version-3).
+- Own language servers (permission `languageServer.request`): `languageServer/request` and `languageServer/notify` send requests and notifications to a language server the plugin itself declares, `languageServer/setStatus` shows its preparation state in the host's status UI, and server state changes and forwarded notifications arrive through `languageServer/didChangeState` and `languageServer/didReceiveNotification`; see [Languages, language servers, run and test](../reference/domains/languages.md) and the contract's [Language server host methods](../contract/v1/README.md#language-server-host-methods).
+- Content providers (permission `documents.contentProvider`): `documents/registerContentProvider` binds a URI scheme to a backend function, and the host calls that function for read-only content when the user opens a document of that scheme; see [Editor, documents, and previews](../reference/domains/editor.md) and the contract's [Content providers](../contract/v1/README.md#content-providers).
 
 ### 9. Host failures and error codes
 
@@ -489,7 +521,7 @@ Protocol 3 host failures are typed: each JSON-RPC number maps one-to-one to an `
 
 From protocol 3 on, new host capabilities (new services with their methods and notifications, optional params, result fields, error codes) are added within protocol 3
 without raising the protocol version; only changes that would make an existing backend misread something (removing or renaming, changing a field's meaning or type, making an optional param required, changing an error number)
-lead to protocol 4. So a plugin that implements protocol 3 once works on every future protocol 3 host, provided it follows these four rules:
+lead to a new protocol version, offered next to the old one. So a plugin that implements protocol 3 once works on every future protocol 3 host, provided it follows these four rules:
 
 1. **Call only methods listed in `getCapabilities.services`.** Any other method gets `-32601` `plugin.host.unavailable`.
 2. **Ignore unknown fields and notifications.** Ignore extra fields in results, notifications, `details`, and `limits`, and any unknown `lithe/host/*` notification.
@@ -500,6 +532,24 @@ lead to protocol 4. So a plugin that implements protocol 3 once works on every f
 
 A new service always comes with a new manifest permission. An older host that does not know the permission refuses the whole plugin package at installation with `plugin.permission.unknown`,
 so the permission is never silently granted or ignored.
+
+#### Protocol 4: cross-plugin calls
+
+Protocol 4 adds only two things, both for [cross-plugin calls](../contract/v1/README.md#cross-plugin-calls-protocol-version-4); it keeps everything in protocol 3, and the four rules above still apply:
+
+- Two relay methods for the caller: it finds the plugins that export a function with `functions/providers`, then calls one of them with `functions/invoke`.
+  Core relays the call, and the caller never reaches the provider's process. Only a backend that negotiated protocol 4 and whose manifest declares at least one call (`pluginFunctions.calls`) may send these requests:
+  one on version 3 or earlier gets `-32601` `plugin.host.unavailable`, and one that declares no call gets `-32010` `plugin.host.permissionDenied`.
+- `caller` in a relayed call: the `lithe/function/invoke` a provider receives has one more top-level field, `caller`, the calling plugin's ID that Core writes from the calling session;
+  its absence means the host started the call. A provider that decides by who is asking reads only this top-level field, never a plugin ID that `params` claims.
+  When a provider makes a nested call while serving a relayed call, it puts that call's top-level `operationID` in `parentOperationID`, so Core knows which call chain the nested call belongs to.
+
+What to remember:
+
+- A backend that negotiated only 3 keeps working as before. It cannot call `functions/*`; the functions it exports can still be called through the relay, but it never receives `caller`, so a provider that decides by who is asking must negotiate 4.
+- To export or call cross-plugin functions, the manifest declares `pluginFunctions`: `pluginAPIVersion` 3 or later, with `pluginFunctions: 1`, `backend: 2`, and `serverProcess: 1` in `requires`.
+  It grants no manifest permission, and declaring an export does not register it: the backend still registers the function with `lithe/function/register`.
+- Only the macOS host implements it so far; the three official SDKs still negotiate only up to protocol 3, have no wrapper for `functions/*`, and do not expose `caller`.
 
 ### 11. Verification
 

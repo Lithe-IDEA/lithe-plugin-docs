@@ -14,8 +14,6 @@ settings detections are never used as launch permits. Existing Java and
 language-server consumers still use their previous adapters. Windows has no
 toolchain adapter and does not advertise `toolDefinitions` or
 `toolchainProviders`, so Core refuses packages that require them there.
-Publisher signatures provide independent origin evidence when present; legacy
-unsigned records never do.
 Consumer migration, the native query lifecycle and cache, pin saving and
 version-manager plugins are not specified yet. The manifest shape is
 [plugin-manifest.schema.json](../plugin-manifest.schema.json).
@@ -47,13 +45,18 @@ replies may not contain statements. Providers share the plugin's
 backend; admission permits a host-query trigger without a page or startup event,
 and the macOS host starts the backend on the first query. Bootstrap must be `packaged`, or
 `runtime` with `packagedRuntime`, without discovered runtime dependencies. Existing
-runtime launch tool restrictions remain; generic consumer launches are not added.
+runtime launch tool restrictions remain for `serverProcess` 1 and 2, which name
+a closed set of runtimes. From `serverProcess` 4 a plugin names any tool definition
+by ID instead; see [`instantiateLaunch`](#launching-a-tool-definition).
 
 `toolchains.provide` may influence which program a defined tool launches. It does
 not grant arbitrary command replacement, installation, network or workspace-code
-execution. Short definition IDs require independently verified official origin;
-community definitions use `<own-plugin-id>:<local-id>`. Community providers may
-answer short IDs. No host-owned tool table, name alias or manager parser is added.
+execution. Any plugin may define a short ID such as `compiler` or a qualified
+`<own-plugin-id>:<local-id>`; the prefix of a qualified ID must be the defining
+plugin's own ID, so qualified IDs of different plugins never collide. A short ID
+defined by more than one enabled plugin belongs to none of them (see the registry
+rules below). Providers may answer short IDs. No host-owned tool table, name
+alias or manager parser is added.
 
 A native Build consumer that directly executes a tool currently accepts only
 `["${executable}", "${arguments}"]`: its tool context carries a program and
@@ -103,22 +106,35 @@ are not a substitute for that adapter. These commands perform no native I/O.
 
 | Command | Input | Success key |
 | --- | --- | --- |
-| `toolchains.registry` | `{plugins:[{manifest,verifiedOfficial}]}` | `registry` |
+| `toolchains.registry` | `{plugins:[{manifest}]}` | `registry` |
 | `toolchains.decodeReply` | Query/response and native evidence described below | `snapshot` |
 | `toolchains.failureReply` | `{params,code}` described below | `reply` |
 | `toolchains.resolvePins` | `{document,directory,tool}` | `resolution` |
 | `toolchains.resolve` | Captured resolver input described below | `resolution` |
 | `toolchains.checkVersion` | `{registry,tool,output,minimumVersion?}` | `version` |
+| `toolchains.instantiateLaunch` | `{registry,tool,executable,home?,entry?,runtimeArguments,arguments}` | `launch` |
 | `toolchains.discoveryPlan` | `{registry,platform}` | `plan` |
 | `toolchains.candidates` | Captured discovery input described below | `candidates` |
 
-Every `registry` input is the raw `{plugins:[...]}` request, not a previously
-normalized result. Core revalidates complete production manifests and the
-host-supplied `verifiedOfficial` boolean; a plugin cannot assert that evidence
-inside its own manifest. Output is `{definitions:[{pluginID,definition}],
-providers:[{pluginID,provider}]}` in stable order. Duplicate plugin/tool ownership
-rejects the batch without replacing earlier owners. Limits are 128 plugins,
-512 aggregate definitions and 256 aggregate providers.
+Every `registry` input is the raw `{plugins:[{manifest}]}` request of the enabled
+plugins, not a previously normalized result. Core revalidates complete production
+manifests; the host supplies no proof of a plugin's origin, and a plugin's own
+claim of one is not read. Output is `{definitions:[{pluginID,definition}],
+providers:[{pluginID,provider}],conflicts:[{tool,pluginIDs}]}` in stable order.
+
+A short ID defined by more than one enabled plugin belongs to none of them. Core
+registers none of those definitions and registers every other definition as
+usual. `conflicts` lists each contested tool once, sorted by `tool`, with the IDs
+of all plugins that defined it, sorted. Ownership is never decided by arrival
+order or by plugin ID order, because a hostile plugin could take a tool by being
+loaded first or by choosing a smaller ID. A contested tool is absent from the
+registry: `discoveryPlan` lists no scans or providers for it, and a consumer that
+resolves it treats it as declared by nobody. A host should tell the user which
+plugins contest the tool; the macOS settings page shows one diagnostic per
+conflict and advises keeping only one of those plugins enabled. Qualified IDs
+cannot be contested, since their prefix is the defining plugin's ID. A repeated
+plugin ID still rejects the whole batch without replacing earlier owners. Limits
+are 128 plugins, 512 aggregate definitions and 256 aggregate providers.
 
 ## Provider backend negotiation
 
@@ -332,6 +348,34 @@ qualified `providers` that declare it, and the definition's `homeLayouts`,
 login-shell home variables (`{variable,path}` from its platform-applicable
 `environment` candidates). It neither scans, queries nor executes them; limits
 are 256 roots, 4096 entries and 64 ancestors for the host adapter.
+
+## Launching a tool definition
+
+A plugin that starts a tool by definition ID (a `launch.kind: "tool"` plan, or a
+`run/start` with `{kind: "tool"}`) never writes the tool's argv. The definition's
+`launch` template says how the tool takes an entry file, runtime arguments and
+program arguments, so no host and no plugin branches on a tool name.
+`toolchains.instantiateLaunch` expands it for the executable the host selected:
+
+- `registry` and `tool` are as in `checkVersion`; `executable` is the selected
+  executable (required). `home` is the resolved tool home, `entry` an absolute
+  file path, `runtimeArguments` and `arguments` string lists. A text is at most
+  4096 bytes, a list at most 1024 items of 64 KiB each, and none holds a NUL.
+- `${executable}`, `${home}`, `${entry}`, `${runtimeArguments}` and
+  `${arguments}` are replaced by the matching value, a list expanding in place.
+  Any other template token is passed as written.
+- The result is `{executable, arguments, versionArguments}`: the program, the
+  rest of the argv, and the definition's `version.arguments` for the probe.
+- A value the caller supplies that the template cannot carry (an `entry` for a
+  tool that launches none, or arguments for one that takes none), or a `${home}`
+  or `${entry}` the caller left out, is
+  `plugin.toolchain.launchMismatch`. An unknown or disabled `tool` is
+  `plugin.toolchain.invalidParams` with `field: "tool"`.
+
+The command performs no native I/O. The host selects the executable with the
+four resolution layers and the launch's `minimumVersion`, probes
+`versionArguments`, checks the output with `checkVersion`, and then starts the
+expanded argv.
 
 ## Settings candidates
 

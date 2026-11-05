@@ -66,7 +66,7 @@
 
 要点：
 
-- `pluginAPIVersion` 是 `4`，`requires` 必须逐项列出实际用到的能力（`debugAdapters` 为 `1`）。
+- `pluginAPIVersion` 是 `4`，`requires` 必须逐项列出实际用到的能力（`debugAdapters` 为 `1`；声明 `features` 或 `defaults` 时为 `3`，由后端发起调试时还要列出 `backend` 2，见第 6 节）。
 - 每个适配器都要有一条 `onDebug:<id>` 激活事件，并声明 `debug.launch` 权限。适配器列出 `attach` 时才需要（也只能声明）`debug.attach`。
 - `selectors` 决定 Lithe 在哪些目标上自动选这个适配器：`targetKinds` 是目标种类，`languageIDs` 是语言。不写 `selectors` 表示只能被用户显式选择。
 - `languages[]` 声明适配器服务的语言。如果这个语言已经由别的插件提供（例如 Rust），你的声明只会给它增加“可以调试”的能力，并并入你声明的文件扩展名；语言名、语言标识和语言服务器不变，装上调试器也不会重启正在运行的语言服务器。
@@ -82,6 +82,8 @@
 | `{"launch": {"kind": "packaged", "path": …}}` | 适配器许可允许分发、你能为每个平台提供构建；可执行文件随插件包安装 |
 | `{"launch": {"kind": "systemCommand", "commands": ["lldb-dap"]}}` | 适配器已经装在用户机器上（例如随 Xcode 命令行工具提供）；Lithe 用自己的工具发现（PATH、项目工具链、用户覆盖）解析命令名，macOS 上也覆盖 Xcode 工具链 |
 | `{"launch": {"kind": "runSelectedRuntime", "tool": "python"}}` | 适配器是 Python / Java / Node.js 程序，用用户选定的运行时启动；这是 `serverProcess` 2 唯一的用途 |
+
+从 `serverProcess` 4 起，`runSelectedRuntime.tool` 不再限于上面的三个名字，而是清单顶层 `requiresTools` 列出的工具定义 ID，见契约的 [Tool references](../contract/v1/README.md#tool-references-serverprocess-4)。
 
 `launch.transport` 是 `stdio`，或者 TCP（`tcpAnnounced`：适配器在输出里打印端口；`tcpPort`：固定端口）。TCP 只允许回环地址。
 
@@ -125,18 +127,53 @@ Lithe 的调试控制台有输入行和补全弹窗。补全来自适配器的 D
 
 两者至少声明一个。适配器能实时补全时，不要把整个命令集再抄一遍。
 
-### 6. 本地验证
+### 6. 适配器行为声明与由后端发起调试（`debugAdapters` 3）
+
+宿主从不按 ID 认识某个适配器：适配器特有的行为写在清单里，共享的调试引擎照着执行。需要 `requires.debugAdapters` 3。
+
+- `features.hotCodeReplace`：`request` 是宿主发给适配器、让它把改动的代码应用到运行中的被调试程序的 DAP 命令，声明了就表示支持热代码替换；
+  `event` 是其 `message` 在调试控制台里显示为进度的 DAP 事件；`changedField`、`errorField` 是响应体里已替换单元的列表和适配器在成功响应里报告的失败信息。
+- `features.stepFilters.argument`：适配器接收步进过滤器所用的启动参数名；用户配置里已经设置的同名参数保持不变。
+- `defaults.stepFilters`：用户没有配置过滤器时的默认值（`classNameFilters`、`skipSynthetics`、`skipStaticInitializers`、`skipConstructors`、`hideFilteredStackFrames`）。
+- 名字写错或使用本版本未定义的字段是 `plugin.manifest.invalid`；两者都不声明时行为与 `debugAdapters` 1、2 相同。完整字段和限制以契约的
+  [Adapter features and defaults](../contract/v1/README.md#adapter-features-and-defaults-debugadapters-3)为准。
+
+插件有后端（`backend` 2）时，可以由后端决定启动什么调试会话，会话仍由宿主拥有（进程、控制台、停止按钮、会话结束）。方法名前缀是 `lithe/host/`：
+
+| 方法 | API | 权限 | 用途 |
+| --- | --- | --- | --- |
+| `debug/start` | API-30 | `debug.start` | 在本插件自己声明的适配器上启动 `launch` 或 `attach` 会话，返回 `sessionID`；需要已声明的 `debugAdapters` 条目 |
+| `run/start` 的 `debug` 字段 | API-23 | `run.start` | 把一次宿主拥有的运行变成调试会话 |
+| `run/stop` | API-23 | `run.start` | 按 `sessionID`（或 `runID`）停止本插件启动的调试会话或运行 |
+
+- `debug/start` 的参数是 `context, label, adapter, request, configuration`。`adapter` 只能是本插件的适配器（本地 ID 或 `<插件 ID>/<本地 ID>`），
+  别的插件的适配器是 `plugin.host.notFound`；`request` 必须是该适配器声明过的；`configuration` 是不超过 256 KiB 的 JSON 对象，
+  作为 DAP 的 launch 或 attach 参数叠在适配器声明的默认值之上，`noDebug` 和以 `__` 开头的键属于宿主，会被拒绝。适配器本身照常声明 `debug.launch`（`attach` 还要 `debug.attach`）。
+- `run/start` 的 `debug` 是 `{configurationType, target}`。`target` 为 `{kind: "connection", port}` 时，进程在 `port` 上等调试器，宿主等它出现后挂接适配器；
+  为 `{kind: "launch"}` 时由适配器自己启动进程，程序、参数、目录和环境变量经 `targetBindings` 取自 `process`。
+  `process.executable` 只能是清单 `requiresTools` 列出的工具定义 ID，或插件包内的文件。运行结束时宿主发 `run/didExit` 通知。
+
+仅 macOS。官方 Node、Java、Rust SDK 还没有 `debug/start`、`run/start`、`run/stop` 的封装，可以先用 SDK 的通用宿主请求，以完整方法名调用，
+例如 Node SDK 的 `backend.host.request(method, params?)`，见 [Host services](../sdk/node/README.md#host-services)。
+
+细节见[调试适配器](../reference/domains/debug-adapters.md)和契约的
+[Run and debug sessions](../contract/v1/README.md#run-and-debug-sessions-protocol-version-3)。
+示例：[`debug-adapters/debug-adapter-features.plugin.json`](../contract/v1/fixtures/debug-adapters/debug-adapter-features.plugin.json)、
+[`debug-adapters/debug-start.json`](../contract/v1/fixtures/debug-adapters/debug-start.json)、
+[`run/run-start.json`](../contract/v1/fixtures/run/run-start.json)。
+
+### 7. 本地验证
 
 1. 对照契约示例 [`contract/v1/fixtures/debug-adapters/debug-adapter.plugin.json`](../contract/v1/fixtures/debug-adapters/debug-adapter.plugin.json)，并用[编辑器 Schema](../README.md#在编辑器里校验-pluginjson) 检查字段。
 2. [`contract/v1/fixtures/debug-adapters/debug-adapter-rejections.json`](../contract/v1/fixtures/debug-adapters/debug-adapter-rejections.json) 列出每种拒绝的稳定错误码、出错字段和报告它的层（`schema`、`coreManifest`、`corePlan`、`coreInstall`），写测试时可以直接对照。
 3. 在支持 API 4 的 Lithe 里安装插件，打开一个目标文件，设置断点并启动调试。适配器被拒绝请求时，Lithe 会显示适配器自己的解释，所以适配器返回的错误文字要写得让用户能看懂。
 4. 在设置页确认 `executable` 找到的路径被回显，再把它改成一个不存在的文件，确认得到的是错误而不是悄悄换文件。
 
-### 7. 安装后是否需要重启
+### 8. 安装后是否需要重启
 
 只贡献调试适配器（以及它声明的语言和设置）的插件，在支持热激活的 Lithe 里安装、更新、回退、卸载、启用、停用后**不需要重启**。是否免重启由宿主按它实际能在运行期登记和撤回的贡献类型决定，不是 `plugin.json` 里的字段，所以插件作者不需要也不能声明。带有其他贡献（语言服务器、构建系统、界面等）的插件仍然在重启后生效。
 
-### 8. 发布
+### 9. 发布
 
 调试适配器插件需要 API 4，只有支持 API 4 的 Lithe 才能安装。旧版 Lithe 在插件市场里会提示升级，而不是安装。
 
@@ -144,10 +181,10 @@ Lithe 的调试控制台有输入行和补全弹窗。补全来自适配器的 D
 - 稳定版支持插件需要的全部能力和协议后，把 Release 转为正式版，追踪器会自动提交后续版本的索引更新。
 - 发布后不要替换或删除资产；索引固定了它的 SHA-256。
 
-### 9. 当前边界
+### 10. 当前边界
 
 - 只有 macOS 宿主实现了调试适配器。
-- 宿主的调试入口对插件适配器只发起 `launch` 请求。`attach` 可以在清单里声明，目前只在构建提供者服务运行的连接调试（`buildProviders` 11）中由宿主选用；用户手动填写主机和端口的远程 attach 还没有宿主入口，不要依赖。
+- 宿主自己的调试入口对插件适配器只发起 `launch` 请求。`attach` 可以在清单里声明：宿主在构建提供者服务运行的连接调试（`buildProviders` 11）中选用它，插件后端也可以用 `debug/start` 或 `run/start` 的 `debug` 字段发起（见第 6 节）；用户手动填写主机和端口的远程 attach 还没有宿主入口，不要依赖。
 - 适配器声明是纯数据，没有自定义界面、没有宿主集成点；需要调试之外的能力（构建、测试、运行配置）请另用对应的贡献类型。
 
 ---
@@ -215,7 +252,7 @@ Plugins are not loaded into the Lithe process. The manifest is pure data: no res
 
 Key points:
 
-- `pluginAPIVersion` is `4`, and `requires` must list exactly the capabilities you use (`debugAdapters` is `1`).
+- `pluginAPIVersion` is `4`, and `requires` must list exactly the capabilities you use (`debugAdapters` is `1`, or `3` when you declare `features` or `defaults`; when the backend starts debug sessions, also list `backend` 2; see section 6).
 - Every adapter needs an `onDebug:<id>` activation event and the `debug.launch` permission. `debug.attach` is needed (and allowed) only when the adapter lists `attach`.
 - `selectors` decide on which targets Lithe picks this adapter automatically: `targetKinds` are target kinds and `languageIDs` are languages. Without `selectors`, the adapter can only be chosen explicitly by the user.
 - `languages[]` declares the languages the adapter serves. If another plugin already provides the language (for example Rust), your declaration only adds the ability to debug it and merges in the file extensions you declare; the language name, language ID, and language server stay the same, and installing the debugger does not restart a running language server.
@@ -231,6 +268,8 @@ Key points:
 | `{"launch": {"kind": "packaged", "path": …}}` | The adapter's license allows distribution and you can provide a build for each platform; the executable installs with the plugin package |
 | `{"launch": {"kind": "systemCommand", "commands": ["lldb-dap"]}}` | The adapter is already installed on the user's machine (for example with the Xcode command line tools); Lithe resolves the command name with its own tool discovery (PATH, project toolchains, user overrides), which on macOS also covers the Xcode toolchain |
 | `{"launch": {"kind": "runSelectedRuntime", "tool": "python"}}` | The adapter is a Python, Java, or Node.js program started with the runtime the user selected; this is the only use of `serverProcess` 2 |
+
+From `serverProcess` 4, `runSelectedRuntime.tool` is no longer limited to the three names above; it is a tool-definition ID listed in the top-level `requiresTools`, see [Tool references](../contract/v1/README.md#tool-references-serverprocess-4) in the contract.
 
 `launch.transport` is `stdio` or TCP (`tcpAnnounced`: the adapter prints its port in its output; `tcpPort`: a fixed port). TCP allows only loopback addresses.
 
@@ -274,18 +313,53 @@ Lithe's debug console has an input line and a completion popup. Completions come
 
 Declare at least one of the two. When the adapter completes live, do not copy its whole command set as well.
 
-### 6. Local verification
+### 6. Adapter behavior declarations and backend-started debugging (`debugAdapters` 3)
+
+A host never recognizes an adapter by its ID: what is specific to an adapter is written in the manifest, and the shared debug engine follows it. This needs `requires.debugAdapters` 3.
+
+- `features.hotCodeReplace`: `request` is the DAP command the host sends to have the adapter apply changed code to the running debuggee, and declaring it means the adapter supports hot code replace;
+  `event` is a DAP event whose `message` the Debug Console shows as progress; `changedField` and `errorField` are the response-body fields for the list of replaced units and for a failure the adapter reports in a successful response.
+- `features.stepFilters.argument`: the launch argument through which the adapter receives stepping filters; an argument the user's configuration already sets is kept.
+- `defaults.stepFilters`: the filters used when the user configured none (`classNameFilters`, `skipSynthetics`, `skipStaticInitializers`, `skipConstructors`, `hideFilteredStackFrames`).
+- A malformed name or a field this version does not define is `plugin.manifest.invalid`; declaring neither keeps the behavior of `debugAdapters` 1 and 2. For the full fields and limits, go by
+  [Adapter features and defaults](../contract/v1/README.md#adapter-features-and-defaults-debugadapters-3) in the contract.
+
+A plugin with a backend (`backend` 2) can decide which debug session to start, while the host still owns the session (the process, the console, the Stop button, and the end of the session). The method prefix is `lithe/host/`:
+
+| Method | API | Permission | Purpose |
+| --- | --- | --- | --- |
+| `debug/start` | API-30 | `debug.start` | Start a `launch` or `attach` session on an adapter the plugin declares itself and return a `sessionID`; needs a declared `debugAdapters` entry |
+| `debug` field of `run/start` | API-23 | `run.start` | Turn a host-owned run into a debug session |
+| `run/stop` | API-23 | `run.start` | Stop a debug session (by `sessionID`) or a run (by `runID`) the plugin started |
+
+- `debug/start` takes `context, label, adapter, request, configuration`. `adapter` must be one of the plugin's own adapters (its local ID or `<plugin ID>/<local ID>`);
+  an adapter of another plugin is `plugin.host.notFound`. `request` must be one the adapter declares. `configuration` is a JSON object of at most 256 KiB that is passed to the adapter as the DAP launch or attach arguments
+  on top of its declared defaults; `noDebug` and keys starting with `__` belong to the host and are refused. The adapter itself still declares `debug.launch` (plus `debug.attach` for `attach`).
+- The `debug` field of `run/start` is `{configurationType, target}`. With `target` as `{kind: "connection", port}`, the process listens for a debugger on `port` and the host waits for it and attaches the adapter;
+  with `{kind: "launch"}`, the adapter starts the process itself and takes the program, arguments, directory, and environment from `process` through its `targetBindings`.
+  `process.executable` can only be a tool-definition ID listed in the manifest's `requiresTools`, or a file inside the plugin package. The host sends the `run/didExit` notification when the run ends.
+
+macOS only. The official Node, Java, and Rust SDKs do not wrap `debug/start`, `run/start`, or `run/stop` yet; until they do, call them with the SDK's generic host request using the full method name,
+for example `backend.host.request(method, params?)` in the Node SDK, see [Host services](../sdk/node/README.md#host-services).
+
+For details, see [Debug adapters](../reference/domains/debug-adapters.md) and
+[Run and debug sessions](../contract/v1/README.md#run-and-debug-sessions-protocol-version-3) in the contract.
+Examples: [`debug-adapters/debug-adapter-features.plugin.json`](../contract/v1/fixtures/debug-adapters/debug-adapter-features.plugin.json),
+[`debug-adapters/debug-start.json`](../contract/v1/fixtures/debug-adapters/debug-start.json), and
+[`run/run-start.json`](../contract/v1/fixtures/run/run-start.json).
+
+### 7. Local verification
 
 1. Compare with the contract example [`contract/v1/fixtures/debug-adapters/debug-adapter.plugin.json`](../contract/v1/fixtures/debug-adapters/debug-adapter.plugin.json) and check fields with the [editor schema](../README.md#validate-pluginjson-in-your-editor).
 2. [`contract/v1/fixtures/debug-adapters/debug-adapter-rejections.json`](../contract/v1/fixtures/debug-adapters/debug-adapter-rejections.json) lists, for each rejection, the stable error code, the offending field, and the layer that reports it (`schema`, `coreManifest`, `corePlan`, `coreInstall`); compare against it directly when writing tests.
 3. Install the plugin in a Lithe that supports API 4, open a target file, set a breakpoint, and start debugging. When the adapter rejects a request, Lithe shows the adapter's own explanation, so write the adapter's error text for users to understand.
 4. On the settings page, confirm that the path `executable` found is shown, then change it to a file that does not exist and confirm you get an error rather than a quietly swapped file.
 
-### 7. Whether installing needs a restart
+### 8. Whether installing needs a restart
 
 A plugin that contributes only debug adapters (and the languages and settings it declares) needs **no restart** after install, update, rollback, uninstall, enable, or disable in a Lithe that supports hot activation. The host decides this from the contribution types it can actually register and withdraw at run time; it is not a `plugin.json` field, so plugin authors neither need to nor can declare it. Plugins with other contributions (language servers, build systems, UI, and so on) still take effect after a restart.
 
-### 8. Publishing
+### 9. Publishing
 
 A debug adapter plugin needs API 4 and installs only on a Lithe that supports API 4. Older Lithe versions show an update prompt in the marketplace instead of installing.
 
@@ -293,8 +367,8 @@ A debug adapter plugin needs API 4 and installs only on a Lithe that supports AP
 - Once a stable release supports every capability and protocol the plugin needs, convert the Release to a full release, and the tracker submits index updates for later versions automatically.
 - Do not replace or delete assets after publishing; the index pins their SHA-256.
 
-### 9. Current limits
+### 10. Current limits
 
 - Only the macOS host implements debug adapters.
-- The host's debug entry issues only `launch` requests to plugin adapters. `attach` can be declared in the manifest; today the host chooses it only for connection debugging of build-provider service runs (`buildProviders` 11). Remote attach with a user-entered host and port has no host entry yet, so do not rely on it.
+- The host's own debug entry issues only `launch` requests to plugin adapters. `attach` can be declared in the manifest: the host chooses it for connection debugging of build-provider service runs (`buildProviders` 11), and a plugin backend can start it with `debug/start` or the `debug` field of `run/start` (see section 6). Remote attach with a user-entered host and port has no host entry yet, so do not rely on it.
 - An adapter declaration is pure data, with no custom UI and no host integration points; for capabilities beyond debugging (build, test, run configurations), use the matching contribution types.
