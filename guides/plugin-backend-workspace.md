@@ -13,7 +13,7 @@
 > 只提供 `backend: [1]` 的旧宿主会以 `plugin.api.unsupported` 拒绝 `backend` 2 的插件，所以老版本 Lithe
 > 不会启动一个期待工作区上下文的进程。三个官方 SDK 都实现了协议 3：Node.js SDK 0.2.0、Java SDK 0.2.0 和 Rust SDK 0.1.0 起
 > （见各自 README 的 Host services：[Node.js](../sdk/node/README.md#host-services)、[Java](../sdk/java/README.md#host-services)、
-> [Rust](../sdk/rust/README.md#host-services)）。宿主还支持函数协议 4（跨插件调用，见第 10 节），三个官方 SDK 目前只实现到协议 3。
+> [Rust](../sdk/rust/README.md#host-services)）。函数协议 4（跨插件调用，见第 10 节）由 Node.js SDK 0.4.0、Java SDK 0.4.0 和 Rust SDK 0.3.0 起实现。
 > 用其他语言或更早的 SDK 需要自己处理下文的请求和通知。
 > 各宿主支持到哪一版，见按最新 preview 核对的[版本对照](../reference/capabilities-and-versions.md)。
 
@@ -269,7 +269,37 @@
 - 只协商到 3 的后端照常工作。它不能调用 `functions/*`；它导出的函数仍可被中转调用，但收不到 `caller`，要按调用方判断就必须协商 4。
 - 导出或调用跨插件函数，清单要声明 `pluginFunctions`：`pluginAPIVersion` 不低于 3，`requires` 里写 `pluginFunctions: 1`、`backend: 2`、`serverProcess: 1`。
   它不授予任何清单权限；清单声明了导出，后端仍要用 `lithe/function/register` 注册该函数。
-- 目前只有 macOS 宿主实现；三个官方 SDK 还只协商到协议 3，没有 `functions/*` 的封装，也读不到 `caller`。
+- 目前只有 macOS 宿主实现。
+
+三个官方 SDK 都协商到协议 4，封装了 `functions/providers`、`functions/invoke`，被调函数能读到 `caller`；
+协商到 3 及以下时，这两个方法在 SDK 本地以 `plugin.host.unavailable`（-32601）失败，不会发给宿主。
+`parentOperationID` 不传时，SDK 取正在处理的 `lithe/function/invoke` 的 `operationID`。
+下面以 Node.js 为例，[Java](../sdk/java/README.md) 和 [Rust](../sdk/rust/README.md) 的对应方法见各自 README：
+
+```js
+// Caller. The manifest declares pluginFunctions.calls for document.format.
+backend.function('format.current', async (params, context) => {
+  const workspace = context.workspaceContext;
+  if (!workspace || !await context.host.supports('lithe/host/functions/invoke')) {
+    throw new PluginError('format.unavailable', 'Cross-plugin calls are unavailable.');
+  }
+  const { providers } = await context.host.functions.providers('document.format');
+  if (providers.length === 0) return null;
+  const { value } = await context.host.functions.invoke(workspace, {
+    pluginID: providers[0].pluginID,
+    functionID: 'document.format',
+    params: { path: params.path },
+    timeoutMilliseconds: 30000,
+  });
+  return value;
+});
+
+// Provider. `caller` is { pluginID } for a relayed call and null when the host started the call.
+backend.function('document.format', async (params, context) => {
+  const callerID = context.caller?.pluginID ?? null;
+  return formatDocument(params, callerID);
+});
+```
 
 ### 11. 验证
 
@@ -293,7 +323,7 @@ The [contract](../contract/v1/README.md#backend-2-workspace-contexts) is normati
 > An older host that offers only `backend: [1]` refuses a `backend` 2 plugin with `plugin.api.unsupported`, so an older Lithe
 > never starts a process that expects workspace contexts. All three official SDKs implement protocol 3 from Node.js SDK 0.2.0, Java SDK 0.2.0, and Rust SDK 0.1.0
 > (see Host services in each README: [Node.js](../sdk/node/README.md#host-services), [Java](../sdk/java/README.md#host-services),
-> [Rust](../sdk/rust/README.md#host-services)). The host also supports function protocol 4 (cross-plugin calls, see section 10); the three official SDKs implement only up to protocol 3 so far.
+> [Rust](../sdk/rust/README.md#host-services)). Function protocol 4 (cross-plugin calls, see section 10) is implemented from Node.js SDK 0.4.0, Java SDK 0.4.0, and Rust SDK 0.3.0.
 > With another language or an earlier SDK, handle the requests and notifications below yourself.
 > For how far each host supports each version, see the [version tables](../reference/capabilities-and-versions.md), which track the latest preview.
 
@@ -549,7 +579,37 @@ What to remember:
 - A backend that negotiated only 3 keeps working as before. It cannot call `functions/*`; the functions it exports can still be called through the relay, but it never receives `caller`, so a provider that decides by who is asking must negotiate 4.
 - To export or call cross-plugin functions, the manifest declares `pluginFunctions`: `pluginAPIVersion` 3 or later, with `pluginFunctions: 1`, `backend: 2`, and `serverProcess: 1` in `requires`.
   It grants no manifest permission, and declaring an export does not register it: the backend still registers the function with `lithe/function/register`.
-- Only the macOS host implements it so far; the three official SDKs still negotiate only up to protocol 3, have no wrapper for `functions/*`, and do not expose `caller`.
+- Only the macOS host implements it so far.
+
+All three official SDKs negotiate protocol 4, wrap `functions/providers` and `functions/invoke`, and expose `caller` to the called function;
+when version 3 or lower is negotiated, both methods fail locally in the SDK with `plugin.host.unavailable` (-32601) and are never sent to the host.
+When `parentOperationID` is omitted, the SDK uses the `operationID` of the `lithe/function/invoke` being handled.
+The example below uses Node.js; for the matching methods in [Java](../sdk/java/README.md) and [Rust](../sdk/rust/README.md), see their READMEs:
+
+```js
+// Caller. The manifest declares pluginFunctions.calls for document.format.
+backend.function('format.current', async (params, context) => {
+  const workspace = context.workspaceContext;
+  if (!workspace || !await context.host.supports('lithe/host/functions/invoke')) {
+    throw new PluginError('format.unavailable', 'Cross-plugin calls are unavailable.');
+  }
+  const { providers } = await context.host.functions.providers('document.format');
+  if (providers.length === 0) return null;
+  const { value } = await context.host.functions.invoke(workspace, {
+    pluginID: providers[0].pluginID,
+    functionID: 'document.format',
+    params: { path: params.path },
+    timeoutMilliseconds: 30000,
+  });
+  return value;
+});
+
+// Provider. `caller` is { pluginID } for a relayed call and null when the host started the call.
+backend.function('document.format', async (params, context) => {
+  const callerID = context.caller?.pluginID ?? null;
+  return formatDocument(params, callerID);
+});
+```
 
 ### 11. Verification
 
