@@ -19,16 +19,16 @@ on stdio and implements Lithe's backend protocols from
 - **`litheVcs` 1**: typed `lithe/vcs/*` requests, for a plugin's
   `vcsProviders` entry, from the
   [VCS provider contract](https://github.com/1lck/Lithe-IDEA/blob/preview/shared/contracts/vcs-provider-v1.md).
-- **`litheKeymapImport` 1** (unreleased): independently negotiated shortcut
+- **`litheKeymapImport` 1** (from 0.3.0): independently negotiated shortcut
   import providers reading only explicitly selected source snapshots.
 
 The SDK owns the wire format, negotiation, cancellation, process cleanup, and
 error mapping. Your code supplies only handlers. Node 20.3 or newer is
 required; declare it as the runtime's `minimumVersion`.
 
-## Shortcut import providers (unreleased)
+## Shortcut import providers
 
-Declare `backend.keymapImportProvider(id, handler)` before listening. Its
+Available from SDK 0.3.0. Declare `backend.keymapImportProvider(id, handler)` before listening. Its
 handler receives a snapshot with `providerID`, `snapshotID`, `listInputs()`
 and `readChunk(fileID, offset, maximumBytes)`, plus the normal call context.
 Paths returned by `listInputs` are relative labels; reads use opaque file IDs.
@@ -115,7 +115,9 @@ real Core session.
 ## Getting the SDK
 
 Releases are published on [this repository's Releases page](https://github.com/Lithe-IDEA/lithe-plugin-docs/releases) and
-tagged `sdk-node-v<version>`. A release ships
+tagged `sdk-node-v<version>`. Version 0.3.0 adds shortcut import providers, native terminals, and typed
+diagnostics through `litheLogging` 1, and removes the free-text `log` API.
+A release ships
 `lithe-plugin-sdk-node-<version>.tgz` and a `.sha256` file holding the
 archive's SHA-256. The SDK is not published to the npm registry. Use it like
 this:
@@ -132,7 +134,9 @@ package. The SDK has no dependencies.
 
 ## Logging
 
-The new SDK requires `experimental.litheLogging` version 1 at initialization.
+From version 0.3.0, the SDK requires `experimental.litheLogging` version 1
+at initialization and refuses a host that does not offer it, so a backend
+built on 0.3.0 or later starts only in a Lithe release that offers it.
 See [plugin logging](../../guides/plugin-logging.md) for the typed diagnostics
 API, host-owned catalog, exact levels, operation correlation and `${logDir}`.
 Use `diagnostics.degraded/recovered` (Rust: `diagnostics().degraded/recovered`)
@@ -361,9 +365,9 @@ The two native workflow samples demonstrate independent producer and consumer
 backends in the Core end-to-end tests. Their engine is fictional; this does not
 migrate Maven, JDT, LLDB or existing plugin business logic.
 
-## Native terminal API (unreleased)
+## Native terminal API
 
-The SDK includes wrappers for plugin-owned native terminal create/show/close,
+From version 0.3.0, the SDK includes wrappers for plugin-owned native terminal create/show/close,
 reopen with bounded display history, disposal and exit subscriptions. These
 methods are discovered within protocol 3; they require a newer host and
 `terminal.create`, not a new protocol version. See
