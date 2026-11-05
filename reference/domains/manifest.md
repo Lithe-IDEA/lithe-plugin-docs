@@ -19,21 +19,28 @@
 | 清单字段 | 最低级别 | `requires` 里的能力 | 功能页 |
 | --- | --- | --- | --- |
 | `languages` | 1 | `languages` | [语言](languages.md) |
-| `languageServers` | 1 | `languageServers`、`serverProcess` | [语言](languages.md) |
+| `languageServers` | 1 | `languageServers`（1–3）、`serverProcess`（1–4） | [语言](languages.md) |
+| `languageServers[].hostIntegration` | 2 | 同 `languageServers`；所有插件都可以声明 | [语言](languages.md) |
+| `requiresTools` | 3 | `serverProcess` 4；当且仅当 `requires.serverProcess` 为 4 时存在 | [工具链](toolchains.md) |
 | `executionProviders` | 1 | `executionProviders` | [语言](languages.md) |
+| `outputLinkMatchers` | 3 | `outputLinkMatchers`；匹配器带 `resolve` 时加 `backend` 2 | [语言](languages.md) |
 | `settings`、`settingActions` | 2 | `settings` | [设置](settings.md) |
 | `ui` | 2 | `ui` | [界面](ui.md) |
 | `buildSystems` | 3 | `buildSystems`，可选 `executableResolution`、`buildModelInputs` | [声明式构建](build-systems.md) |
+| `buildSystems` 里的 `hostIntegration`（模型、测试结果、依赖来源） | 3 | 同 `buildSystems`；只限官方插件，目前只有 `maven` | [声明式构建](build-systems.md) |
 | `buildSystems[].provider` | 3 | `buildProviders`，自有进程时加 `serverProcess` | [构建提供者](build-providers.md) |
 | `vcsProviders` | 3 | `vcsProviders`、`serverProcess` | [VCS](vcs.md) |
 | `backend` | 3 | `backend`、`serverProcess` | [插件后端](backend.md) |
+| `pluginFunctions` | 3 | `pluginFunctions`、`backend` 2、`serverProcess` 1；不授予权限 | [插件后端](backend.md) |
 | `projectGenerators` | 3 | `projectGenerators` | [项目生成器](project-generators.md) |
 | `toolDefinitions`、`toolchainProviders` | 3 | `toolDefinitions`、`toolchainProviders`、`executableResolution` | [工具链](toolchains.md) |
 | `keymapImportProviders` | 3 | `keymapImportProviders`、`backend`、`serverProcess` | [快捷键导入](keymap-import.md) |
 | `vendor.bundledSignatureRequirement` | 3 | `packageTrust` | [包信任](package-trust.md) |
-| `debugAdapters` | 4 | `debugAdapters`，`runSelectedRuntime` 需要 `serverProcess` 2 | [调试适配器](debug-adapters.md) |
+| `debugAdapters` | 4 | `debugAdapters`（1–3），`runSelectedRuntime` 需要 `serverProcess` 2 | [调试适配器](debug-adapters.md) |
 
-级别 1、2 的清单不写 `requires`；级别 3 起必须写，而且要**恰好**列出用到的能力。
+级别 1、2 的清单不写 `requires`；级别 3 起必须写，而且要**恰好**列出用到的能力。括号里的范围是契约现有的版本，各版本新增什么见[版本对照](../capabilities-and-versions.md#能力版本requires)。
+
+`hostIntegration` 在两处是不同的声明：语言服务器的 `hostIntegration` 对所有插件开放，只读取声明插件自己包里的资源，不授予额外权限（见[语言](languages.md)）；构建系统的 `hostIntegration` 仍只限官方插件，目前只有 `maven`（见[声明式构建](build-systems.md)）。宿主没有实现的 ID 一律是 `plugin.integration.unsupported`。
 
 ### 权限与激活事件
 
@@ -49,6 +56,10 @@
 | `backend.launch` | 声明了 `backend` | [插件后端](backend.md) |
 | `keymaps.provide`、`keymaps.readSelectedSources` | `keymapImportProviders` 不为空 | [快捷键导入](keymap-import.md) |
 | `toolchains.provide` | 声明了 `toolchainProviders` | [工具链](toolchains.md) |
+| `run.start` | 后端启动和停止由宿主持有的 Run 会话（`run/start`、`run/stop`，通知 `run/didExit`）；需要 `backend` 2 | [插件后端](backend.md) |
+| `debug.start` | 后端在自己的调试适配器上启动调试会话（`debug/start`）；需要 `backend` 2 和已声明的 `debugAdapters` | [插件后端](backend.md)、[调试适配器](debug-adapters.md) |
+| `languageServer.request` | `languageServers` 3 的服务器列出了 `requestMethods` 或 `forwardNotifications`，而且只有这时才可声明；需要 `backend` 2。只授予对本插件自己服务器的 `languageServer/*` 宿主方法和两个通知 | [语言](languages.md) |
+| `documents.contentProvider` | 后端注册只读文档内容提供者；需要 `backend` 2。只授予 `documents/registerContentProvider`，不授予读取或编辑文档 | [语言](languages.md) |
 | `credentials.store`、`workspace.*`、`documents.read`、`editor.*`、`preview.open`、`browser.open`、`window.messages`、`terminal.create` | 后端调用对应的宿主方法 | [API 总表](../api-catalog.md#已公开的宿主方法) |
 
 | 激活事件 | 含义 |
@@ -81,7 +92,7 @@
 | 文件 | 内容 |
 | --- | --- |
 | [`manifest/hello-lithe.plugin.json`](../../contract/v1/fixtures/manifest/hello-lithe.plugin.json) | 最小的级别 2 界面插件：一个工具窗口、一个命令。ID 在保留的测试命名空间里，不能直接发布 |
-| [`manifest/invalid-manifests.json`](../../contract/v1/fixtures/manifest/invalid-manifests.json) | 174 个拒绝用例，覆盖所有功能。每个用例给某个合法 fixture 打补丁，并写明稳定的拒绝码和字段 |
+| [`manifest/invalid-manifests.json`](../../contract/v1/fixtures/manifest/invalid-manifests.json) | 225 个拒绝用例，覆盖所有功能。每个用例给某个合法 fixture 打补丁，并写明稳定的拒绝码和字段 |
 
 ### 相关指南
 
@@ -107,21 +118,28 @@ Every plugin package has a `plugin.json` at its root. It says who the plugin is,
 | Manifest field | Lowest level | Capabilities in `requires` | Domain page |
 | --- | --- | --- | --- |
 | `languages` | 1 | `languages` | [Languages](languages.md) |
-| `languageServers` | 1 | `languageServers`, `serverProcess` | [Languages](languages.md) |
+| `languageServers` | 1 | `languageServers` (1–3), `serverProcess` (1–4) | [Languages](languages.md) |
+| `languageServers[].hostIntegration` | 2 | The same as `languageServers`; any plugin may declare one | [Languages](languages.md) |
+| `requiresTools` | 3 | `serverProcess` 4; present exactly when `requires.serverProcess` is 4 | [Toolchains](toolchains.md) |
 | `executionProviders` | 1 | `executionProviders` | [Languages](languages.md) |
+| `outputLinkMatchers` | 3 | `outputLinkMatchers`, plus `backend` 2 when a matcher has `resolve` | [Languages](languages.md) |
 | `settings`, `settingActions` | 2 | `settings` | [Settings](settings.md) |
 | `ui` | 2 | `ui` | [UI](ui.md) |
 | `buildSystems` | 3 | `buildSystems`, optionally `executableResolution` and `buildModelInputs` | [Declarative build systems](build-systems.md) |
+| `hostIntegration` inside `buildSystems` (model, test-result, or dependency source) | 3 | The same as `buildSystems`; official plugins only, and only `maven` exists | [Declarative build systems](build-systems.md) |
 | `buildSystems[].provider` | 3 | `buildProviders`, plus `serverProcess` for an own process | [Build providers](build-providers.md) |
 | `vcsProviders` | 3 | `vcsProviders`, `serverProcess` | [VCS](vcs.md) |
 | `backend` | 3 | `backend`, `serverProcess` | [Plugin backend](backend.md) |
+| `pluginFunctions` | 3 | `pluginFunctions`, `backend` 2, `serverProcess` 1; grants no permission | [Plugin backend](backend.md) |
 | `projectGenerators` | 3 | `projectGenerators` | [Project generators](project-generators.md) |
 | `toolDefinitions`, `toolchainProviders` | 3 | `toolDefinitions`, `toolchainProviders`, `executableResolution` | [Toolchains](toolchains.md) |
 | `keymapImportProviders` | 3 | `keymapImportProviders`, `backend`, `serverProcess` | [Shortcut import](keymap-import.md) |
 | `vendor.bundledSignatureRequirement` | 3 | `packageTrust` | [Package trust](package-trust.md) |
-| `debugAdapters` | 4 | `debugAdapters`; `runSelectedRuntime` needs `serverProcess` 2 | [Debug adapters](debug-adapters.md) |
+| `debugAdapters` | 4 | `debugAdapters` (1–3); `runSelectedRuntime` needs `serverProcess` 2 | [Debug adapters](debug-adapters.md) |
 
-Level 1 and 2 manifests have no `requires`. From level 3 on it is required and must list **exactly** the capabilities the manifest uses.
+Level 1 and 2 manifests have no `requires`. From level 3 on it is required and must list **exactly** the capabilities the manifest uses. The ranges in parentheses are the versions the contract has today; what each version adds is in the [versions](../capabilities-and-versions.md#capability-versions-requires) page.
+
+`hostIntegration` is two different declarations. A language server's `hostIntegration` is open to every plugin; it reads only resources inside the declaring plugin's own package and grants no extra permission (see [Languages](languages.md)). A build system's `hostIntegration` is still limited to official plugins, and only `maven` exists (see [Declarative build systems](build-systems.md)). An ID the host does not implement is always `plugin.integration.unsupported`.
 
 ### Permissions and activation events
 
@@ -137,6 +155,10 @@ Level 1 and 2 manifests have no `requires`. From level 3 on it is required and m
 | `backend.launch` | `backend` is declared | [Plugin backend](backend.md) |
 | `keymaps.provide`, `keymaps.readSelectedSources` | `keymapImportProviders` is not empty | [Shortcut import](keymap-import.md) |
 | `toolchains.provide` | `toolchainProviders` is declared | [Toolchains](toolchains.md) |
+| `run.start` | the backend starts and stops host-owned Run sessions (`run/start`, `run/stop`, notification `run/didExit`); needs `backend` 2 | [Plugin backend](backend.md) |
+| `debug.start` | the backend starts a debug session on one of its own adapters (`debug/start`); needs `backend` 2 and a declared `debugAdapters` entry | [Plugin backend](backend.md), [Debug adapters](debug-adapters.md) |
+| `languageServer.request` | a `languageServers` 3 server lists `requestMethods` or `forwardNotifications`, and only then; needs `backend` 2. Grants the `languageServer/*` host methods for the plugin's own servers and their two notifications, nothing else | [Languages](languages.md) |
+| `documents.contentProvider` | the backend registers a read-only document content provider; needs `backend` 2. Grants `documents/registerContentProvider` only, not reading or editing documents | [Languages](languages.md) |
 | `credentials.store`, `workspace.*`, `documents.read`, `editor.*`, `preview.open`, `browser.open`, `window.messages`, `terminal.create` | the backend calls the matching host methods | [API catalog](../api-catalog.md#public-host-methods) |
 
 | Activation event | Meaning |
@@ -169,7 +191,7 @@ Each provider needs its event and each event needs a provider. There is no event
 | File | Content |
 | --- | --- |
 | [`manifest/hello-lithe.plugin.json`](../../contract/v1/fixtures/manifest/hello-lithe.plugin.json) | The smallest level 2 UI plugin: one tool window and one command. Its ID is in the reserved test namespace and cannot be published as is |
-| [`manifest/invalid-manifests.json`](../../contract/v1/fixtures/manifest/invalid-manifests.json) | 174 rejection cases across every domain. Each patches a valid fixture and names the stable rejection code and field |
+| [`manifest/invalid-manifests.json`](../../contract/v1/fixtures/manifest/invalid-manifests.json) | 225 rejection cases across every domain. Each patches a valid fixture and names the stable rejection code and field |
 
 ### Related guides
 

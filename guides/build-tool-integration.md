@@ -23,7 +23,7 @@ Windows 不支持。各能力的版本和宿主对照见[构建系统](../refere
 | 补全、跳转、诊断 | API 1/2 `languageServers` | 按 LSP 提供能力，不自动声明编译和测试 |
 | 运行文件或固定项目命令 | `executionProviders[].run` | 命令与 argv 模板，工作目录为工作区根；不提供通用目标选择或构建模型 |
 | 运行整个工程、文件所在范围或指定测试 | `executionProviders[].test` | 测试项目标记、文件发现和命令规划；不是完整语义测试发现与结构化结果协议 |
-| 官方 Java 项目的运行/测试/调试 | 官方 Java 插件的 API 2 `hostIntegration: jdt` | 宿主已有 JDT 集成，不能复制为社区通用扩展点 |
+| Java 项目的运行/测试/调试 | 任何插件都可以声明 API 2 `languageServers[].hostIntegration: jdt` | 使用宿主已有的 JDT 集成；集成只读插件自己包里的资源，交给同一插件启动的语言服务器，不额外授予权限；宿主未实现的集成 ID 返回 `plugin.integration.unsupported`，见[契约](../contract/v1/README.md#host-integrations-api-2) |
 | 通用 Build 工具窗口、工程模型、任务、依赖与同步 | API 3 `buildSystems`；模型需要程序计算时再加 `buildProviders` | Core 和 macOS 已实现；官方 Gradle、Maven、Cargo 插件已按 API 3 发布；Windows 在安装前拒绝构建插件 |
 
 当需求只是 `lua <当前文件>`、`go test ./...` 这类固定命令，可以使用现有执行提供者。
@@ -178,9 +178,17 @@ Core 的计划接口本身不启动进程、不监视文件、不持久化选择
 不要把内部 dispatcher 命令写成社区插件可以调用的宿主脚本 API。
 
 `languageServers[].hostIntegration` 的 JDT 集成（API 2）与构建系统 `model.source: "hostIntegration"`
-是不同接口，都只限官方插件：语言服务器侧只有 `jdt`，构建侧目前只有 `maven`。
-它们都不是社区作者任意命名即可扩展的机制；不要复制官方 ID 或修改 `vendor` 来绕过限制。
-社区构建插件用 `static`、`command` 或 `provider` 模型。
+是不同接口，开放范围也不同：
+
+- 语言服务器侧对所有插件开放。任何插件都可以声明宿主已实现的集成 ID（目前语言服务器侧有 `jdt`）；
+  集成只读取声明插件自己包里的资源，交给同一插件启动的服务器或辅助进程，不额外授予权限。
+  宿主未实现的 ID 返回 `plugin.integration.unsupported`，见
+  [契约](../contract/v1/README.md#host-integrations-api-2)。
+- 构建系统侧仍只限官方插件，目前只有 `maven`；官方命名空间以外的插件请求它同样得到
+  `plugin.integration.unsupported`。不要复制官方 ID 或修改 `vendor` 来绕过这个限制。
+  社区构建插件用 `static`、`command` 或 `provider` 模型。
+
+两侧都不是作者自己命名就能新增的机制：集成 ID 必须是宿主已经实现的。
 
 ### 6. 验证完整工作流
 
@@ -231,7 +239,7 @@ Before publishing, still confirm that the target host version supports every cap
 | Completion, navigation, diagnostics | API 1/2 `languageServers` | Features come from LSP; compile and test are not declared automatically |
 | Run a file or a fixed project command | `executionProviders[].run` | A command and argv template; the working directory is the workspace root; no general target selection or build model |
 | Run the whole project, a file's scope, or a named test | `executionProviders[].test` | Test-project markers, file discovery, and command planning; not a full semantic test-discovery or structured-results protocol |
-| Run, test, and debug official Java projects | The official Java plugin's API 2 `hostIntegration: jdt` | The host already has the JDT integration; it cannot be copied as a general community extension point |
+| Run, test, and debug Java projects | Any plugin may declare API 2 `languageServers[].hostIntegration: jdt` | Uses the host's existing JDT integration; the integration reads only resources inside the plugin's own package and hands them to the language server that same plugin starts, and grants no extra permission; an integration ID the host does not implement returns `plugin.integration.unsupported`; see the [contract](../contract/v1/README.md#host-integrations-api-2) |
 | A general Build tool window, project model, tasks, dependencies, and sync | API 3 `buildSystems`, plus `buildProviders` when a program must compute the model | Implemented in Core and macOS; the official Gradle, Maven, and Cargo plugins are published at API 3; Windows rejects build plugins before install |
 
 When all you need is a fixed command such as `lua <current file>` or `go test ./...`, an
@@ -398,10 +406,19 @@ you still have to accept it in a real host.
 Do not present internal dispatcher commands as a host scripting API that community plugins can call.
 
 The JDT integration in `languageServers[].hostIntegration` (API 2) and the build-system
-`model.source: "hostIntegration"` are different interfaces, and both are limited to official plugins:
-the language-server side has only `jdt`, and the build side currently has only `maven`.
-Neither is a mechanism community authors can extend by picking a name; do not copy an official ID
-or change `vendor` to get around the limit. Community build plugins use the `static`, `command`, or `provider` models.
+`model.source: "hostIntegration"` are different interfaces, and they are open to different plugins:
+
+- The language-server side is open to every plugin. Any plugin may declare an integration ID the host
+  already implements (the language-server side currently has `jdt`); the integration reads only
+  resources inside the declaring plugin's own package and hands them to the server or helper process
+  that same plugin starts, and grants no extra permission. An ID the host does not implement returns
+  `plugin.integration.unsupported`; see the [contract](../contract/v1/README.md#host-integrations-api-2).
+- The build-system side is still limited to official plugins, and currently has only `maven`; a plugin
+  outside the official namespace that asks for it also gets `plugin.integration.unsupported`.
+  Do not copy an official ID or change `vendor` to get around this limit.
+  Community build plugins use the `static`, `command`, or `provider` models.
+
+Neither side lets an author add an integration by picking a name: the ID must be one the host already implements.
 
 ### 6. Verify the complete workflow
 

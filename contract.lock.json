@@ -3,12 +3,12 @@
   "source": {
     "repository": "https://github.com/1lck/Lithe-IDEA",
     "directory": "shared/contracts/plugins/v1",
-    "revision": "c5c68126bdf1d203f0c1aeb056a053482b1f6d2e"
+    "revision": "22c14a96b3e6a8152686e2abdd6cb075e2849365"
   },
   "files": [
     {
       "path": "README.md",
-      "sha256": "901a4bf10b6ac207aa6c6e24dd6046dcc0d071aa40331d252aa7050208cf4991"
+      "sha256": "76f1ba3324ea001cd8ac2cee9bc0aac0126b647bc5fd5a8a5167cfbdf5b2c056"
     },
     {
       "path": "fixtures/backend/backend-workspace.plugin.json",
@@ -24,7 +24,15 @@
     },
     {
       "path": "fixtures/backend/function-protocol.json",
-      "sha256": "4341a2145d495431f4017ae2aed95214c512c14c5efb866c5a1178912c66006b"
+      "sha256": "08742d14152975c3e08c7b48f5d98a19f3a6ae6bf8bd22b6a5ae2edf2fa46b17"
+    },
+    {
+      "path": "fixtures/backend/plugin-functions-caller.plugin.json",
+      "sha256": "cde349f0408a44971214fde930cd83144236684c3dc85b96a53a7389cd98da72"
+    },
+    {
+      "path": "fixtures/backend/plugin-functions-exporter.plugin.json",
+      "sha256": "5383087ef74b27cd8225683a50091ebff4f0be197ffc1cc84b58f6d18237b860"
     },
     {
       "path": "fixtures/backend/plugin-logging.json",
@@ -155,6 +163,10 @@
       "sha256": "4cf0e02549ea24f30d245adb423dffddc0a51fba1c835fae600dc89468d23c3d"
     },
     {
+      "path": "fixtures/debug-adapters/debug-adapter-features.plugin.json",
+      "sha256": "10bbe0e5bd7e2e983d0019dcc81b3ff134621e7245a03c51bff6d8fec3b113ba"
+    },
+    {
       "path": "fixtures/debug-adapters/debug-adapter-language-server.plugin.json",
       "sha256": "c29d1e94a69840a63317e5d4b15a0a9cd8267a980fa2b21c37528bc08bb3ee96"
     },
@@ -169,6 +181,10 @@
     {
       "path": "fixtures/debug-adapters/debug-adapter.plugin.json",
       "sha256": "81038febbde31e0554451789106f8fc255e87038c8185602ce0c7e918f90ff78"
+    },
+    {
+      "path": "fixtures/debug-adapters/debug-start.json",
+      "sha256": "49073e0435fec52ca51e8c7d9799849bb31d1736908feb48dff2bea82b906ee1"
     },
     {
       "path": "fixtures/editor/editor-actions-v2.json",
@@ -211,6 +227,14 @@
       "sha256": "fd0e27a4cb3642c2094c70e4124f95c55711e0228fd77bfddc869d02fac3d7d6"
     },
     {
+      "path": "fixtures/languages/language-server-backend-launch.plugin.json",
+      "sha256": "a8abf56ce1f2f25cb966fdfa97f1d7fc2b53e443cfb3562382d7401c6867a07c"
+    },
+    {
+      "path": "fixtures/languages/language-server-launch-resolution.json",
+      "sha256": "891e0cb18cf2f7f37a36d91c0b59f834b1342795971ab136393d448ff8b34292"
+    },
+    {
       "path": "fixtures/languages/language-system-command.plugin.json",
       "sha256": "4dbdd38bbe23003da61210296f986d94313b23a98be4d97b1a628570c4375501"
     },
@@ -228,7 +252,7 @@
     },
     {
       "path": "fixtures/manifest/invalid-manifests.json",
-      "sha256": "a5de588870e4599e2d0631f1cec3aefe81ad647b0a1930a1037d749e9848114b"
+      "sha256": "1998fdb5a583043644857702652b7f776ed1805f3ff016dd543f942a2c4d15bb"
     },
     {
       "path": "fixtures/marketplace/index-cases.json",
@@ -291,6 +315,18 @@
       "sha256": "57d17750e2c3d0fed6158d0995b08cf782b745774e5a7e6bee3b7d3dbdb6a777"
     },
     {
+      "path": "fixtures/run/output-link-matchers.json",
+      "sha256": "3e28c25f15c54e791fd86e7f9e620ab822745e5234dfc6286e18bed75a67ae78"
+    },
+    {
+      "path": "fixtures/run/run-start.json",
+      "sha256": "4bc9206445ea231863d0a2b44d9f7debdc6f2a63e8afc35cb1c5ccccda67455c"
+    },
+    {
+      "path": "fixtures/run/tool-reference-launch.plugin.json",
+      "sha256": "9f12db5f3b4856db8d238089905ec175ba1a918f4f875780a371d06a94a7430c"
+    },
+    {
       "path": "fixtures/settings/settings-v2.plugin.json",
       "sha256": "83d4c7faf7bfbb9c474639bfc0ef42dae8cd7d370d388f8527589f2afed12981"
     },
@@ -332,11 +368,11 @@
     },
     {
       "path": "plugin-manifest.schema.json",
-      "sha256": "d06ca0aea3bed8d1a34c5b84167c01b1f89f8a639b607d2773fd61ddfb2f0d63"
+      "sha256": "b540f9906e1eb36130bb12cca245d044445eee95614b1e452824696edfd4fa53"
     },
     {
       "path": "toolchains/README.md",
-      "sha256": "3c5535140a3040753b6eab5e4e7032362820e397ac0a670a71e60e7b6a83ad82"
+      "sha256": "2ec9f9bbb93e0b8d92c2299525ecb56d64b889e79b15bad1a350f5f3c0654106"
     }
   ]
 }
