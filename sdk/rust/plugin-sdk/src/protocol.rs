@@ -8,12 +8,15 @@ use serde_json::Value;
 /// Plugin-function protocol versions this SDK answers, newest first.
 /// Version 2 keeps every rule of version 1 and adds host services; version 3
 /// adds workspace contexts, capability discovery, host notifications, and
-/// `$/cancelRequest` for host requests.
-pub const FUNCTIONS_VERSIONS: [u64; 3] = [3, 2, 1];
+/// `$/cancelRequest` for host requests; version 4 adds calls to other
+/// plugins' functions through Core's relay.
+pub const FUNCTIONS_VERSIONS: [u64; 4] = [4, 3, 2, 1];
 /// First plugin-function protocol version with host services.
 pub const HOST_SERVICES_VERSION: u64 = 2;
 /// First plugin-function protocol version with workspace contexts.
 pub const CONTEXT_VERSION: u64 = 3;
+/// First plugin-function protocol version with the cross-plugin relay.
+pub const RELAY_VERSION: u64 = 4;
 
 pub(crate) mod methods {
     pub const INITIALIZE: &str = "initialize";
@@ -63,6 +66,13 @@ pub(crate) mod methods {
     pub const DID_CHANGE_CONTEXTS: &str = "lithe/host/workspace/didChangeContexts";
     pub const SUBSCRIPTION_NOTIFY: &str = "lithe/host/subscriptions/notify";
     pub const COMMAND_DID_RUN: &str = "lithe/host/commands/didRun";
+    pub const FUNCTIONS_PROVIDERS: &str = "lithe/host/functions/providers";
+    pub const FUNCTIONS_INVOKE: &str = "lithe/host/functions/invoke";
+
+    /// The host methods only plugin-function protocol 4 offers.
+    pub fn is_relay(method: &str) -> bool {
+        matches!(method, FUNCTIONS_PROVIDERS | FUNCTIONS_INVOKE)
+    }
 }
 
 /// JSON-RPC and LSP error codes the SDK answers with.
@@ -89,6 +99,8 @@ pub(crate) const MAX_PENDING_HOST_REQUESTS: usize = 16;
 /// Events kept for subscriptions whose answer has not been read yet.
 pub(crate) const MAX_EARLY_EVENTS: usize = 128;
 const MAX_COMMAND_ID_BYTES: usize = 128;
+/// The longest `parentOperationID` Core accepts on a relayed call.
+const MAX_PARENT_OPERATION_ID_BYTES: usize = 128;
 /// The largest integer JSON carries exactly.
 const MAX_SAFE_INTEGER: u64 = (1 << 53) - 1;
 
@@ -134,6 +146,12 @@ pub fn is_command_id(value: &str) -> bool {
         })
 }
 
+/// A `parentOperationID`: the `operationID` of a relayed call, a string of
+/// 1-128 bytes.
+pub(crate) fn is_parent_operation_id(value: &str) -> bool {
+    !value.is_empty() && value.len() <= MAX_PARENT_OPERATION_ID_BYTES
+}
+
 /// A context generation: a positive integer JSON carries exactly.
 pub(crate) fn generation(value: &Value) -> Option<u64> {
     let generation = match value.as_u64() {
@@ -168,6 +186,24 @@ mod tests {
     use super::*;
 
     #[test]
+    fn the_newest_offered_version_is_the_relay_and_only_two_methods_need_it() {
+        assert_eq!(FUNCTIONS_VERSIONS[0], RELAY_VERSION);
+        assert!(FUNCTIONS_VERSIONS.windows(2).all(|pair| pair[0] > pair[1]));
+        assert_eq!(FUNCTIONS_VERSIONS.last(), Some(&1));
+        assert!(methods::is_relay("lithe/host/functions/providers"));
+        assert!(methods::is_relay("lithe/host/functions/invoke"));
+        for other in [
+            methods::CREDENTIALS_GET,
+            methods::GET_CAPABILITIES,
+            methods::FUNCTION_INVOKE,
+            "lithe/host/functions/other",
+            "lithe/host/functions/",
+        ] {
+            assert!(!methods::is_relay(other), "{other}");
+        }
+    }
+
+    #[test]
     fn function_ids_are_dot_separated_lower_camel_case() {
         assert!(is_function_id("snapshot.refresh"));
         assert!(is_function_id("query.runAll2"));
@@ -200,6 +236,16 @@ mod tests {
             assert!(!is_command_id(invalid), "{invalid}");
         }
         assert!(!is_command_id(&"a".repeat(129)));
+    }
+
+    #[test]
+    fn parent_operation_ids_are_one_to_one_hundred_twenty_eight_bytes() {
+        assert!(is_parent_operation_id("17"));
+        assert!(is_parent_operation_id(&"o".repeat(128)));
+        assert!(is_parent_operation_id(&"é".repeat(64)));
+        assert!(!is_parent_operation_id(""));
+        assert!(!is_parent_operation_id(&"o".repeat(129)));
+        assert!(!is_parent_operation_id(&"é".repeat(65)));
     }
 
     #[test]
