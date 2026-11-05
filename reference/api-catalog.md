@@ -4,7 +4,7 @@
 
 ## 中文
 
-Lithe 的插件公共 API 按 [API 实施计划](https://github.com/1lck/Lithe-IDEA/blob/preview/docs/development/macos-plugin-api-plan.md)统一编号为 API-01 到 API-44。本页列出每个编号**现在能用什么**、**还没有什么**，并把能用的部分链接到契约章节和功能页。参数、返回值、错误码以 [`contract/v1/README.md`](../contract/v1/README.md) 为准；版本号见[能力与协议版本对照](capabilities-and-versions.md)。核对日期 2026-11-05。
+Lithe 的插件公共 API 按 [API 实施计划](https://github.com/1lck/Lithe-IDEA/blob/preview/docs/development/macos-plugin-api-plan.md)统一编号为 API-01 到 API-44。本页列出每个编号**现在能用什么**、**还没有什么**，并把能用的部分链接到契约章节和功能页。参数、返回值、错误码以 [`contract/v1/README.md`](../contract/v1/README.md) 为准；版本号见[能力与协议版本对照](capabilities-and-versions.md)。按主仓库最新 `preview` 核对，日期 2026-11-05。
 
 读这张表前先知道三件事：
 
@@ -127,7 +127,7 @@ Lithe 的插件公共 API 按 [API 实施计划](https://github.com/1lck/Lithe-I
 
 ## English
 
-Lithe numbers its public plugin APIs API-01 to API-44 in the [API implementation plan](https://github.com/1lck/Lithe-IDEA/blob/preview/docs/development/macos-plugin-api-plan.md). This page lists, for each ID, **what is usable now** and **what is still missing**, and links the usable parts to contract sections and domain pages. [`contract/v1/README.md`](../contract/v1/README.md) is normative for params, results, and error codes; versions are in [Capability and protocol versions](capabilities-and-versions.md). Checked on 2026-11-05.
+Lithe numbers its public plugin APIs API-01 to API-44 in the [API implementation plan](https://github.com/1lck/Lithe-IDEA/blob/preview/docs/development/macos-plugin-api-plan.md). This page lists, for each ID, **what is usable now** and **what is still missing**, and links the usable parts to contract sections and domain pages. [`contract/v1/README.md`](../contract/v1/README.md) is normative for params, results, and error codes; versions are in [Capability and protocol versions](capabilities-and-versions.md). Checked against the latest `preview` of the Lithe repository on 2026-11-05.
 
 Three things to know before reading the tables:
 

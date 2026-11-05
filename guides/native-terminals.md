@@ -1,4 +1,92 @@
-# Open a native Lithe terminal from a plugin
+# 从插件打开 Lithe 原生终端 / Open a native Lithe terminal from a plugin
+
+[中文](#中文) · [English](#english)
+
+## 中文
+
+这些 SDK 封装从 Node.js SDK 0.3.0、Java SDK 0.3.0 和 Rust SDK 0.2.0 开始提供，并且需要宿主声明终端方法。仓库里的契约副本锁定在已合并的宿主改动 [Lithe #1653](https://github.com/1lck/Lithe-IDEA/pull/1653)，即 `f64d262c48f1ff5ad1778b301138596493a09ad5`。副本由 `scripts/contract.mjs sync` 生成，不手改。规则见[原生终端契约](../contract/v1/README.md#plugin-owned-native-terminals-function-protocol-3)。
+
+交互式客户端请使用宿主的集成终端。声明 `requires.backend: 2` 和权限 `terminal.create`；网页调用自己后端的函数，后端带着该函数的工作区上下文调用宿主。插件不需要实现终端模拟器，不需要通过插件函数转发按键，也不需要成为构建或运行提供者。
+
+先用 `host.supports` 探测 `lithe/host/terminal/create` 和 `reopen`。旧宿主和 Windows 宿主可能没有这些方法。首个实现只支持 macOS 上的本机工作区，并明确拒绝远程 authority。宿主检查调用方、显示执行确认，并管理 PTY、渲染、焦点、尺寸调整和有界的进程树关闭。传 `show:false` 时，create 和 reopen 保留当前的终端选择，不展开终端面板，也不请求输入焦点。需要让新标签页显示出来时，调用 `show`。
+
+### Node.js 示例
+
+```js
+const host = context.host;
+const workspace = context.workspaceContext;
+if (!workspace || !await host.supports('lithe/host/terminal/reopen')) {
+  throw new Error('This host has no native terminal API.');
+}
+const terminal = await host.terminal.create(workspace, {
+  title: 'Interactive client',
+  executable: 'example-client',
+  arguments: ['--interactive'],
+  retainedContextBytes: 16 * 1024,
+});
+// 退出订阅需要比这次调用活得更久时，把它放在后端生命周期的 host 上。
+const events = await backend.host.terminal.onExit(workspace, terminal.terminalID, event => {
+  console.error(event.generation, event.exitCode, event.reason);
+});
+await host.terminal.close(workspace, { terminalID: terminal.terminalID, retainedContextBytes: 4096 });
+await host.terminal.reopen(workspace, { terminalID: terminal.terminalID });
+await events.dispose();
+await host.terminal.dispose(workspace, { terminalID: terminal.terminalID });
+```
+
+只传契约支持的字段。尤其是 close 要传 `{terminalID, retainedContextBytes:4096}`，不要把结果里的元数据复制进请求参数；宿主会拒绝未知字段。所有 SDK 都不会在取消后自动重试启动。
+
+### Rust 示例
+
+```rust,ignore
+let workspace = context.workspace_context().ok_or_else(||
+    lithe_plugin_sdk::PluginError::new("example.noWorkspace", "Open a workspace first."))?;
+let host = context.host();
+if !host.supports("lithe/host/terminal/reopen")? {
+    return Err(lithe_plugin_sdk::PluginError::new(
+        "example.unavailable", "This host has no native terminal API.").into());
+}
+let terminal = host.terminal();
+let opened = terminal.create(workspace, serde_json::json!({
+    "executable": "example-client", "arguments": ["--interactive"],
+    "retainedContextBytes": 4096
+}))?;
+let id = opened["terminalID"].as_str().ok_or_else(||
+    lithe_plugin_sdk::FunctionError::internal("Host returned no terminalID"))?;
+terminal.close(workspace, id, Some(4096))?;
+terminal.reopen(workspace, id)?;
+terminal.dispose(workspace, id)?;
+```
+
+Rust 还提供 `terminal.on_exit(workspace,id)`，返回 SDK 已有的 `Subscription`，用有界的 `recv_timeout` 接收，并显式调用 `dispose`。
+
+### Java 接口
+
+`host.terminal()` 提供 `create(context,params)`、`show(context,params)`、`close(context,params)`、`reopen(context,params)`、`dispose(context,params)` 和 `onExit(context,params)`。参数是普通的 JSON Map。前五个返回 `CompletableFuture<Map<String,Object>>`（show 和 dispose 返回 null）；`onExit` 返回 `CompletableFuture<Subscription>`。上下文、取消、宿主失败和订阅路由与其他协议 3 方法使用同一通道。
+
+### 启动与重开的语义
+
+`executable` 是 PATH 中的裸命令名或绝对路径；`arguments` 保持 argv 数组。可选的 `cwd` 是工作区内的 `{rootID,path}` 目录资源，不能离开工作区。`environment` 是字符串覆盖值或表示删除的 null 组成的映射，不是 shell 赋值语句。不要把凭据放进标题、参数或日志。输入和输出都留在原生终端里；没有公开的 `sendText`、读取终端输出或枚举用户终端的 API。
+
+`close` 移除标签页并停止进程，保留启动配置和已显示输出末尾的一段有界纯文本。`retainedContextBytes` 是 UTF-8 字节预算：默认 16384，最大 262144，0 表示不保留历史。可以在 create 时设置，也可以在 close 时覆盖。为了不截断 Unicode 字符，实际保留的字节数可能更少。显示或回显过的密钥可能出现在这段历史里，这类会话请设为 0。原始转义序列和 stdin 事件都不保留。
+
+`reopen` 用同样的 executable、argv、cwd 和 environment 启动一个**新进程**，启动前先把保留的那段输出恢复到显示中。它不会重放输入、恢复进程内存或找回 shell 变量。它保留 `terminalID` 并递增 `generation`；事件带有 generation，旧进程的退出不会被误认为新进程的退出。退出订阅在 reopen 之后继续有效。进程自然退出和用户关闭标签页之后也可以 reopen。这两条路径都会先完成有界的原生清理，只保留选定的快照，并释放原生会话和渲染缓冲区，然后才通知订阅者。清理期间句柄处于忙碌状态；退出订阅者收到事件后可以立即 reopen。字节预算为 0 时，任何退出路径都不保留历史。
+
+`dispose` 忘掉句柄、启动设置和历史；会话仍在运行时先关闭它。每个插件最多保留 8 个句柄（包括已关闭的），所以不会再 reopen 的句柄要 dispose。后端或会话重启、插件停用或更新、关闭或替换工作区，也会释放这些句柄。上下文和历史只在内存中，从不写入已安装的插件包。
+
+Rust 示例的 `terminal.cycle` 函数和 Core 端到端场景覆盖协议的往返。该场景由测试提供宿主应答；真实的原生 PTY 输入、输出和历史由 Lithe 自己的 `PluginTerminalNativeTests` 验证。
+
+终端生命周期场景现在默认针对锁定的宿主运行：
+
+```sh
+node scripts/sdk-e2e.mjs
+```
+
+示例在已安装的清单里声明了 `terminal.create`，所以测试拿到的授权与已安装插件相同。没有这个权限的旧宿主会拒绝该示例清单；没有声明它的其他插件保持原有兼容性。
+
+---
+
+## English
 
 These SDK wrappers ship from Node.js SDK 0.3.0, Java SDK 0.3.0, and Rust SDK
 0.2.0, and require a host that advertises the terminal methods. The checked-in contract mirror is pinned to
@@ -22,7 +110,7 @@ With `show:false`, create/reopen preserve the current terminal selection and
 do not reveal the terminal panel or request input focus. Call `show` when the
 new tab should become visible.
 
-## Node.js
+### Node.js
 
 ```js
 const host = context.host;
@@ -51,7 +139,7 @@ retainedContextBytes:4096}` for close rather than copying result metadata into
 request params; the host refuses unknown fields. No SDK retries a launch after
 cancellation automatically.
 
-## Rust
+### Rust
 
 ```rust,ignore
 let workspace = context.workspace_context().ok_or_else(||
@@ -76,7 +164,7 @@ terminal.dispose(workspace, id)?;
 Rust also exposes `terminal.on_exit(workspace,id)` as an existing SDK
 `Subscription`, with bounded `recv_timeout` and explicit `dispose`.
 
-## Java
+### Java
 
 `host.terminal()` exposes `create(context,params)`, `show(context,params)`,
 `close(context,params)`, `reopen(context,params)`, `dispose(context,params)` and
@@ -85,7 +173,7 @@ Rust also exposes `terminal.on_exit(workspace,id)` as an existing SDK
 `CompletableFuture<Subscription>`. Context, cancellation, host failures and
 subscription routing use the same channel as the other protocol-3 methods.
 
-## Launch and reopen semantics
+### Launch and reopen semantics
 
 `executable` is a bare PATH command or absolute path; `arguments` stays an argv
 array. Optional `cwd` is a workspace `{rootID,path}` directory resource and

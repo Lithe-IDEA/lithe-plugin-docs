@@ -79,7 +79,7 @@ Core 只把 `localhost`、`127.0.0.0/8`、`::1` 判为本机；其他主机都�
 ### 相关指南
 
 - [编写调试适配器插件（API 4）](../../guides/debug-adapter-plugin.md)
-- [原生构建、测试与运行准备（开发中）](../../guides/native-build-workflows.md)
+- [原生构建、测试与运行准备](../../guides/native-build-workflows.md)
 
 ---
 

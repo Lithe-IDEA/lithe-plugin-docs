@@ -4,7 +4,7 @@
 
 ## 中文
 
-本页把插件会碰到的所有版本号放在一起：每个能力、每个进程协议、每个文档格式的**全部版本**，以及 Rust Core、macOS、Windows、三个官方 SDK 各自支持到哪一版。规范以 [`contract/v1/README.md`](../contract/v1/README.md) 为准；本页与契约不一致时以契约为准，并请提 Issue。核对日期 2026-11-05，对应 [`contract.lock.json`](../contract.lock.json) 锁定的契约修订。
+本页把插件会碰到的所有版本号放在一起：每个能力、每个进程协议、每个文档格式的**全部版本**，以及 Rust Core、macOS、Windows、三个官方 SDK 各自支持到哪一版。规范以 [`contract/v1/README.md`](../contract/v1/README.md) 为准；本页与契约不一致时以契约为准，并请提 Issue。本页以主仓库最新 `preview` 为基准：Core、macOS、Windows 列按 `preview` 上的代码核对（2026-11-05，`644afdaac`），契约链接对应 [`contract.lock.json`](../contract.lock.json) 锁定的修订。Lithe 稳定版可能还没有其中的部分版本，发布插件前以目标版本的发行说明为准。
 
 ### 四类版本号
 
@@ -163,7 +163,7 @@
 
 ## English
 
-This page puts every version number a plugin meets in one place: **every version** of each capability, each process protocol, and each document format, and how far Rust Core, macOS, Windows, and the three official SDKs support each. [`contract/v1/README.md`](../contract/v1/README.md) is normative; where this page disagrees with it, the contract wins, and please open an issue. Checked on 2026-11-05 against the contract revision pinned in [`contract.lock.json`](../contract.lock.json).
+This page puts every version number a plugin meets in one place: **every version** of each capability, each process protocol, and each document format, and how far Rust Core, macOS, Windows, and the three official SDKs support each. [`contract/v1/README.md`](../contract/v1/README.md) is normative; where this page disagrees with it, the contract wins, and please open an issue. This page tracks the latest `preview` of the Lithe repository: the Core, macOS, and Windows columns are checked against the code on `preview` (2026-11-05, `644afdaac`), and contract links follow the revision pinned in [`contract.lock.json`](../contract.lock.json). A stable Lithe release may lack some of these versions, so check your target version's release notes before publishing.
 
 ### Four kinds of version
 

@@ -75,7 +75,7 @@
 ### 相关指南
 
 - [为语言插件接入构建、运行与测试](../../guides/build-tool-integration.md)
-- [原生构建、测试与运行准备（开发中）](../../guides/native-build-workflows.md)
+- [原生构建、测试与运行准备](../../guides/native-build-workflows.md)
 
 ---
 
