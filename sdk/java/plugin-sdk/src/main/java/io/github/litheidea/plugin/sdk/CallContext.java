@@ -24,9 +24,10 @@ public final class CallContext {
     private final ProgressSink progress;
     private final Host host;
     private final Map<String, Object> workspaceContext;
+    private final Map<String, Object> caller;
 
     CallContext(Cancellation cancellation, Backend backend, String functionId, String operationId, ProgressSink progress,
-            Host host, Map<String, Object> workspaceContext) {
+            Host host, Map<String, Object> workspaceContext, Map<String, Object> caller) {
         this.cancellation = cancellation;
         this.backend = backend;
         this.functionId = functionId;
@@ -34,6 +35,7 @@ public final class CallContext {
         this.progress = progress;
         this.host = host;
         this.workspaceContext = workspaceContext;
+        this.caller = caller;
     }
 
     /**
@@ -92,7 +94,12 @@ public final class CallContext {
         return functionId;
     }
 
-    /** The wire operation ID of a function or bounded build call, otherwise null. */
+    /**
+     * The wire operation ID of a function or bounded build call, otherwise null.
+     * It identifies the call in diagnostics and, when the request has no usable
+     * operation ID, falls back to the JSON-RPC request ID: do not use it as a
+     * {@code parentOperationID}. {@link #host()} already sends the right one.
+     */
     public String operationId() {
         return operationId;
     }
@@ -115,5 +122,22 @@ public final class CallContext {
      */
     public Map<String, Object> workspaceContext() {
         return workspaceContext;
+    }
+
+    /**
+     * The plugin that called this function through the relay (protocol 4): an
+     * unmodifiable {@code { pluginID }}, written by Core from the calling
+     * session. Null when the host started the call, when the session negotiated
+     * protocol 3 or earlier, and for calls that are not function invocations.
+     * Decide by who asks from this, never from a plugin ID in the params,
+     * which any caller can write.
+     */
+    public Map<String, Object> caller() {
+        return caller;
+    }
+
+    /** The {@code pluginID} of {@link #caller()}, or null when there is no calling plugin. */
+    public String callerPluginId() {
+        return caller == null ? null : (String) caller.get("pluginID");
     }
 }

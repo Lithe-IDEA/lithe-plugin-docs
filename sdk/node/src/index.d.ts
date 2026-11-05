@@ -172,8 +172,42 @@ export interface FindPage<T> {
 type Scoped<P, R> = (context: ContextReference, params: P, options?: HostRequestOptions) => Promise<R>;
 type ScopedOptional<P, R> = (context: ContextReference, params?: P, options?: HostRequestOptions) => Promise<R>;
 
+/** One enabled plugin that exports a function, from `host.functions.providers`. */
+export interface FunctionProvider {
+  pluginID: string;
+  /** The contract version of the exported function. */
+  version: number;
+}
+
+export interface FunctionProvidersResult {
+  /** Enabled plugins other than the caller, sorted by plugin ID. */
+  providers: FunctionProvider[];
+}
+
+/** One cross-plugin call, the argument of `host.functions.invoke`. */
+export interface FunctionCall {
+  /** The providing plugin, one of `providers(functionID)`. */
+  pluginID: string;
+  functionID: string;
+  /** A JSON object; not sent when omitted, which Core reads as `{}`. */
+  params?: JsonObject;
+  /** A positive integer. Core defaults it to 60000 and caps it at 600000. */
+  timeoutMilliseconds?: number;
+  /**
+   * The `operationID` of the call this one belongs to, a string of 1-128 bytes.
+   * Inside a function handler `context.host` fills it with the call being
+   * served; `backend.host` has no default.
+   */
+  parentOperationID?: string;
+}
+
+export interface FunctionInvokeResult {
+  /** The provider's result; `null` is a result. */
+  value: JsonValue;
+}
+
 /**
- * Host services of plugin-function protocols 2 and 3. Every method rejects
+ * Host services of plugin-function protocols 2 to 4. Every method rejects
  * with `HostError` when the host refuses; from protocol 3 check
  * `supports(method)` instead of assuming a method from the version.
  * A full `WorkspaceContext` may be passed wherever a reference is expected.
@@ -273,6 +307,19 @@ export interface Host {
       { opened: true; source: 'web' | 'disk'; hasUnsavedChanges?: boolean }
     >;
   };
+  /**
+   * Protocol 4; the manifest's `pluginFunctions.calls`. Calls between plugins,
+   * relayed through Core. Under protocol 3 or earlier both reject at once with
+   * `HostError` `plugin.host.unavailable`, and nothing is sent. Argument
+   * mistakes reject with `PluginSdkError` `sdk.functions.invalidCall`, or
+   * `sdk.host.invalidContext` for the context, before anything is sent.
+   */
+  readonly functions: {
+    /** The enabled plugins other than this one that export `functionID`. */
+    providers(functionID: string, options?: HostRequestOptions): Promise<FunctionProvidersResult>;
+    /** Calls one provider's function in a workspace context. A provider's own failure is `plugin.function.failed`. */
+    invoke(context: ContextReference, call: FunctionCall, options?: HostRequestOptions): Promise<FunctionInvokeResult>;
+  };
   /** Permission `terminal.create`; only terminals owned by this backend session and context. */
   readonly terminal: {
     create: Scoped<{ executable: string; arguments?: string[]; title?: string; cwd?: WorkspaceResource;
@@ -312,6 +359,12 @@ export interface FunctionContext extends RequestContext {
   operationID: string;
   /** The context of the page's window (protocol 3), or null. */
   workspaceContext: ContextReference | null;
+  /**
+   * The plugin that called this function through the relay (protocol 4), or
+   * null: the host started the call, or the session negotiated less than 4.
+   * Decide by this field, never by a plugin ID inside `params`.
+   */
+  readonly caller: { readonly pluginID: string } | null;
   /** Reports progress; ignored once the call has ended. */
   progress(report: ProgressReport): void;
 }
@@ -505,7 +558,7 @@ export interface Backend {
   readonly initializeParams: JsonObject | null;
   /** Highest common version (1-6), or null before/without negotiation. */
   readonly buildVersion: number | null;
-  /** Highest common plugin-function version (1-3), or null before/without negotiation. */
+  /** Highest common plugin-function version (1-4), or null before/without negotiation. */
   readonly functionsVersion: number | null;
   readonly functionIDs: string[];
   /** Host services; usable once the session is ready. */
@@ -577,7 +630,10 @@ export function openStateStore(directory: string, options?: { packageDirectory?:
 
 export function isFunctionId(value: unknown): boolean;
 
-/** Host failure codes and the JSON-RPC number each has from protocol 3. */
+/**
+ * Host failure codes and the JSON-RPC number each has from protocol 3. The
+ * `plugin.function.*` codes belong to the relay (protocol 4).
+ */
 export const HOST_ERRORS: Readonly<{
   'plugin.host.unavailable': -32601;
   'plugin.host.invalidParams': -32602;
@@ -595,9 +651,25 @@ export const HOST_ERRORS: Readonly<{
   'plugin.host.preconditionFailed': -32019;
   'plugin.host.busy': -32020;
   'plugin.host.rateLimited': -32021;
+  'plugin.host.languageServerUnavailable': -32022;
+  'plugin.host.languageServerError': -32023;
+  'plugin.host.methodNotDeclared': -32024;
+  'plugin.host.toolUnresolved': -32025;
+  'plugin.host.foreignContribution': -32026;
+  'plugin.function.notDeclared': -32027;
+  'plugin.function.notExported': -32028;
+  'plugin.function.providerDisabled': -32029;
+  'plugin.function.versionMismatch': -32030;
+  'plugin.function.callCycle': -32065;
+  'plugin.function.depthExceeded': -32066;
+  'plugin.function.tooManyCalls': -32067;
+  'plugin.function.payloadTooLarge': -32068;
+  'plugin.function.providerUnavailable': -32069;
+  'plugin.function.failed': -32070;
+  'plugin.function.invalidResult': -32071;
 }>;
 
-/** Host request method names of protocols 2 and 3. */
+/** Host request method names of protocols 2 to 4. */
 export const HOST_METHODS: Readonly<Record<
   | 'credentialsGet' | 'credentialsSet' | 'credentialsDelete' | 'getCapabilities' | 'subscriptionsDispose'
   | 'workspaceListContexts' | 'workspaceGetContext' | 'workspaceGetFolders' | 'workspaceReadDirectory'
@@ -605,7 +677,8 @@ export const HOST_METHODS: Readonly<Record<
   | 'documentsList' | 'documentsGetSnapshot' | 'editorRegisterActions' | 'editorGetActive'
   | 'editorGetSelections' | 'editorApplyEdits' | 'editorReplaceSelections' | 'editorInsertText'
   | 'editorOpen' | 'editorReveal' | 'previewOpenHTML' | 'browserOpenExternal'
-  | 'windowShowInformation' | 'windowShowWarning' | 'windowShowError',
+  | 'windowShowInformation' | 'windowShowWarning' | 'windowShowError'
+  | 'functionsProviders' | 'functionsInvoke',
   string
 >>;
 
@@ -635,4 +708,7 @@ export const LIMITS: Readonly<{
   maxCredentialKeyBytes: number;
   maxCredentialSecretBytes: number;
   maxPendingHostRequests: number;
+  relayDefaultTimeoutMilliseconds: number;
+  relayMaxTimeoutMilliseconds: number;
+  maxParentOperationIdBytes: number;
 }>;

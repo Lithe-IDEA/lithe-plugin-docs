@@ -89,9 +89,9 @@ pub mod sdk_codes {
     pub const SESSION_CLOSED: &str = "sdk.session.closed";
 }
 
-/// Stable host failure codes of plugin-function protocol 3 and their
-/// JSON-RPC numbers. A later host adds codes after `-32021`.
-pub const HOST_ERROR_CODES: [(&str, i64); 16] = [
+/// Stable `plugin.host.*` failure codes as of plugin-function protocol 4 and
+/// their JSON-RPC numbers. A later host adds codes after `-32026`.
+pub const HOST_ERROR_CODES: [(&str, i64); 21] = [
     ("plugin.host.unavailable", -32601),
     ("plugin.host.invalidParams", -32602),
     ("plugin.host.failed", -32603),
@@ -108,6 +108,31 @@ pub const HOST_ERROR_CODES: [(&str, i64); 16] = [
     ("plugin.host.preconditionFailed", -32019),
     ("plugin.host.busy", -32020),
     ("plugin.host.rateLimited", -32021),
+    ("plugin.host.languageServerUnavailable", -32022),
+    ("plugin.host.languageServerError", -32023),
+    ("plugin.host.methodNotDeclared", -32024),
+    ("plugin.host.toolUnresolved", -32025),
+    ("plugin.host.foreignContribution", -32026),
+];
+
+/// The `plugin.function.*` failures a relayed call from another plugin
+/// (plugin-function protocol 4) may end with, and their JSON-RPC numbers. The
+/// relay's `plugin.host.*` outcomes (`timeout`, `cancelled`, `contextExpired`,
+/// `authorityUnsupported`) are in [`HOST_ERROR_CODES`]. A
+/// `plugin.function.failed` answer names the provider's own code in its
+/// `pluginErrorCode` detail.
+pub const RELAY_ERROR_CODES: [(&str, i64); 11] = [
+    ("plugin.function.notDeclared", -32027),
+    ("plugin.function.notExported", -32028),
+    ("plugin.function.providerDisabled", -32029),
+    ("plugin.function.versionMismatch", -32030),
+    ("plugin.function.callCycle", -32065),
+    ("plugin.function.depthExceeded", -32066),
+    ("plugin.function.tooManyCalls", -32067),
+    ("plugin.function.payloadTooLarge", -32068),
+    ("plugin.function.providerUnavailable", -32069),
+    ("plugin.function.failed", -32070),
+    ("plugin.function.invalidResult", -32071),
 ];
 
 impl SdkError {
@@ -129,7 +154,8 @@ impl SdkError {
     }
 
     /// The failure for a JSON-RPC error answer. A host method without a
-    /// known code is a host failure: from version 3 a number names one code,
+    /// known code is a host failure: from version 3 a number names one code
+    /// (of [`HOST_ERROR_CODES`], or from version 4 of [`RELAY_ERROR_CODES`]),
     /// and an unknown number is `plugin.host.failed`.
     pub(crate) fn from_response(method: &str, error: &Value) -> Self {
         let rpc_code = error["code"].as_i64();
@@ -137,6 +163,7 @@ impl SdkError {
             Some(code) => code,
             None if method.starts_with(methods::HOST_PREFIX) => HOST_ERROR_CODES
                 .iter()
+                .chain(RELAY_ERROR_CODES.iter())
                 .find(|(_, number)| Some(*number) == rpc_code)
                 .map_or("plugin.host.failed", |(code, _)| code),
             None => "sdk.host.error",
@@ -304,6 +331,57 @@ mod tests {
         assert_eq!(later.details(), None);
         let other = SdkError::from_response(methods::FUNCTION_REGISTER, &json!({ "code": -32602 }));
         assert_eq!(other.code(), "sdk.host.error");
+    }
+
+    #[test]
+    fn the_host_and_relay_tables_hold_every_documented_code_once() {
+        assert_eq!(HOST_ERROR_CODES.len(), 21);
+        assert_eq!(RELAY_ERROR_CODES.len(), 11);
+        let mut codes = std::collections::BTreeSet::new();
+        let mut numbers = std::collections::BTreeSet::new();
+        for (prefix, table) in [
+            ("plugin.host.", &HOST_ERROR_CODES[..]),
+            ("plugin.function.", &RELAY_ERROR_CODES[..]),
+        ] {
+            for (code, number) in table {
+                assert!(code.starts_with(prefix), "{code}");
+                assert!(codes.insert(*code), "{code} is listed twice");
+                assert!(numbers.insert(*number), "{number} names two codes");
+            }
+        }
+    }
+
+    #[test]
+    fn relay_failures_keep_their_code_number_and_the_providers_own_code() {
+        for (code, number) in RELAY_ERROR_CODES {
+            // A number alone names the code.
+            let error =
+                SdkError::from_response(methods::FUNCTIONS_INVOKE, &json!({ "code": number }));
+            assert_eq!(error.code(), code);
+            assert_eq!(error.rpc_code(), Some(number));
+            assert_eq!(error.message(), "lithe/host/functions/invoke failed.");
+        }
+        let failed = SdkError::from_response(
+            methods::FUNCTIONS_INVOKE,
+            &json!({
+                "code": -32070,
+                "message": "The plugin function failed.",
+                "data": {
+                    "code": "plugin.function.failed",
+                    "details": { "pluginErrorCode": "go.noModule" }
+                }
+            }),
+        );
+        assert_eq!(failed.code(), "plugin.function.failed");
+        assert_eq!(failed.message(), "The plugin function failed.");
+        assert_eq!(
+            failed.details(),
+            json!({ "pluginErrorCode": "go.noModule" }).as_object()
+        );
+        // Outside a host method a relay number stays an unnamed answer.
+        let outside =
+            SdkError::from_response(methods::FUNCTION_REGISTER, &json!({ "code": -32070 }));
+        assert_eq!(outside.code(), "sdk.host.error");
     }
 
     #[test]

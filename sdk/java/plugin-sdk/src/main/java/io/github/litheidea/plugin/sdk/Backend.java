@@ -35,7 +35,7 @@ import java.util.function.Supplier;
  * then call {@link #listen()}. Handlers run on their own threads, so several
  * calls can be in flight at once; shared plugin state needs its own locking.
  *
- * <p>Host services ({@code lithe/host/*}) of plugin-function protocols 2 and 3
+ * <p>Host services ({@code lithe/host/*}) of plugin-function protocols 2 to 4
  * are in {@link #host()}, or a handler's {@link CallContext#host()}.
  *
  * <p>Contract: {@code contract/v1/README.md} ("Build providers"
@@ -168,9 +168,10 @@ public final class Backend {
         }
 
         /**
-         * Selected plugin-function version (1-3), or zero when unavailable.
+         * Selected plugin-function version (1-4), or zero when unavailable.
          * Version 2 adds host credentials; version 3 workspace contexts, the
-         * other host services, and host notifications.
+         * other host services, and host notifications; version 4 calls to
+         * other plugins' functions and the calling plugin of a function call.
          */
         public int functionsVersion() {
             return functionsVersion;
@@ -227,7 +228,7 @@ public final class Backend {
     private final AtomicInteger nextRequestId = new AtomicInteger(1);
     private final ExecutorService executor = Executors.newCachedThreadPool(new ThreadNamer());
     private final HostChannel channel = new HostChannel(new Wire());
-    private final Host host = new Host(channel, Collections.<Cancellation>emptyList());
+    private final Host host = new Host(channel, Collections.<Cancellation>emptyList(), null);
     /** Serializes register/unregister so the host sees them in call order. */
     private CompletableFuture<Void> registrations = CompletableFuture.completedFuture(null);
     private volatile Phase phase = Phase.IDLE;
@@ -277,9 +278,10 @@ public final class Backend {
     }
 
     /**
-     * Host services of plugin-function protocols 2 and 3, usable once the
+     * Host services of plugin-function protocols 2 to 4, usable once the
      * session is ready. Prefer a handler's {@link CallContext#host()}, whose
-     * requests end with the call.
+     * requests end with the call; this one belongs to no call, so its calls to
+     * other plugins name no parent call unless the call says one.
      */
     public Host host() {
         return host;
@@ -938,7 +940,7 @@ public final class Backend {
             return;
         }
         run(id, null, null, null, context -> handler.handle(new KeymapSnapshot((String) provider, (String) snapshot, context.host()), context),
-                Backend::functionResult, null, null, "lithe/keymap/import");
+                Backend::functionResult, null, null, "lithe/keymap/import", null, null);
     }
 
     private static boolean validKeymapProvider(String id) {
@@ -959,6 +961,7 @@ public final class Backend {
         Object operationId = invocation.get("operationID");
         Object params = invocation.get("params");
         Map<String, Object> workspaceContext = workspaceContext(invocation.get("context"));
+        Map<String, Object> caller = callerReference(invocation.get("caller"));
         Handler handler;
         synchronized (lock) {
             handler = negotiated.functions() && functionId instanceof String ? functions.get(functionId) : null;
@@ -991,8 +994,10 @@ public final class Backend {
             notification.put("params", report);
             write(notification);
         };
+        // The call's wire operation ID is the parent of the calls it makes to other plugins.
+        String parentOperationId = Protocol.isParentOperationId(operation) ? operation : null;
         run(id, function, operation, workspaceContext, context -> handler.handle(arguments, context),
-                Backend::functionResult, () -> reporting.set(false), progress);
+                Backend::functionResult, () -> reporting.set(false), progress, function, caller, parentOperationId);
     }
 
     private void invokeBuild(Object id, String method, Map<String, Object> arguments, Handler handler) {
@@ -1001,7 +1006,8 @@ public final class Backend {
             return;
         }
         if (!Protocol.buildProgress(method)) {
-            run(id, null, null, null, context -> handler.handle(arguments, context), result -> buildResult(method, result), null, null, method);
+            run(id, null, null, null, context -> handler.handle(arguments, context), result -> buildResult(method, result), null, null, method,
+                    null, null);
             return;
         }
         Object wireId = arguments.get("operationID");
@@ -1028,7 +1034,7 @@ public final class Backend {
             }
         };
         run(id, null, (String) wireId, null, context -> handler.handle(arguments, context),
-                result -> buildResult(method, result), () -> reporting.set(false), progress, method);
+                result -> buildResult(method, result), () -> reporting.set(false), progress, method, null, null);
     }
 
     private interface Invocation {
@@ -1046,11 +1052,18 @@ public final class Backend {
     /** Runs one handler with its own cancellation and answers exactly once. */
     private void run(Object id, String functionId, String operationId, Map<String, Object> workspaceContext,
             Invocation invoke, Shape shape, Runnable onSettled, CallContext.ProgressSink progress) {
-        run(id, functionId, operationId, workspaceContext, invoke, shape, onSettled, progress, functionId == null ? "function-call" : functionId);
+        run(id, functionId, operationId, workspaceContext, invoke, shape, onSettled, progress,
+                functionId == null ? "function-call" : functionId, null, null);
     }
 
+    /**
+     * {@code caller} is the plugin that called a function through the relay and
+     * {@code parentOperationId} the wire operation ID calls to other plugins
+     * name as their parent; both are null for every call but a function call.
+     */
     private void run(Object id, String functionId, String operationId, Map<String, Object> workspaceContext,
-            Invocation invoke, Shape shape, Runnable onSettled, CallContext.ProgressSink progress, String diagnosticOperation) {
+            Invocation invoke, Shape shape, Runnable onSettled, CallContext.ProgressSink progress, String diagnosticOperation,
+            Map<String, Object> caller, String parentOperationId) {
         long started = System.nanoTime();
         String diagnosticOperationId = Diagnostics.requestOperationId(operationId, id);
         Cancellation cancellation = new Cancellation(() -> diagnostics().degraded("notification", "cancellation_listener_failed"));
@@ -1059,7 +1072,7 @@ public final class Backend {
             incoming.put(key, new Call(cancellation, functionId));
         }
         CallContext context = new CallContext(cancellation, this, functionId, diagnosticOperationId, progress,
-                new Host(channel, Collections.singletonList(cancellation)), workspaceContext);
+                new Host(channel, Collections.singletonList(cancellation), parentOperationId), workspaceContext, caller);
         executor.execute(() -> {
             Object result = null;
             Map<String, Object> error = null;
@@ -1473,6 +1486,23 @@ public final class Backend {
     /** The {@code { contextID, generation }} the host sent, or null. */
     private static Map<String, Object> workspaceContext(Object value) {
         return Protocol.isContextReference(value) ? Host.contextReference(Json.object(value)) : null;
+    }
+
+    /**
+     * The {@code { pluginID }} of the plugin that called a function through the
+     * relay, or null. Core adds it on protocol 4 only, and only as exactly
+     * {@code { pluginID }}; anything else is not a caller.
+     */
+    private Map<String, Object> callerReference(Object value) {
+        if (negotiated.functionsVersion() < Protocol.RELAY_VERSION || !(value instanceof Map)) {
+            return null;
+        }
+        Map<?, ?> caller = (Map<?, ?>) value;
+        Object pluginId = caller.get("pluginID");
+        if (caller.size() != 1 || !(pluginId instanceof String) || ((String) pluginId).isEmpty()) {
+            return null;
+        }
+        return Collections.<String, Object>singletonMap("pluginID", pluginId);
     }
 
     /** The session's wire, for host services. */

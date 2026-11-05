@@ -13,13 +13,15 @@ import java.util.regex.Pattern;
  */
 public final class Protocol {
     /** Protocol versions this SDK can answer: the highest of each. */
-    public static final int FUNCTIONS_VERSION = 3;
+    public static final int FUNCTIONS_VERSION = 4;
     public static final int BUILD_VERSION = 6;
 
     /** First plugin-function version with host services (credentials). */
     public static final int HOST_SERVICES_VERSION = 2;
     /** First plugin-function version with workspace contexts, discovery, and host notifications. */
     public static final int CONTEXT_VERSION = 3;
+    /** First plugin-function version with cross-plugin calls through Core and the {@code caller} of a relayed call. */
+    public static final int RELAY_VERSION = 4;
 
     public static final String INITIALIZE = "initialize";
     public static final String INITIALIZED = "initialized";
@@ -40,7 +42,7 @@ public final class Protocol {
     public static final String BUILD_PROGRESS = "lithe/build/progress";
 
     /**
-     * Backend-to-host requests of plugin-function protocols 2 and 3. From
+     * Backend-to-host requests of plugin-function protocols 2 to 4. From
      * version 3 the host adds methods without a new version;
      * {@link Host#request} sends any {@code lithe/host/*} method, and
      * {@code getCapabilities} says which ones the session may call.
@@ -82,6 +84,10 @@ public final class Protocol {
     public static final String HOST_WINDOW_SHOW_WARNING = "lithe/host/window/showWarning";
     public static final String HOST_WINDOW_SHOW_ERROR = "lithe/host/window/showError";
 
+    /** Cross-plugin calls Core relays; they need plugin-function protocol 4 ({@link #RELAY_VERSION}). */
+    public static final String HOST_FUNCTIONS_PROVIDERS = "lithe/host/functions/providers";
+    public static final String HOST_FUNCTIONS_INVOKE = "lithe/host/functions/invoke";
+
     /** Host-to-backend notifications of plugin-function protocol 3. */
     public static final String HOST_DID_CHANGE_CONTEXTS = "lithe/host/workspace/didChangeContexts";
     public static final String HOST_SUBSCRIPTION_NOTIFY = "lithe/host/subscriptions/notify";
@@ -108,6 +114,11 @@ public final class Protocol {
     /** Unanswered host requests Core allows a session; the SDK queues the rest. */
     public static final int MAX_PENDING_HOST_REQUESTS = 16;
     public static final int MAX_CREDENTIAL_SECRET_BYTES = 16 * 1024;
+    /** Timeout Core gives a relayed call that names none. */
+    public static final int RELAY_DEFAULT_TIMEOUT_MILLISECONDS = 60000;
+    /** Longest timeout of a relayed call; the SDK sends a longer one unchanged and leaves the cap to Core. */
+    public static final int RELAY_MAX_TIMEOUT_MILLISECONDS = 600000;
+    public static final int MAX_PARENT_OPERATION_ID_BYTES = 128;
 
     /** Minimum negotiated version; unknown methods can never pass admission. */
     static int buildMethodVersion(String method) {
@@ -168,6 +179,20 @@ public final class Protocol {
         Map<?, ?> reference = (Map<?, ?>) value;
         Object id = reference.get("contextID");
         return id instanceof String && isCredentialKey((String) id) && isGeneration(reference.get("generation"));
+    }
+
+    /** A {@code parentOperationID}: a string of 1-128 UTF-8 bytes. */
+    static boolean isParentOperationId(Object value) {
+        if (!(value instanceof String)) {
+            return false;
+        }
+        int bytes = utf8Length((String) value);
+        return bytes >= 1 && bytes <= MAX_PARENT_OPERATION_ID_BYTES;
+    }
+
+    /** Whether {@code method} is one of the relay requests, which need protocol {@link #RELAY_VERSION}. */
+    static boolean isRelayMethod(String method) {
+        return HOST_FUNCTIONS_PROVIDERS.equals(method) || HOST_FUNCTIONS_INVOKE.equals(method);
     }
 
     /** A command ID from the plugin's manifest: 1-128 of {@code [a-z0-9.-]}. */

@@ -16,8 +16,9 @@ use crate::framing::{read_frame, write_frame, Frame};
 use crate::host::{Channel, Credentials, Host, Outcome, Outgoing, WorkspaceContext};
 use crate::panic_boundary::catch as catch_unwind;
 use crate::protocol::{
-    bounded_text, error_codes, is_command_id, is_function_id, methods, CONTEXT_VERSION,
-    FUNCTIONS_VERSIONS, MAX_FUNCTIONS, MAX_MESSAGE_BYTES, MAX_RESULT_BYTES,
+    bounded_text, error_codes, is_command_id, is_function_id, is_parent_operation_id, methods,
+    CONTEXT_VERSION, FUNCTIONS_VERSIONS, MAX_FUNCTIONS, MAX_MESSAGE_BYTES, MAX_RESULT_BYTES,
+    RELAY_VERSION,
 };
 use base64::{engine::general_purpose::STANDARD as BASE64, Engine as _};
 use serde_json::{json, Map, Value};
@@ -835,6 +836,7 @@ impl Shared {
                     ),
                     cancellation,
                     workspace_context: None,
+                    caller: None,
                     reporting: AtomicBool::new(false),
                     quiet_success: AtomicBool::new(false),
                 };
@@ -860,6 +862,11 @@ impl Shared {
             .unwrap_or_default()
             .to_string();
         let operation_id = params["operationID"].clone();
+        // What nested cross-plugin calls name as the call they belong to.
+        let parent_operation = operation_id
+            .as_str()
+            .filter(|operation| is_parent_operation_id(operation))
+            .map(str::to_string);
         let call_params = match params.get("params") {
             None | Some(Value::Null) => json!({}),
             Some(params) => params.clone(),
@@ -872,6 +879,10 @@ impl Shared {
                 .functions_version
                 .filter(|version| *version >= CONTEXT_VERSION)
                 .and_then(|_| WorkspaceContext::from_reference(&params["context"]));
+            let caller = state
+                .functions_version
+                .filter(|version| *version >= RELAY_VERSION)
+                .and_then(|_| Caller::from_value(&params["caller"]));
             let handler = state
                 .functions_version
                 .and_then(|_| state.functions.get(&function_id).cloned());
@@ -884,9 +895,9 @@ impl Shared {
                     },
                 );
             }
-            handler.map(|handler| (handler, workspace_context))
+            handler.map(|handler| (handler, workspace_context, caller))
         };
-        let Some((handler, workspace_context)) = handler else {
+        let Some((handler, workspace_context, caller)) = handler else {
             return shared.respond(
                 &id,
                 Err(rpc_error(
@@ -913,9 +924,11 @@ impl Shared {
                     host: Host::new(
                         Arc::clone(&worker),
                         vec![cancellation.clone(), ended.clone()],
-                    ),
+                    )
+                    .with_parent_operation(parent_operation),
                     cancellation,
                     workspace_context,
+                    caller,
                     reporting: AtomicBool::new(true),
                     quiet_success: AtomicBool::new(false),
                 };
@@ -1115,8 +1128,37 @@ pub struct Context {
     cancellation: Cancellation,
     host: Host,
     workspace_context: Option<WorkspaceContext>,
+    caller: Option<Caller>,
     reporting: AtomicBool,
     quiet_success: AtomicBool,
+}
+
+/// The plugin that called a function through Core's relay (protocol 4).
+/// Core writes it from the identity of the calling session and a caller
+/// cannot supply it, so a provider may key per-caller state by it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Caller {
+    plugin_id: String,
+}
+
+impl Caller {
+    /// The `caller` field of a relayed `lithe/function/invoke`, which is
+    /// exactly `{ pluginID }` with a non-empty string.
+    fn from_value(value: &Value) -> Option<Self> {
+        let fields = value.as_object().filter(|fields| fields.len() == 1)?;
+        let plugin_id = fields
+            .get("pluginID")?
+            .as_str()
+            .filter(|plugin_id| !plugin_id.is_empty())?;
+        Some(Self {
+            plugin_id: plugin_id.to_string(),
+        })
+    }
+
+    /// The calling plugin's ID, such as `dev.lithe.fixture.python`.
+    pub fn plugin_id(&self) -> &str {
+        &self.plugin_id
+    }
 }
 
 impl Context {
@@ -1181,6 +1223,13 @@ impl Context {
     /// own UI, and before protocol 3.
     pub fn workspace_context(&self) -> Option<&WorkspaceContext> {
         self.workspace_context.as_ref()
+    }
+
+    /// The plugin that called this function through Core's relay (protocol
+    /// 4). `None` when the host started the call, which includes every call
+    /// before protocol 4, and for a `caller` of any other shape.
+    pub fn caller(&self) -> Option<&Caller> {
+        self.caller.as_ref()
     }
 
     /// `host().credentials()`.

@@ -1,4 +1,4 @@
-//! Host services of plugin-function protocols 2 and 3, driven by a scripted
+//! Host services of plugin-function protocols 2 to 4, driven by a scripted
 //! host and the contract fixture; mirrors `sdk/node/test/host.test.mjs`.
 
 mod common;
@@ -141,7 +141,8 @@ impl Session {
 fn the_sdk_answers_the_highest_plugin_function_version_the_host_offers() {
     let fixture = fixture();
     for (offered, expected) in [
-        (fixture["offer"]["versions"].clone(), 3),
+        (fixture["offer"]["versions"].clone(), 4),
+        (json!([1, 2, 3]), 3),
         (json!([1, 2]), 2),
         (json!([1]), 1),
         (json!([2, 99]), 2),
@@ -161,7 +162,7 @@ fn the_sdk_answers_the_highest_plugin_function_version_the_host_offers() {
         assert_eq!(handle.host().version(), Some(expected));
         host.close();
     }
-    // The fixture's answers of versions 2 and 3 have the shape the SDK sends.
+    // The fixture's answers of versions 2 to 4 have the shape the SDK sends.
     let mut checked = 0;
     for case in cases(&fixture, "negotiation") {
         if case["expected"]["version"].as_u64() >= Some(2) {
@@ -661,19 +662,23 @@ fn commands_context_changes_and_later_host_notifications_reach_their_handlers() 
         .iter()
         .map(|case| {
             let params = &case["params"];
-            if case["method"] == "lithe/host/commands/didRun" {
-                json!(["command", params["commandID"], params["context"]]).to_string()
-            } else {
-                json!(["contexts", params]).to_string()
-            }
+            let entry = match case["method"].as_str().unwrap() {
+                "lithe/host/commands/didRun" => {
+                    json!(["command", params["commandID"], params["context"]])
+                }
+                "lithe/host/workspace/didChangeContexts" => json!(["contexts", params]),
+                method => json!(["notification", method, params]),
+            };
+            entry.to_string()
         })
         .collect();
     expected.insert(json!(["later", { "value": 1 }]).to_string());
-    assert_eq!(expected.len(), 4);
+    // Every delivered case is told apart by its method and params.
+    assert_eq!(expected.len(), delivered.len() + 1);
 
     let (sender, seen) = mpsc::channel::<Value>();
     let mut backend = Backend::new("test-backend");
-    let (commands, contexts, later) = (sender.clone(), sender.clone(), sender);
+    let (commands, contexts, later) = (sender.clone(), sender.clone(), sender.clone());
     backend
         .on_command("db.refresh", move |command_id, context| {
             let context = context.map_or(Value::Null, |context| context.to_value());
@@ -692,6 +697,30 @@ fn commands_context_changes_and_later_host_notifications_reach_their_handlers() 
             Ok(())
         })
         .unwrap();
+    // The other delivered methods (run exits, language server changes and
+    // forwarded notifications) use the generic registration, once each.
+    let routed = [
+        "lithe/host/commands/didRun",
+        "lithe/host/workspace/didChangeContexts",
+    ];
+    let generic: BTreeSet<&str> = delivered
+        .iter()
+        .filter_map(|case| case["method"].as_str())
+        .filter(|method| !routed.contains(method))
+        .collect();
+    assert_eq!(generic.len(), 3);
+    for method in generic {
+        let sender = sender.clone();
+        let method_name = method.to_string();
+        backend
+            .on_host_notification(method, move |params| {
+                sender
+                    .send(json!(["notification", method_name, params]))
+                    .unwrap();
+                Ok(())
+            })
+            .unwrap();
+    }
     let refused = |result: Result<&mut Backend, SdkError>| {
         result.err().expect("a refusal").code().to_string()
     };
@@ -760,5 +789,406 @@ fn native_terminal_methods_keep_context_and_literal_arguments() {
         session.reply(&request, Value::Null);
         assert_eq!(done(&operation).unwrap(), Value::Null);
     }
+    session.close();
+}
+
+#[test]
+fn a_version_four_call_names_the_plugin_that_called_it_older_ones_and_the_host_do_not() {
+    let mut checked = 0;
+    for case in cases(&fixture(), "invocationCallers") {
+        let params = &case["expected"]["params"];
+        let (sender, seen) = mpsc::channel::<Option<String>>();
+        let mut backend = Backend::new("test-backend");
+        backend
+            .function(params["functionID"].as_str().unwrap(), move |_, context| {
+                let caller = context.caller().map(|caller| caller.plugin_id().into());
+                sender.send(caller).unwrap();
+                Ok(Value::Null)
+            })
+            .unwrap();
+        let mut session = Session::start(case["version"].as_u64().unwrap(), backend);
+        // A callee of an older version is sent the caller here too, to show
+        // that the SDK does not report it.
+        let mut wire = params.clone();
+        if let Some(caller) = case.get("caller") {
+            wire["caller"] = json!({ "pluginID": caller });
+        }
+        session.host.request(9, "lithe/function/invoke", wire);
+        let response = session.response(9);
+        assert!(
+            response.get("error").is_none(),
+            "{}: {response}",
+            case["name"]
+        );
+        assert_eq!(
+            seen.recv_timeout(WAIT).unwrap(),
+            params["caller"]["pluginID"].as_str().map(str::to_string),
+            "{}",
+            case["name"]
+        );
+        session.close();
+        checked += 1;
+    }
+    assert_eq!(checked, 4);
+}
+
+#[test]
+fn a_caller_that_is_not_exactly_a_plugin_id_is_not_reported() {
+    let (sender, seen) = mpsc::channel::<Option<String>>();
+    let mut backend = Backend::new("test-backend");
+    backend
+        .function("languageImport.settings", move |_, context| {
+            let caller = context.caller().map(|caller| caller.plugin_id().into());
+            sender.send(caller).unwrap();
+            Ok(Value::Null)
+        })
+        .unwrap();
+    let mut session = Session::start(4, backend);
+    let python = "dev.lithe.fixture.python";
+    let attempts = [
+        (json!({ "pluginID": python }), Some(python)),
+        (json!({ "pluginID": "" }), None),
+        (json!({ "pluginID": 7 }), None),
+        (json!({}), None),
+        (json!({ "pluginID": python, "version": 1 }), None),
+        (json!(python), None),
+        (Value::Null, None),
+    ];
+    for (id, (caller, expected)) in (10..).zip(attempts) {
+        let extra = json!({ "caller": caller });
+        session
+            .host
+            .invoke_with(id, "languageImport.settings", json!({}), extra);
+        assert_eq!(session.response(id)["result"], Value::Null);
+        let reported = seen.recv_timeout(WAIT).unwrap();
+        assert_eq!(reported.as_deref(), expected, "{caller}");
+    }
+    session.close();
+}
+
+#[test]
+fn relay_requests_carry_the_fixture_params_and_only_the_fields_the_methods_define() {
+    let backend = Backend::new("test-backend");
+    let host = backend.handle().host();
+    let mut session = Session::start(4, backend);
+    let mut forwarded = 0;
+    for case in cases(&fixture(), "hostRequests") {
+        if case["expected"]["relay"] != true {
+            continue;
+        }
+        let method = case["method"].as_str().unwrap().to_string();
+        let answer = if method.ends_with("/providers") {
+            json!({ "providers": [{ "pluginID": "dev.lithe.fixture.go", "version": 1 }] })
+        } else {
+            json!({ "value": { "settings": [] } })
+        };
+        let sending = {
+            let host = host.clone();
+            let (method, params) = (method.clone(), case["params"].clone());
+            background(move || {
+                if method.ends_with("/providers") {
+                    let function_id = params["functionID"].as_str().unwrap();
+                    host.functions().providers(function_id)
+                } else {
+                    let context = WorkspaceContext::from_value(&params["context"]).unwrap();
+                    host.functions().invoke(&context, params)
+                }
+            })
+        };
+        let request = session.take(&method);
+        assert_eq!(request["params"], case["params"], "{}", case["name"]);
+        session.reply(&request, answer.clone());
+        assert_eq!(done(&sending).unwrap(), answer, "{}", case["name"]);
+        forwarded += 1;
+    }
+    assert_eq!(forwarded, 3);
+
+    // Fields the method does not define are not sent: Core would refuse a
+    // top-level `caller`, and the call's context is the argument.
+    let call = json!({
+        "pluginID": "dev.lithe.fixture.go", "functionID": "languageImport.settings",
+        "caller": { "pluginID": "dev.lithe.fixture.other" },
+        "context": { "contextID": "other", "generation": 9 }, "extra": true
+    });
+    let sending = {
+        let host = host.clone();
+        background(move || host.functions().invoke(&context(), call))
+    };
+    let request = session.take("lithe/host/functions/invoke");
+    let expected = json!({
+        "pluginID": "dev.lithe.fixture.go", "functionID": "languageImport.settings",
+        "context": context().to_value()
+    });
+    assert_eq!(request["params"], expected);
+    session.reply(&request, json!({ "value": null }));
+    done(&sending).unwrap();
+    session.close();
+}
+
+#[test]
+fn a_relayed_call_from_a_handler_belongs_to_the_call_it_serves_unless_it_names_another() {
+    let mut backend = Backend::new("test-backend");
+    backend
+        .function("project.collect", |params, served| {
+            let value = served.host().functions().invoke(&context(), params)?;
+            Ok(value)
+        })
+        .unwrap();
+    let mut session = Session::start(4, backend);
+    let call = json!({
+        "pluginID": "dev.lithe.fixture.go", "functionID": "languageImport.settings"
+    });
+
+    session.host.invoke(5, "project.collect", call.clone());
+    let request = session.take("lithe/host/functions/invoke");
+    assert_eq!(request["params"]["parentOperationID"], "op-5");
+    session.reply(&request, json!({ "value": { "files": 3 } }));
+    let response = session.response(5);
+    assert_eq!(response["result"], json!({ "value": { "files": 3 } }));
+
+    let mut named = call.clone();
+    named["parentOperationID"] = json!("op-elsewhere");
+    session.host.invoke(6, "project.collect", named);
+    let request = session.take("lithe/host/functions/invoke");
+    assert_eq!(request["params"]["parentOperationID"], "op-elsewhere");
+    session.reply(&request, json!({ "value": null }));
+    let response = session.response(6);
+    assert_eq!(response["result"], json!({ "value": null }));
+
+    // A parent the contract would refuse never leaves the SDK.
+    let mut invalid = call;
+    invalid["parentOperationID"] = json!("");
+    session.host.invoke(7, "project.collect", invalid);
+    assert!(session.response(7).get("error").is_some());
+    assert_eq!(session.sent("lithe/host/functions/invoke").len(), 2);
+    session.close();
+}
+
+#[test]
+fn before_protocol_four_the_relay_is_refused_locally_and_nothing_is_sent() {
+    let call = json!({
+        "pluginID": "dev.lithe.fixture.go", "functionID": "languageImport.settings"
+    });
+    for version in [3, 2] {
+        let backend = Backend::new("test-backend");
+        let host = backend.handle().host();
+        let session = Session::start(version, backend);
+        let functions = host.functions();
+        let providers = functions.providers("languageImport.settings");
+        let invoked = functions.invoke(&context(), call.clone());
+        // The generic request is held to the same rule.
+        let generic = host.request("lithe/host/functions/invoke", json!({}));
+        for result in [providers, invoked, generic] {
+            let error = result.unwrap_err();
+            assert_eq!(error.code(), "plugin.host.unavailable", "v{version}");
+            assert_eq!(error.rpc_code(), Some(-32601), "v{version}");
+        }
+        session.host.assert_quiet();
+        session.close();
+    }
+
+    // The fixture's case for the same refusal agrees.
+    let mut checked = 0;
+    for case in cases(&fixture(), "hostRequests") {
+        let method = case["method"].as_str().unwrap();
+        let version = case["version"].as_u64().unwrap();
+        if version >= 4 || !method.starts_with("lithe/host/functions/") {
+            continue;
+        }
+        let backend = Backend::new("test-backend");
+        let host = backend.handle().host();
+        let session = Session::start(version, backend);
+        let params = case["params"].clone();
+        let error = host.request(method, params).unwrap_err();
+        assert_eq!(error.code(), case["expected"]["code"], "{}", case["name"]);
+        assert_eq!(error.rpc_code(), case["expected"]["rpcCode"].as_i64());
+        session.host.assert_quiet();
+        session.close();
+        checked += 1;
+    }
+    assert_eq!(checked, 1);
+}
+
+#[test]
+fn relay_refusals_keep_the_code_number_and_the_providers_own_code() {
+    let backend = Backend::new("test-backend");
+    let host = backend.handle().host();
+    let mut session = Session::start(4, backend);
+    let call = json!({
+        "pluginID": "dev.lithe.fixture.go", "functionID": "languageImport.settings"
+    });
+    let mut refused = |wire: Value| -> SdkError {
+        let pending = {
+            let (host, call) = (host.clone(), call.clone());
+            background(move || host.functions().invoke(&context(), call))
+        };
+        let request = session.take("lithe/host/functions/invoke");
+        session.refuse(&request, wire);
+        done(&pending).expect_err("a refusal")
+    };
+    let relay_errors = cases(&fixture(), "relayErrors");
+    assert_eq!(relay_errors.len(), 15);
+    for case in relay_errors {
+        let expected = case["code"].as_str().unwrap();
+        let number = case["rpcCode"].as_i64().unwrap();
+        let data = json!({ "code": expected });
+        let named = refused(json!({ "code": number, "message": "Refused.", "data": data }));
+        assert_eq!(named.code(), expected, "{}", case["name"]);
+        assert_eq!(named.rpc_code(), Some(number), "{}", case["name"]);
+        // The number alone names the code.
+        let numbered = refused(json!({ "code": number, "message": "Refused." }));
+        assert_eq!(numbered.code(), expected, "{}", case["name"]);
+        assert_eq!(numbered.rpc_code(), Some(number), "{}", case["name"]);
+    }
+    let failed = refused(json!({
+        "code": -32070, "message": "The provider failed.",
+        "data": {
+            "code": "plugin.function.failed", "details": { "pluginErrorCode": "db.locked" }
+        }
+    }));
+    assert_eq!(failed.code(), "plugin.function.failed");
+    assert_eq!(failed.details().unwrap()["pluginErrorCode"], "db.locked");
+    session.close();
+}
+
+#[test]
+fn an_invalid_relayed_call_fails_locally_and_nothing_is_sent() {
+    let backend = Backend::new("test-backend");
+    let host = backend.handle().host();
+    let session = Session::start(4, backend);
+    let functions = host.functions();
+    let valid = json!({
+        "pluginID": "dev.lithe.fixture.go", "functionID": "languageImport.settings"
+    });
+    let attempts = [
+        ("pluginID", json!("")),
+        ("pluginID", json!(7)),
+        ("functionID", json!("Not-Valid")),
+        ("params", json!([1])),
+        ("timeoutMilliseconds", json!(0)),
+        ("timeoutMilliseconds", json!(-5)),
+        ("timeoutMilliseconds", json!(1.5)),
+        ("timeoutMilliseconds", json!("5")),
+        ("parentOperationID", json!(17)),
+        ("parentOperationID", json!("")),
+        ("parentOperationID", json!("p".repeat(129))),
+    ];
+    for (field, bad) in attempts {
+        let label = format!("{field}: {bad}");
+        let mut call = valid.clone();
+        call[field] = bad;
+        let result = functions.invoke(&context(), call);
+        assert_eq!(code(result), "sdk.functions.invalidCall", "{label}");
+    }
+    let incomplete = [
+        json!([]),
+        json!({ "functionID": "languageImport.settings" }),
+        json!({ "pluginID": "dev.lithe.fixture.go" }),
+    ];
+    for call in incomplete {
+        let label = call.to_string();
+        let result = functions.invoke(&context(), call);
+        assert_eq!(code(result), "sdk.functions.invalidCall", "{label}");
+    }
+    for bad in ["", "Not-Valid", "UPPER", "a..b"] {
+        let result = functions.providers(bad);
+        assert_eq!(code(result), "sdk.functions.invalidCall", "{bad:?}");
+    }
+
+    // The fixture's cases Core refuses as invalid params agree with these
+    // checks, whenever the call names a context.
+    let mut refused = 0;
+    for case in cases(&fixture(), "hostRequests") {
+        let params = &case["params"];
+        if case["method"] != "lithe/host/functions/invoke"
+            || case["expected"]["code"] != "plugin.host.invalidParams"
+            || params.get("context").is_none()
+        {
+            continue;
+        }
+        let workspace = WorkspaceContext::from_value(&params["context"]).unwrap();
+        let result = functions.invoke(&workspace, params.clone());
+        assert_eq!(
+            code(result),
+            "sdk.functions.invalidCall",
+            "{}",
+            case["name"]
+        );
+        refused += 1;
+    }
+    assert_eq!(refused, 4);
+    session.host.assert_quiet();
+    session.close();
+}
+
+#[test]
+fn relay_answers_are_the_hosts_objects_and_a_null_value_stays_inside_value() {
+    let backend = Backend::new("test-backend");
+    let host = backend.handle().host();
+    let mut session = Session::start(4, backend);
+    let listing = {
+        let host = host.clone();
+        background(move || host.functions().providers("languageImport.settings"))
+    };
+    let request = session.take("lithe/host/functions/providers");
+    let answer = json!({
+        "providers": [{ "pluginID": "dev.lithe.fixture.go", "version": 1 }]
+    });
+    session.reply(&request, answer.clone());
+    assert_eq!(done(&listing).unwrap(), answer);
+
+    let call = json!({
+        "pluginID": "dev.lithe.fixture.go", "functionID": "languageImport.settings"
+    });
+    let calling = {
+        let host = host.clone();
+        background(move || host.functions().invoke(&context(), call))
+    };
+    let request = session.take("lithe/host/functions/invoke");
+    session.reply(&request, json!({ "value": null }));
+    assert_eq!(done(&calling).unwrap(), json!({ "value": null }));
+
+    // An answer that is not an object is the host's mistake, not a value.
+    let broken = {
+        let host = host.clone();
+        background(move || host.functions().providers("languageImport.settings"))
+    };
+    let request = session.take("lithe/host/functions/providers");
+    session.reply(&request, json!([]));
+    assert_eq!(code(done(&broken)), "sdk.host.invalidResult");
+    session.close();
+}
+
+#[test]
+fn cancelling_a_call_cancels_the_relayed_call_it_waits_on() {
+    let (sender, outcome) = mpsc::channel();
+    let mut backend = Backend::new("test-backend");
+    backend
+        .function("project.collect", move |params, served| {
+            let relay = served.host().functions().invoke(&context(), params);
+            let failure = relay.as_ref().err().map(|error| error.code().to_string());
+            sender.send(failure).unwrap();
+            Ok(relay?)
+        })
+        .unwrap();
+    let mut session = Session::start(4, backend);
+    let call = json!({
+        "pluginID": "dev.lithe.fixture.go", "functionID": "languageImport.settings"
+    });
+    session.host.invoke(41, "project.collect", call);
+    let request = session.take("lithe/host/functions/invoke");
+    session.host.notify("$/cancelRequest", json!({ "id": 41 }));
+    assert_eq!(session.response(41)["error"]["code"], -32800);
+    // The relayed request fails with the call's cancellation, and Core is told.
+    assert_eq!(
+        outcome.recv_timeout(WAIT).unwrap().as_deref(),
+        Some("sdk.call.cancelled")
+    );
+    let cancels: Vec<_> = session
+        .sent("$/cancelRequest")
+        .into_iter()
+        .map(|frame| frame["params"].clone())
+        .collect();
+    assert_eq!(cancels, [json!({ "id": request["id"] })]);
     session.close();
 }

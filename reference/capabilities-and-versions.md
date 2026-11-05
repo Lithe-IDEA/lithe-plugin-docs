@@ -131,9 +131,9 @@ macOS 目前只声明 `serverProcess` 1 和 3：版本 4 已由 Core 校验，�
 
 “Core 提供”是宿主在 `initialize` 里给出的版本列表；SDK 列是该 SDK 能回答的版本。后端会选两边都支持的最高版本。
 
-| 协议 | Core 提供 | Node SDK 0.3.0 | Java SDK 0.3.0 | Rust SDK 0.2.0 |
+| 协议 | Core 提供 | Node SDK 0.4.0 | Java SDK 0.4.0 | Rust SDK 0.3.0 |
 | --- | --- | --- | --- | --- |
-| `litheFunctions` | 1、2、3、4 | 3 | 3 | 3、2、1 |
+| `litheFunctions` | 1、2、3、4 | 1–4 | 1–4 | 1–4 |
 | `litheBuild` | 1–11 | 1–6 | 1–6 | — |
 | `litheVcs` | 1 | 1 | — | — |
 | `litheKeymapImport` | 1 | 1 | 1 | 1 |
@@ -141,7 +141,7 @@ macOS 目前只声明 `serverProcess` 1 和 3：版本 4 已由 Core 校验，�
 | `litheLogging` | 1 | 1（必需） | 1（必需） | 1（必需） |
 
 - Node 和 Java SDK 的构建方法按协商结果启用：`model`、`dependencies` 需要 1，`execute` 需要 2，`test`、`discoverTests` 需要 3，`prepareRun` 需要 4，`prepareDebug` 需要 5。版本 7–11 的内容目前没有 SDK 封装。
-- 宿主支持函数协议 1–4，三个官方 SDK（Node、Java、Rust）目前只协商 1–3，所以用它们构建的后端不会协商到协议 4。协议 4 的 `functions/*` 和 `caller`，以及协议 3 宿主方法中的 `run/*`、`debug/start`、`languageServer/*`、`documents/registerContentProvider`，目前都没有 SDK 封装；插件可以先用 SDK 的通用宿主请求调用这些协议 3 的方法。
+- 宿主支持函数协议 1–4，三个官方 SDK（Node、Java、Rust）都协商 1–4，已封装协议 4 的 `functions/providers`、`functions/invoke` 和被调函数的 `caller`；协商到 3 及以下时，这两个方法在 SDK 本地以 `plugin.host.unavailable`（-32601）失败，不会发给宿主。协议 3 宿主方法中的 `run/*`、`debug/start`、`languageServer/*`、`documents/registerContentProvider` 仍没有 SDK 封装；插件可以先用 SDK 的通用宿主请求调用这些协议 3 的方法。
 - 当前 SDK 要求宿主提供 `litheLogging` 1，否则拒绝初始化；用这些 SDK 构建的后端只能在提供该协议的 Lithe 版本中启动。
 
 ### SDK 发版历史
@@ -156,6 +156,9 @@ macOS 目前只声明 `serverProcess` 1 和 3：版本 4 已由 Core 校验，�
 | 2026-11-05 | [Node 0.3.0](https://github.com/Lithe-IDEA/lithe-plugin-docs/releases/tag/sdk-node-v0.3.0) | 3 | 1–6 | 1 | 1 | 1（必需） | 快捷键导入提供者、原生终端、类型化诊断；移除自由文本 `log` |
 | 2026-11-05 | [Java 0.3.0](https://github.com/Lithe-IDEA/lithe-plugin-docs/releases/tag/sdk-java-v0.3.0) | 3 | 1–6 | — | 1 | 1（必需） | 同 Node 0.3.0 |
 | 2026-11-05 | [Rust 0.2.0](https://github.com/Lithe-IDEA/lithe-plugin-docs/releases/tag/sdk-rust-v0.2.0) | 3、2、1 | — | — | 1 | 1（必需） | 同 Node 0.3.0 |
+| 2026-11-05 | [Node 0.4.0](https://github.com/Lithe-IDEA/lithe-plugin-docs/releases/tag/sdk-node-v0.4.0) | 1–4 | 1–6 | 1 | 1 | 1（必需） | 函数协议 4：跨插件调用（`functions/providers`、`functions/invoke`、`caller`） |
+| 2026-11-05 | [Java 0.4.0](https://github.com/Lithe-IDEA/lithe-plugin-docs/releases/tag/sdk-java-v0.4.0) | 1–4 | 1–6 | — | 1 | 1（必需） | 函数协议 4：跨插件调用（`functions/providers`、`functions/invoke`、`caller`） |
+| 2026-11-05 | [Rust 0.3.0](https://github.com/Lithe-IDEA/lithe-plugin-docs/releases/tag/sdk-rust-v0.3.0) | 1–4 | — | — | 1 | 1（必需） | 函数协议 4：跨插件调用（`functions/providers`、`functions/invoke`、`caller`） |
 
 ### 文档格式版本
 
@@ -302,9 +305,9 @@ These protocols are negotiated when a process starts and never appear in the man
 
 “Core offers” is the list the host sends in `initialize`; the SDK columns are the versions each SDK can answer. A backend picks the highest version both sides support.
 
-| Protocol | Core offers | Node SDK 0.3.0 | Java SDK 0.3.0 | Rust SDK 0.2.0 |
+| Protocol | Core offers | Node SDK 0.4.0 | Java SDK 0.4.0 | Rust SDK 0.3.0 |
 | --- | --- | --- | --- | --- |
-| `litheFunctions` | 1, 2, 3, 4 | 3 | 3 | 3, 2, 1 |
+| `litheFunctions` | 1, 2, 3, 4 | 1–4 | 1–4 | 1–4 |
 | `litheBuild` | 1–11 | 1–6 | 1–6 | — |
 | `litheVcs` | 1 | 1 | — | — |
 | `litheKeymapImport` | 1 | 1 | 1 | 1 |
@@ -312,7 +315,7 @@ These protocols are negotiated when a process starts and never appear in the man
 | `litheLogging` | 1 | 1 (required) | 1 (required) | 1 (required) |
 
 - The Node and Java SDKs enable each build method from the negotiated version: `model` and `dependencies` need 1, `execute` 2, `test` and `discoverTests` 3, `prepareRun` 4, `prepareDebug` 5. Versions 7–11 have no SDK wrappers yet.
-- The host supports function protocols 1–4, while the three official SDKs (Node, Java, Rust) negotiate only 1–3 today, so a backend built on them never negotiates protocol 4. The protocol 4 `functions/*` methods and `caller` field, and the protocol 3 host methods `run/*`, `debug/start`, `languageServer/*`, and `documents/registerContentProvider`, have no SDK wrappers yet; a plugin can call those protocol 3 methods through the SDK's generic host request meanwhile.
+- The host supports function protocols 1–4, and the three official SDKs (Node, Java, Rust) all negotiate 1–4. They wrap the protocol 4 methods `functions/providers` and `functions/invoke` and expose `caller` to the called function; when version 3 or lower is negotiated, both methods fail locally in the SDK with `plugin.host.unavailable` (-32601) and are never sent to the host. The protocol 3 host methods `run/*`, `debug/start`, `languageServer/*`, and `documents/registerContentProvider` still have no SDK wrappers; a plugin can call those protocol 3 methods through the SDK's generic host request meanwhile.
 - The current SDKs require the host to offer `litheLogging` 1 and refuse to initialize otherwise, so a backend built on them starts only in a Lithe release that offers it.
 
 ### SDK release history
@@ -327,6 +330,9 @@ These protocols are negotiated when a process starts and never appear in the man
 | 2026-11-05 | [Node 0.3.0](https://github.com/Lithe-IDEA/lithe-plugin-docs/releases/tag/sdk-node-v0.3.0) | 3 | 1–6 | 1 | 1 | 1 (required) | Shortcut import providers, native terminals, typed diagnostics; free-text `log` removed |
 | 2026-11-05 | [Java 0.3.0](https://github.com/Lithe-IDEA/lithe-plugin-docs/releases/tag/sdk-java-v0.3.0) | 3 | 1–6 | — | 1 | 1 (required) | Same as Node 0.3.0 |
 | 2026-11-05 | [Rust 0.2.0](https://github.com/Lithe-IDEA/lithe-plugin-docs/releases/tag/sdk-rust-v0.2.0) | 3, 2, 1 | — | — | 1 | 1 (required) | Same as Node 0.3.0 |
+| 2026-11-05 | [Node 0.4.0](https://github.com/Lithe-IDEA/lithe-plugin-docs/releases/tag/sdk-node-v0.4.0) | 1–4 | 1–6 | 1 | 1 | 1 (required) | Function protocol 4: cross-plugin calls (`functions/providers`, `functions/invoke`, `caller`) |
+| 2026-11-05 | [Java 0.4.0](https://github.com/Lithe-IDEA/lithe-plugin-docs/releases/tag/sdk-java-v0.4.0) | 1–4 | 1–6 | — | 1 | 1 (required) | Function protocol 4: cross-plugin calls (`functions/providers`, `functions/invoke`, `caller`) |
+| 2026-11-05 | [Rust 0.3.0](https://github.com/Lithe-IDEA/lithe-plugin-docs/releases/tag/sdk-rust-v0.3.0) | 1–4 | — | — | 1 | 1 (required) | Function protocol 4: cross-plugin calls (`functions/providers`, `functions/invoke`, `caller`) |
 
 ### Document format versions
 

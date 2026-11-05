@@ -5,7 +5,7 @@
 // handler instead of as a refused session at runtime.
 
 /** Protocol versions this SDK can answer: the highest of each. */
-export const FUNCTIONS_VERSION = 3;
+export const FUNCTIONS_VERSION = 4;
 export const BUILD_VERSION = 6;
 export const VCS_VERSION = 1;
 
@@ -13,6 +13,8 @@ export const VCS_VERSION = 1;
 export const HOST_SERVICES_VERSION = 2;
 /** First plugin-function version with workspace contexts, discovery, and host notifications. */
 export const CONTEXT_VERSION = 3;
+/** First plugin-function version with cross-plugin calls relayed through Core and the callee's `caller`. */
+export const RELAY_VERSION = 4;
 
 export const METHODS = Object.freeze({
   initialize: 'initialize',
@@ -36,10 +38,11 @@ export const METHODS = Object.freeze({
 });
 
 /**
- * Backend-to-host requests of plugin-function protocols 2 and 3. From
+ * Backend-to-host requests of plugin-function protocols 2 to 4. From
  * version 3 the host adds methods without a new version; `host.request`
  * sends any `lithe/host/*` method, and `getCapabilities` says which ones
- * this session may call.
+ * this session may call. The two `functions` methods are the exception:
+ * they need version 4.
  */
 export const HOST_METHODS = Object.freeze({
   credentialsGet: 'lithe/host/credentials/get',
@@ -77,6 +80,8 @@ export const HOST_METHODS = Object.freeze({
   terminalReopen: 'lithe/host/terminal/reopen',
   terminalDispose: 'lithe/host/terminal/dispose',
   terminalOnExit: 'lithe/host/terminal/onExit',
+  functionsProviders: 'lithe/host/functions/providers',
+  functionsInvoke: 'lithe/host/functions/invoke',
 });
 
 /** Host-to-backend notifications of protocol 3. */
@@ -88,8 +93,9 @@ export const HOST_NOTIFICATIONS = Object.freeze({
 
 /**
  * Host failure codes (`error.data.code`) and the JSON-RPC number Core sends
- * with each to a version 3 backend. A number never changes meaning; a later
- * host adds codes after `-32021`.
+ * with each to a version 3 or 4 backend. A number never changes meaning; a
+ * later host adds codes after the last one listed here. The
+ * `plugin.function.*` codes are the relay's own (protocol 4).
  */
 export const HOST_ERRORS = Object.freeze({
   'plugin.host.unavailable': -32601,
@@ -108,6 +114,22 @@ export const HOST_ERRORS = Object.freeze({
   'plugin.host.preconditionFailed': -32019,
   'plugin.host.busy': -32020,
   'plugin.host.rateLimited': -32021,
+  'plugin.host.languageServerUnavailable': -32022,
+  'plugin.host.languageServerError': -32023,
+  'plugin.host.methodNotDeclared': -32024,
+  'plugin.host.toolUnresolved': -32025,
+  'plugin.host.foreignContribution': -32026,
+  'plugin.function.notDeclared': -32027,
+  'plugin.function.notExported': -32028,
+  'plugin.function.providerDisabled': -32029,
+  'plugin.function.versionMismatch': -32030,
+  'plugin.function.callCycle': -32065,
+  'plugin.function.depthExceeded': -32066,
+  'plugin.function.tooManyCalls': -32067,
+  'plugin.function.payloadTooLarge': -32068,
+  'plugin.function.providerUnavailable': -32069,
+  'plugin.function.failed': -32070,
+  'plugin.function.invalidResult': -32071,
 });
 
 /** Minimum negotiated version of each typed build operation. */
@@ -183,7 +205,16 @@ export const LIMITS = Object.freeze({
   maxCredentialKeyBytes: 128,
   maxCredentialSecretBytes: 16 * 1024,
   maxPendingHostRequests: 16,
+  // The relay's bounds are Core's to enforce; the SDK only names them.
+  relayDefaultTimeoutMilliseconds: 60000,
+  relayMaxTimeoutMilliseconds: 600000,
+  maxParentOperationIdBytes: 128,
 });
+
+/** True for the two host methods that need plugin-function protocol 4. */
+export function isRelayMethod(method) {
+  return method === HOST_METHODS.functionsProviders || method === HOST_METHODS.functionsInvoke;
+}
 
 /** Dot-separated lowerCamelCase segments, for example `snapshot.refresh`. */
 export function isFunctionId(value) {
@@ -201,7 +232,7 @@ export function isVcsId(value) {
 }
 
 /**
- * The key alphabet of protocols 2 and 3: 1-128 ASCII letters, digits, `.`,
+ * The key alphabet of protocols 2 to 4: 1-128 ASCII letters, digits, `.`,
  * `_`, `:`, or `-`. Credential keys, context IDs, and subscription IDs use it.
  */
 export function isCredentialKey(value) {
