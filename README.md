@@ -146,6 +146,7 @@ SDK 的源码都在本仓库的 `sdk/` 下，发布在[本仓库的 Releases](ht
 | --- | --- |
 | [插件 API 总表](reference/api-catalog.md) | API-01–44 每一项现在能用的方法、尚未提供的部分和对应功能页 |
 | [能力与协议版本对照](reference/capabilities-and-versions.md) | 插件 API 级别、`requires` 能力版本、进程协议版本、文档格式版本，按 Core、macOS、Windows 和官方 SDK 对照 |
+| [插件协议更新记录](reference/protocol-changelog.md) | 每个协议、能力和 API 是哪天、哪个 PR 改的，以及每个版本首次出现在哪个 PR；只有中文 |
 | [功能页](reference/README.md#功能页) | 15 个功能各一页：版本对照、字段、宿主现状、契约章节、示例与用例 |
 
 ### 插件契约
@@ -187,7 +188,7 @@ node scripts/contract.mjs sync --revision <主仓库的完整 commit>
 
 联网命令会调用 GitHub API；设置 `GITHUB_TOKEN` 可以避开匿名请求的频率限制。CI 在每次提交时运行前两项检查和测试，每周一运行一次 `drift`。主仓库的契约有变化时，每周检查会失败并提示重新同步。
 
-契约变化后，同时检查 [`reference/`](reference/README.md) 里受影响的功能页和版本表：它们是手写的对照，不会随同步自动更新。
+契约变化后，同时检查 [`reference/`](reference/README.md) 里受影响的功能页和版本表：它们是手写的对照，不会随同步自动更新。每次同步还要在[插件协议更新记录](reference/protocol-changelog.md)里补上新合入的 PR，做法见该页的“维护”一节。
 
 #### SDK
 
@@ -353,6 +354,7 @@ Lithe Store maintains the listing rules: [Publishing community plugins](https://
 | --- | --- |
 | [Plugin API catalog](reference/api-catalog.md) | For each of API-01–44, the methods usable today, what is still missing, and its feature page |
 | [Capability and protocol versions](reference/capabilities-and-versions.md) | Plugin API levels, `requires` capability versions, process protocol versions, and document format versions, compared across Core, macOS, Windows, and the official SDKs |
+| [Plugin protocol changelog](reference/protocol-changelog.md) | When, and in which PR, each protocol, capability, and API changed, and the PR that introduced each version; Chinese only |
 | [Feature pages](reference/README.md#feature-pages) | One page for each of 15 features: versions compared, fields, host status, contract sections, examples and cases |
 
 ### Plugin contract
@@ -394,7 +396,7 @@ With a local clone of the Lithe repository, add `--checkout <clone directory>` t
 
 Online commands call the GitHub API; set `GITHUB_TOKEN` to avoid anonymous rate limits. CI runs the first two checks and the tests on every commit and runs `drift` every Monday. When the Lithe repository's contract changes, the weekly check fails and asks for a resync.
 
-After a contract change, also check the affected feature pages and version tables in [`reference/`](reference/README.md): they are hand-written comparisons and do not update with the sync.
+After a contract change, also check the affected feature pages and version tables in [`reference/`](reference/README.md): they are hand-written comparisons and do not update with the sync. Each sync also adds the newly merged PRs to the [plugin protocol changelog](reference/protocol-changelog.md), as its maintenance section describes.
 
 #### SDKs
 

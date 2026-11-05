@@ -12,6 +12,7 @@
 | --- | --- |
 | API-01–44 每一项现在能用什么、还缺什么 | [插件 API 总表](api-catalog.md) |
 | 插件 API 级别、`requires` 能力版本、进程协议版本、文档格式版本，以及各宿主和 SDK 支持到哪一版 | [能力与协议版本对照](capabilities-and-versions.md) |
+| 每个协议、能力和 API 是哪天、哪个 PR 改的 | [插件协议更新记录](protocol-changelog.md)（只有中文） |
 | 某个功能的字段、版本、宿主现状、契约章节和示例 | 下方的功能页 |
 | 一步步做出一个插件 | [开发指南](../guides/) |
 
@@ -58,6 +59,7 @@ This directory organizes the plugin contract by feature: what each numbered API 
 | --- | --- |
 | What each of API-01–44 offers today and what is missing | [Plugin API catalog](api-catalog.md) |
 | Plugin API levels, `requires` capability versions, process protocol versions, document format versions, and which version each host and SDK supports | [Capability and protocol versions](capabilities-and-versions.md) |
+| When, and in which PR, each protocol, capability, and API changed | [Plugin protocol changelog](protocol-changelog.md) (Chinese only) |
 | A feature's fields, versions, host status, contract sections, and examples | The feature pages below |
 | Building a plugin step by step | [Guides](../guides/) |
 
