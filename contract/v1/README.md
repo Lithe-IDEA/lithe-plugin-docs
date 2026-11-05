@@ -14,7 +14,7 @@ This directory is the cross-platform source of truth:
 | `native-ui.schema.json` | JSON shape of native UI documents rendered by the host |
 | `plugin-index.schema.json` | JSON shape of a marketplace source index |
 | `fixtures/` | Valid example manifests and golden cases, one folder per contract area (below). Manifests are named after the capability they exercise rather than a published plugin. Case files name their base manifest by file name, so file names are unique across the folders |
-| `toolchains/README.md` | Implemented Core foundation: plugin definitions/provider declarations, verified-origin registry, reply validation, directory pins, snapshot resolution, version matching and discovery plans; native hosts are not connected |
+| `toolchains/README.md` | Implemented Core foundation: plugin definitions/provider declarations, verified-origin registry, reply validation, directory pins, snapshot resolution, version matching and discovery plans; macOS uses it for its read-only settings pages and for Build and run tools, Windows is not connected |
 | `toolchains/proposal/` | Broader design draft, including unimplemented query transport, native lifecycle/persistence, consumer migration, settings UI and manager plugins; examples are review projections, not installable manifests |
 
 | Fixture folder | Contents |
@@ -29,9 +29,9 @@ This directory is the cross-platform source of truth:
 | `fixtures/build-providers/` | Build providers (`build-provider*`) and the golden cases of their configuration, run options, run and debug preparation, execution, and test protocols |
 | `fixtures/debug-adapters/` | Debug adapters (standalone, served by a language server, remote attach) and `debug-adapter-rejections.json` |
 | `fixtures/vcs/` | A version control provider |
-| `fixtures/keymap-import/` | Two independent shortcut import providers sharing one packaged backend; native source access is not implemented yet |
+| `fixtures/keymap-import/` | Two independent shortcut import providers sharing one packaged backend |
 | `fixtures/project-generators/` | Project generators: template files (`templates/`), a scaffolding command, and an archive download; `project-plans.json` holds golden `project.*` form evaluations, generation plans, and name checks |
-| `fixtures/toolchains/` | Production-shape Core fixtures for tool definitions and a packaged toolchain provider; they require explicit new host capabilities, not yet supplied by native products. `proposal/` holds the examples and cases of the toolchains draft |
+| `fixtures/toolchains/` | Production-shape fixtures for tool definitions and a packaged toolchain provider; they require `toolDefinitions` and `toolchainProviders`, which only macOS advertises. `proposal/` holds the examples and cases of the toolchains draft |
 | `fixtures/package-trust/` | `publisher-bundled.plugin.json` and `signature-vectors.json`: public cross-platform vectors for the package publisher signature: the RFC 8032 test key, a fixed package with non-ASCII file names, its canonical payload, RFC 8032 deterministic signature, and content digest. Both platforms must build the same canonical payload and digest and accept the recorded signature; signers that add randomness, such as CryptoKit, check the signature by verification instead of byte comparison |
 | `fixtures/marketplace/` | Marketplace index, availability, source URL, and install review golden cases |
 
@@ -60,7 +60,8 @@ does not add a built-in tool-definition table or interpret version-manager
 configuration formats.
 
 The [implemented Core contract](toolchains/README.md) now accepts `toolDefinitions: 1`
-and `toolchainProviders: 1` declarations and provides six `toolchains.*` commands.
+and `toolchainProviders: 1` declarations and provides the `toolchains.*` commands
+listed there.
 `executableResolution: 2` applies to tool-definition candidates only; it does not
 admit new sources into existing Build candidate sets. Definitions are entirely
 plugin-owned, with reserved short IDs checked against host-verified official
@@ -69,9 +70,11 @@ provenance when constructing the registry.
 macOS advertises these capabilities for its read-only toolchain settings pages.
 The native adapter scans declarations, probes checked executables, queries plugin
 backends and watches their inputs; Core consumes captured facts and owns validation
-and resolution. Windows does not advertise the capabilities. Saving pins,
+and resolution. A separate fresh resolution serves Build tools and run plans
+whose `toolchain` executable names a plugin-defined tool rather than a host
+toolchain; settings detections never grant launch authority. Windows does not advertise the capabilities. Saving pins,
 `toolchainConsumers`, generic runtime launches and live backend activation remain
-unsupported, and current Java/Maven/Build/Run selection is unchanged. Version-manager
+unsupported, and Java and language-server consumers keep their previous adapters. Version-manager
 implementations such as mise belong to their own plugin packages. Proposal
 envelopes remain separate from production manifests. See [the implemented slice](toolchains/README.md).
 
@@ -133,10 +136,10 @@ and provider, revokes them when the import or session ends, and rejects files
 replaced or changed after capture. A new snapshot for that provider revokes the
 previous one. Errors never disclose absolute paths.
 
-This is a foundation, not an available product extension: macOS implements the
-scoped reader, but provider discovery, the product import workflow and Windows
-source access are not implemented. Hosts must not advertise this capability
-until they implement the complete workflow. No existing SDK advertises it.
+macOS advertises `keymapImportProviders` 1 and implements the scoped reader.
+Windows has no import source reader and does not advertise the capability; a
+host advertises it only with the complete import workflow. The official Node,
+Java and Rust SDKs implement `litheKeymapImport` 1.
 
 ## Package layout
 
@@ -170,7 +173,7 @@ symbolic links. A host treats an installed package as read-only.
 | `settings` | User-adjustable plugin options (level 2 and later). |
 | `ui` | Host-rendered tool windows and commands (level 2 and later). |
 | `buildSystems` | Project-level build tools (level 3). |
-| `toolDefinitions` | Plugin-owned tool policy ([Core foundation](toolchains/README.md)); requires `toolDefinitions: 1` and `executableResolution: 2`; macOS hosts read-only discovery. |
+| `toolDefinitions` | Plugin-owned tool policy ([Core foundation](toolchains/README.md)); requires `toolDefinitions: 1` and `executableResolution: 2`; macOS hosts read-only discovery and resolves Build and run tools. |
 | `toolchainProviders` | Backend fact-provider declarations ([Core foundation](toolchains/README.md)); requires `toolchainProviders: 1`, backend/server-process capabilities and `toolchains.provide`. |
 | `keymapImportProviders` | Independent shortcut import providers; requires `keymapImportProviders: 1`, `backend: 2`, `serverProcess: 1` and `keymaps.provide`. macOS provides access to explicitly selected sources; Windows does not yet advertise this capability. |
 
@@ -672,9 +675,9 @@ hosts. Level 3 versions each section on its own. A level 3 manifest lists in
 | `debugAdapters` | [`debugAdapters[]`](#api-level-4-debug-adapters); v2 adds target arguments/environment | `1`, `2` |
 | `projectGenerators` | [`projectGenerators[]`](#project-generators): entries of the New Project window | `1` |
 | `backend` | [`backend`](#plugin-backend): the plugin's own long-lived process | `1`, `2` (adds [start without a page and workspace contexts](#backend-2-workspace-contexts)) |
-| `toolDefinitions` | [Tool identities, layouts, discovery and four-layer candidates](toolchains/README.md) | `1` (Core; macOS read-only settings) |
-| `toolchainProviders` | [Provider declarations and permission-bound answer validation](toolchains/README.md) | `1` (Core; macOS read-only settings) |
-| `executableResolution` | [Shared executable candidates](#shared-executable-candidates-executableresolution-1): candidate ordering and strict selection; v2 adds tool-definition candidates and canonical project/subproject toolchain registry bindings without changing existing Build candidate sets | `1`, `2` (v2 Core; macOS read-only settings) |
+| `toolDefinitions` | [Tool identities, layouts, discovery and four-layer candidates](toolchains/README.md) | `1` (Core; macOS settings pages, Build and run tools) |
+| `toolchainProviders` | [Provider declarations and permission-bound answer validation](toolchains/README.md) | `1` (Core; macOS settings pages, Build and run tools) |
+| `executableResolution` | [Shared executable candidates](#shared-executable-candidates-executableresolution-12): candidate ordering and strict selection; v2 adds tool-definition candidates and canonical project/subproject toolchain registry bindings without changing existing Build candidate sets | `1`, `2` (v2 Core; macOS settings pages, Build and run tools) |
 | `keymapImportProviders` | `keymapImportProviders[]`: independent shortcut import providers | `1` (macOS; Windows does not advertise it yet) |
 
 Version 1 of every capability means what its section means at level 2
@@ -1022,9 +1025,16 @@ They are excluded as `plugin-disk-install-state`. No runtime write targets the
 signed app bundle or Windows installation resources, so these paths do not
 change code signatures or Sparkle differential-update baselines.
 
-Windows currently shares the schemas and Rust validation only; it has no
-implementation of this declarative ZIP/directory snapshot and approval flow.
-Its existing worker-package import is a separate format. The feature matrix
+Windows has a narrower disk import. It copies a ZIP or unpacked directory into
+a private snapshot under the application's local data directory
+(`plugin-temp/lithe-plugin-disk-<id>`), reviews it with
+`plugins.marketplace.installReview`, and installs only after the user confirms.
+Confirmation re-runs the review and refuses a snapshot whose `plugin.json`
+changed after review. It does not verify publisher signatures, does not compute
+or recheck a digest of the other package files, and does not record approved
+programs or provenance; its installation record holds only the ID, active
+version and enabled state. It has no marketplace install path. Its existing
+worker-package import is a separate format. The feature matrix
 therefore keeps Windows `partial` and macOS runtime verification `pending`;
 static checks and Node resource tests alone do not verify the UI confirmation,
 complete program rendering, cleanup, or bundle hashes in a real workflow.
@@ -3056,9 +3066,12 @@ The design source is the [proposed public Extension Contract and Provider API](h
 Current runtime behavior is recorded in the [first-stage workbench UI Note](https://github.com/1lck/Lithe-IDEA/blob/preview/.agents/notes/implemented/architecture/2026-10-12-workbench-ui-contributions.md).
 
 ### Current Windows availability
-Windows can validate API level 2 through Rust Core but its UI adapter has not
-implemented this contract yet. Its marketplace must filter unsupported API
-levels until that adapter is available.
+Windows advertises `ui` 1 and 2: it renders host tool windows, commands and
+package web content. It does not advertise `ui` 3 (native controls) or 4
+(backend-only commands), so Core refuses packages that require them there.
+Windows installs declarative packages from disk only and has no marketplace
+browser yet. Core's `plugins.marketplace.validateIndex` marks level 2 versions
+without `requires` available only on `darwin-*` platforms.
 
 ### Existing community store and Lua template
 
@@ -3076,8 +3089,9 @@ remain valid. To add a host-rendered view to that template:
    existing package checksum, user install review and content digest still
    apply; UI does not bypass them.
 5. Set the new Store version entry's `pluginAPIVersion` to 2. The index schema,
-   release archive format and SHA-256 rules stay unchanged. Only list platforms
-   with an implemented API level 2 UI host (currently macOS).
+   release archive format and SHA-256 rules stay unchanged. Only list `darwin-*`
+   platforms: `plugins.marketplace.validateIndex` marks a level 2 version without
+   `requires` unsupported on every other platform.
 
 `fixtures/manifest/hello-lithe.plugin.json` is a contract fixture in the reserved test
 namespace, not a ready-to-publish community package. Change its ID and all

@@ -3,12 +3,12 @@
   "source": {
     "repository": "https://github.com/1lck/Lithe-IDEA",
     "directory": "shared/contracts/plugins/v1",
-    "revision": "51eede90590073461fcb645c229fa72adbe06bb6"
+    "revision": "0fb748a419622950ca72cb228c2ba0f7f5ebf4aa"
   },
   "files": [
     {
       "path": "README.md",
-      "sha256": "aa59b3d97b39733d563aefc6a7627f9118b3da4a5e5a80e7e4ea9b7f546d6c03"
+      "sha256": "8bae09cb1277181d6598c9835a42f6fb9c2db27d2e4d0e60dd5e45e80d487e5d"
     },
     {
       "path": "fixtures/backend/backend-workspace.plugin.json",
@@ -244,7 +244,7 @@
     },
     {
       "path": "fixtures/package-trust/signature-vectors.json",
-      "sha256": "1dcd72cef08f8dc5c257d9d80b9f767b04fbfbd601a2a66ce8d416d1563fe34c"
+      "sha256": "94dd446142eee59dd1d8422b004912161c13e9e281c8a754d8bb1f632fb8e6fa"
     },
     {
       "path": "fixtures/project-generators/project-generator.plugin.json",
@@ -340,11 +340,11 @@
     },
     {
       "path": "toolchains/README.md",
-      "sha256": "85b8fe77d6c3ad834daade17d474ec537960031f24e547460de435d084eb3783"
+      "sha256": "65b98b081650aac5b1208ab823c56ec5d335a2300c76867e6c814fca08b5b50e"
     },
     {
       "path": "toolchains/proposal/README.md",
-      "sha256": "7d704ff951e8b60c784b9807eeb8d37ead03e131040e70a2f803440660728ed6"
+      "sha256": "b7b324bc688a218c94f7cbceb425a8976f024ac2ac18d049aac747887b99496b"
     },
     {
       "path": "toolchains/proposal/local.schema.json",
@@ -356,7 +356,7 @@
     },
     {
       "path": "toolchains/proposal/manifest.md",
-      "sha256": "beaae4c30e0716eb2b2b1d6a59bead73e55a133703b200908f8f07106bad0804"
+      "sha256": "77e4e8a8e1b4d67c548edc9242afaa0f071466c431ea7e290c25993df218defb"
     },
     {
       "path": "toolchains/proposal/protocol.md",
