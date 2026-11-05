@@ -80,32 +80,59 @@ Lithe 的插件公共 API 按 [API 实施计划](https://github.com/1lck/Lithe-I
 
 ### 已公开的宿主方法
 
-后端向宿主发送的请求，前缀都是 `lithe/host/`。“协议”列是最低的 `litheFunctions` 版本。除 `getCapabilities`、`subscriptions/dispose`、`workspace/listContexts` 外，协议 3 的方法都要带 `context: {contextID, generation}`。除 `credentials.store` 外，下表的权限都要求清单声明 `backend` 2，否则安装时拒绝。
+后端向宿主发送的请求，前缀都是 `lithe/host/`，下表省略前缀。一个 API 编号下可以有多个方法，每个方法单独一行，按 API 编号排列。
 
-| 方法 | 权限 | 协议 | API |
+- **“API”列是规划编号**，来自 [API 实施计划](https://github.com/1lck/Lithe-IDEA/blob/preview/docs/development/macos-plugin-api-plan.md)，和“协议”列的 `litheFunctions` 版本、清单里的能力版本分开记录。同一个 API 的方法可以分几个 PR 陆续加入；协议 3 里向后兼容地新增方法，也不升协议版本。每个方法哪天、由哪个 PR 首次加入，见[插件协议更新记录](protocol-changelog.md#宿主方法按-api-编号)。
+- **“协议”列**是最低的 `litheFunctions` 版本。除 `getCapabilities`、`subscriptions/dispose`、`workspace/listContexts` 外，协议 3 的方法都要带 `context: {contextID, generation}`。
+- **“权限”列**：除 `credentials.store` 外，都要求清单声明 `backend` 2，否则安装时拒绝。
+
+| API | 方法 | 用途 | 权限 | 协议 |
+| --- | --- | --- | --- | --- |
+| API-01、API-37 | `getCapabilities` | 查询协商的协议版本、后端运行位置（`backendAuthority`）、当前可用的服务和限制；由 Core 直接回答 | 每个插件会话都有 | 3 |
+| API-01 | `subscriptions/dispose` | 取消一个订阅，即 `workspace/watch`、`editor/registerActions`、`terminal/onExit` 返回的 `subscriptionID`；未知或已取消的 ID 也返回 `null` | 每个插件会话都有 | 3 |
+| API-05 | `workspace/listContexts` | 列出当前的工作区上下文，带变化序号 `revision` | `workspace.metadata` | 3 |
+| API-05 | `workspace/getContext` | 读取一个工作区上下文 | `workspace.metadata` | 3 |
+| API-05 | `workspace/getFolders` | 列出上下文的根目录，每个根目录带 `rootID` | `workspace.metadata` | 3 |
+| API-06 | `workspace/readDirectory` | 分页列出目录项 | `workspace.files.read` | 3 |
+| API-06 | `workspace/stat` | 读取文件或目录的类型、大小和修改时间 | `workspace.files.read` | 3 |
+| API-06 | `workspace/readFile` | 读取磁盘上的文件，返回文本或 base64，超过上限时截断 | `workspace.files.read` | 3 |
+| API-07 | `workspace/watch` | 监听文件或目录的变化，事件经 `subscriptions/notify` 送达 | `workspace.files.watch` | 3 |
+| API-08 | `workspace/findFiles` | 在一个根目录下按名称查找文件，分页 | `workspace.search` | 3 |
+| API-08 | `workspace/findText` | 在磁盘内容中搜索文本，按行返回匹配，分页 | `workspace.search` | 3 |
+| API-09 | `documents/list` | 列出已打开文档的摘要 | `documents.read` | 3 |
+| API-09 | `documents/getSnapshot` | 读取文档当前缓冲区的全文，包含未保存的修改 | `documents.read` | 3 |
+| API-09 | `editor/getActive` | 读取前台文本标签的文档摘要，没有时为 `null` | `documents.read` | 3 |
+| API-09 | `editor/getSelections` | 读取文档的全部选区和主选区 | `documents.read` | 3 |
+| API-10 | `editor/applyEdits` | 按范围批量编辑，先校验 `expectedVersion` | `editor.edit` | 3 |
+| API-10 | `editor/replaceSelections` | 替换选区的文本：一个替换文本用于全部选区，或每个选区一个 | `editor.edit` | 3 |
+| API-10 | `editor/insertText` | 在指定位置插入文本 | `editor.edit` | 3 |
+| API-15 | `editor/open` | 在编辑器中打开文件，没有缓冲区时从磁盘读取；可以前台或后台打开，并定位光标 | `editor.open` | 3 |
+| API-15 | `editor/reveal` | 参数和 `editor/open` 相同，但只处理已打开的文件；文件没打开时返回 `plugin.host.notFound`，不会从磁盘打开 | `editor.open` | 3 |
+| API-16 | `preview/openHTML` | 打开 HTML 文件的预览（`editorAndPreview` 或 `previewOnly`），预览使用实时缓冲区 | `preview.open` | 3 |
+| API-16 | `browser/openExternal` | 在外部浏览器打开 HTTP(S) 地址或已保存的 HTML 文件 | `browser.open` | 3 |
+| API-17 | `window/showInformation` | 显示信息消息，可以带按钮，返回用户点的按钮序号 | `window.messages` | 3 |
+| API-17 | `window/showWarning` | 显示警告消息，用法同 `showInformation` | `window.messages` | 3 |
+| API-17 | `window/showError` | 显示错误消息，用法同 `showInformation` | `window.messages` | 3 |
+| API-21 | `credentials/get` | 读取本插件保存的密钥，没有时为 `null` | `credentials.store` | 2 |
+| API-21 | `credentials/set` | 保存密钥，最多 16 KiB | `credentials.store` | 2 |
+| API-21 | `credentials/delete` | 删除密钥，没有保存过也返回 `null` | `credentials.store` | 2 |
+| API-24 | `terminal/create` | 经执行确认创建插件自有原生终端，返回 `terminalID` 和 `generation` | `terminal.create` | 3 |
+| API-24 | `terminal/show` | 显示并选中本插件的终端 | `terminal.create` | 3 |
+| API-24 | `terminal/close` | 结束进程树并关闭标签，按字节预算保留显示历史和启动配置 | `terminal.create` | 3 |
+| API-24 | `terminal/reopen` | 经重新确认，用原启动配置创建新进程，`generation` 加 1，并恢复有界的显示历史 | `terminal.create` | 3 |
+| API-24 | `terminal/dispose` | 关闭终端，彻底释放句柄、启动配置和历史 | `terminal.create` | 3 |
+| API-24 | `terminal/onExit` | 订阅终端每个 `generation` 的退出结果 | `terminal.create` | 3 |
+| API-27 | `editor/registerActions` | 注册编辑器动作：把后端的普通函数绑定到文件范围（`selector`），返回 `subscriptionID` | `editor.actions`（同时需要 `documents.read`） | 3 |
+
+快捷键导入提供者另有 `keymapImport/listInputs`、`keymapImport/readChunk` 两个方法，属于 `litheKeymapImport` 协议，不在 API-01–44 内，见[快捷键导入](domains/keymap-import.md)。
+
+宿主发给后端的通知（后端不回复），前缀同样是 `lithe/host/`：
+
+| API | 通知 | 用途 | 授予条件 |
 | --- | --- | --- | --- |
-| `credentials/get`、`credentials/set`、`credentials/delete` | `credentials.store` | 2 | API-21 |
-| `getCapabilities`、`subscriptions/dispose` | 每个插件会话都有 | 3 | API-01、API-37 |
-| `workspace/listContexts`、`workspace/getContext`、`workspace/getFolders` | `workspace.metadata` | 3 | API-05 |
-| `workspace/readDirectory`、`workspace/stat`、`workspace/readFile` | `workspace.files.read` | 3 | API-06 |
-| `workspace/watch` | `workspace.files.watch` | 3 | API-07 |
-| `workspace/findFiles`、`workspace/findText` | `workspace.search` | 3 | API-08 |
-| `documents/list`、`documents/getSnapshot`、`editor/getActive`、`editor/getSelections` | `documents.read` | 3 | API-09 |
-| `editor/applyEdits`、`editor/replaceSelections`、`editor/insertText` | `editor.edit` | 3 | API-10 |
-| `editor/open`、`editor/reveal` | `editor.open` | 3 | API-15 |
-| `preview/openHTML` | `preview.open` | 3 | API-16 |
-| `browser/openExternal` | `browser.open` | 3 | API-16 |
-| `window/showInformation`、`window/showWarning`、`window/showError` | `window.messages` | 3 | API-17 |
-| `editor/registerActions` | `editor.actions`（同时需要 `documents.read`） | 3 | API-27 |
-| `terminal/create`、`show`、`close`、`reopen`、`dispose`、`onExit` | `terminal.create` | 3 | API-24 |
-
-宿主发给后端的通知（后端不回复）：
-
-| 通知 | 授予条件 | API |
-| --- | --- | --- |
-| `lithe/host/workspace/didChangeContexts` | `workspace.metadata` | API-04、API-05 |
-| `lithe/host/subscriptions/notify` | 每个插件会话都有 | API-07、API-24 |
-| `lithe/host/commands/didRun` | 每个插件会话都有 | API-02 |
+| API-02 | `commands/didRun` | 用户运行了本插件的命令；只是事件，不表示命令的业务操作已经成功 | 每个插件会话都有 |
+| API-04、API-05 | `workspace/didChangeContexts` | 工作区上下文有变化，带新的 `revision`；后端再调用 `listContexts` 读取 | `workspace.metadata` |
+| API-07、API-24 | `subscriptions/notify` | 送达一个订阅的事件，例如文件变化（`workspace/watch`）、终端退出（`terminal/onExit`） | 每个插件会话都有 |
 
 ### 限制
 
@@ -203,32 +230,59 @@ The manifest, marketplace, package trust, and shortcut import are installation a
 
 ### Public host methods
 
-Requests a backend sends to the host, all prefixed `lithe/host/`. The “Protocol” column is the lowest `litheFunctions` version. Apart from `getCapabilities`, `subscriptions/dispose`, and `workspace/listContexts`, every protocol 3 method takes `context: {contextID, generation}`. Apart from `credentials.store`, every permission below requires the manifest to declare `backend` 2, or installation refuses it.
+Requests a backend sends to the host, all prefixed `lithe/host/`; the tables omit the prefix. One API ID can cover several methods; each method has its own row, ordered by API ID.
 
-| Method | Permission | Protocol | API |
+- **The “API” column holds planning IDs** from the [API implementation plan](https://github.com/1lck/Lithe-IDEA/blob/preview/docs/development/macos-plugin-api-plan.md). They are recorded separately from the `litheFunctions` version in the “Protocol” column and from manifest capability versions. The methods of one API can arrive over several PRs, and a backward-compatible method added within protocol 3 does not bump the protocol version. The date and PR that first added each method are in the [protocol changelog](protocol-changelog.md#宿主方法按-api-编号) (Chinese only).
+- **The “Protocol” column** is the lowest `litheFunctions` version. Apart from `getCapabilities`, `subscriptions/dispose`, and `workspace/listContexts`, every protocol 3 method takes `context: {contextID, generation}`.
+- **The “Permission” column**: apart from `credentials.store`, every permission requires the manifest to declare `backend` 2, or installation refuses it.
+
+| API | Method | Purpose | Permission | Protocol |
+| --- | --- | --- | --- | --- |
+| API-01, API-37 | `getCapabilities` | Reports the negotiated protocol version, where the backend runs (`backendAuthority`), and the services and limits available now; Core answers it itself | Every plugin-owned session | 3 |
+| API-01 | `subscriptions/dispose` | Cancels a subscription, that is, a `subscriptionID` returned by `workspace/watch`, `editor/registerActions`, or `terminal/onExit`; an unknown or already disposed ID also returns `null` | Every plugin-owned session | 3 |
+| API-05 | `workspace/listContexts` | Lists the current workspace contexts with the change counter `revision` | `workspace.metadata` | 3 |
+| API-05 | `workspace/getContext` | Reads one workspace context | `workspace.metadata` | 3 |
+| API-05 | `workspace/getFolders` | Lists the context's root folders, each with a `rootID` | `workspace.metadata` | 3 |
+| API-06 | `workspace/readDirectory` | Lists directory entries page by page | `workspace.files.read` | 3 |
+| API-06 | `workspace/stat` | Reads the kind, size, and modification time of a file or directory | `workspace.files.read` | 3 |
+| API-06 | `workspace/readFile` | Reads a file from disk as text or base64, truncated past the limit | `workspace.files.read` | 3 |
+| API-07 | `workspace/watch` | Watches a file or directory for changes; events arrive through `subscriptions/notify` | `workspace.files.watch` | 3 |
+| API-08 | `workspace/findFiles` | Finds files by name under one root, page by page | `workspace.search` | 3 |
+| API-08 | `workspace/findText` | Searches disk content for text and returns matching lines, page by page | `workspace.search` | 3 |
+| API-09 | `documents/list` | Lists summaries of the open documents | `documents.read` | 3 |
+| API-09 | `documents/getSnapshot` | Reads the full text of a document's current buffer, unsaved changes included | `documents.read` | 3 |
+| API-09 | `editor/getActive` | Reads the document summary of the foreground text tab, or `null` | `documents.read` | 3 |
+| API-09 | `editor/getSelections` | Reads all of a document's selections and the primary one | `documents.read` | 3 |
+| API-10 | `editor/applyEdits` | Applies a batch of range edits after checking `expectedVersion` | `editor.edit` | 3 |
+| API-10 | `editor/replaceSelections` | Replaces the text of selections: one replacement for all of them, or one per selection | `editor.edit` | 3 |
+| API-10 | `editor/insertText` | Inserts text at a position | `editor.edit` | 3 |
+| API-15 | `editor/open` | Opens a file in the editor, reading it from disk when no buffer exists; opens it in the foreground or background and can place the caret | `editor.open` | 3 |
+| API-15 | `editor/reveal` | Takes the same params as `editor/open` but only handles files already open; a file that is not open returns `plugin.host.notFound` and is not opened from disk | `editor.open` | 3 |
+| API-16 | `preview/openHTML` | Opens a preview of an HTML file (`editorAndPreview` or `previewOnly`) that uses the live buffer | `preview.open` | 3 |
+| API-16 | `browser/openExternal` | Opens an HTTP(S) URL or a saved HTML file in the external browser | `browser.open` | 3 |
+| API-17 | `window/showInformation` | Shows an information message, optionally with buttons, and returns the index of the button the user chose | `window.messages` | 3 |
+| API-17 | `window/showWarning` | Shows a warning message; used like `showInformation` | `window.messages` | 3 |
+| API-17 | `window/showError` | Shows an error message; used like `showInformation` | `window.messages` | 3 |
+| API-21 | `credentials/get` | Reads a secret this plugin stored, or `null` | `credentials.store` | 2 |
+| API-21 | `credentials/set` | Stores a secret of at most 16 KiB | `credentials.store` | 2 |
+| API-21 | `credentials/delete` | Deletes a secret; also returns `null` when nothing was stored | `credentials.store` | 2 |
+| API-24 | `terminal/create` | Creates a plugin-owned native terminal after execution consent and returns `terminalID` and `generation` | `terminal.create` | 3 |
+| API-24 | `terminal/show` | Shows and selects one of this plugin's terminals | `terminal.create` | 3 |
+| API-24 | `terminal/close` | Ends the process tree and closes the tab, keeping display history within a byte budget and the launch settings | `terminal.create` | 3 |
+| API-24 | `terminal/reopen` | After renewed consent, starts a new process with the original launch settings, increments `generation`, and restores bounded display history | `terminal.create` | 3 |
+| API-24 | `terminal/dispose` | Closes the terminal and releases its handle, launch settings, and history for good | `terminal.create` | 3 |
+| API-24 | `terminal/onExit` | Subscribes to the exit outcome of each `generation` of a terminal | `terminal.create` | 3 |
+| API-27 | `editor/registerActions` | Registers editor actions that bind an ordinary backend function to file ranges (`selector`) and returns a `subscriptionID` | `editor.actions` (also needs `documents.read`) | 3 |
+
+Shortcut import providers also have two methods, `keymapImport/listInputs` and `keymapImport/readChunk`. They belong to the `litheKeymapImport` protocol, outside API-01–44; see [Shortcut import](domains/keymap-import.md).
+
+Notifications the host sends to a backend (the backend answers none), also prefixed `lithe/host/`:
+
+| API | Notification | Purpose | Granted by |
 | --- | --- | --- | --- |
-| `credentials/get`, `credentials/set`, `credentials/delete` | `credentials.store` | 2 | API-21 |
-| `getCapabilities`, `subscriptions/dispose` | Every plugin-owned session | 3 | API-01, API-37 |
-| `workspace/listContexts`, `workspace/getContext`, `workspace/getFolders` | `workspace.metadata` | 3 | API-05 |
-| `workspace/readDirectory`, `workspace/stat`, `workspace/readFile` | `workspace.files.read` | 3 | API-06 |
-| `workspace/watch` | `workspace.files.watch` | 3 | API-07 |
-| `workspace/findFiles`, `workspace/findText` | `workspace.search` | 3 | API-08 |
-| `documents/list`, `documents/getSnapshot`, `editor/getActive`, `editor/getSelections` | `documents.read` | 3 | API-09 |
-| `editor/applyEdits`, `editor/replaceSelections`, `editor/insertText` | `editor.edit` | 3 | API-10 |
-| `editor/open`, `editor/reveal` | `editor.open` | 3 | API-15 |
-| `preview/openHTML` | `preview.open` | 3 | API-16 |
-| `browser/openExternal` | `browser.open` | 3 | API-16 |
-| `window/showInformation`, `window/showWarning`, `window/showError` | `window.messages` | 3 | API-17 |
-| `editor/registerActions` | `editor.actions` (also needs `documents.read`) | 3 | API-27 |
-| `terminal/create`, `show`, `close`, `reopen`, `dispose`, `onExit` | `terminal.create` | 3 | API-24 |
-
-Notifications the host sends to a backend (the backend answers none):
-
-| Notification | Granted by | API |
-| --- | --- | --- |
-| `lithe/host/workspace/didChangeContexts` | `workspace.metadata` | API-04, API-05 |
-| `lithe/host/subscriptions/notify` | Every plugin-owned session | API-07, API-24 |
-| `lithe/host/commands/didRun` | Every plugin-owned session | API-02 |
+| API-02 | `commands/didRun` | The user ran one of this plugin's commands; it is an event only and does not mean the command's business action succeeded | Every plugin-owned session |
+| API-04, API-05 | `workspace/didChangeContexts` | The workspace contexts changed, with the new `revision`; the backend then calls `listContexts` to read them | `workspace.metadata` |
+| API-07, API-24 | `subscriptions/notify` | Delivers an event of one subscription, such as a file change (`workspace/watch`) or a terminal exit (`terminal/onExit`) | Every plugin-owned session |
 
 ### Limits
 
