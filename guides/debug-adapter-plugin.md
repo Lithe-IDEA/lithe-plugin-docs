@@ -123,8 +123,8 @@ Lithe 的调试控制台有输入行和补全弹窗。补全来自适配器的 D
 
 ## 6. 本地验证
 
-1. 对照契约示例 `contract/v1/fixtures/debug-adapter.plugin.json`，并用[编辑器 Schema](../README.md#在编辑器里校验-pluginjson) 检查字段。
-2. `contract/v1/fixtures/debug-adapter-rejections.json` 列出每种拒绝的稳定错误码、出错字段和报告它的层（`schema`、`coreManifest`、`corePlan`、`coreInstall`），写测试时可以直接对照。
+1. 对照契约示例 [`contract/v1/fixtures/debug-adapters/debug-adapter.plugin.json`](../contract/v1/fixtures/debug-adapters/debug-adapter.plugin.json)，并用[编辑器 Schema](../README.md#在编辑器里校验-pluginjson) 检查字段。
+2. [`contract/v1/fixtures/debug-adapters/debug-adapter-rejections.json`](../contract/v1/fixtures/debug-adapters/debug-adapter-rejections.json) 列出每种拒绝的稳定错误码、出错字段和报告它的层（`schema`、`coreManifest`、`corePlan`、`coreInstall`），写测试时可以直接对照。
 3. 在支持 API 4 的 Lithe 里安装插件，打开一个目标文件，设置断点并启动调试。适配器被拒绝请求时，Lithe 会显示适配器自己的解释，所以适配器返回的错误文字要写得让用户能看懂。
 4. 在设置页确认 `executable` 找到的路径被回显，再把它改成一个不存在的文件，确认得到的是错误而不是悄悄换文件。
 

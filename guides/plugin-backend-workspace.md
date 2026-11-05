@@ -166,7 +166,7 @@
 
 这样的命令要求 `backend` 2、`ui.contribute` 与 `backend.launch` 权限，以及对应的 `onCommand:<id>`。
 不认识 `ui` 4 的旧宿主会在安装时拒绝插件，不会装上一个执行不了的命令。完整示例见
-[`fixtures/command-backend.plugin.json`](../contract/v1/fixtures/command-backend.plugin.json)。
+[`fixtures/backend/command-backend.plugin.json`](../contract/v1/fixtures/backend/command-backend.plugin.json)。
 
 ## 8. 文档、文件与窗口方法
 
@@ -241,9 +241,9 @@
 
 ## 11. 验证
 
-- 用契约里的 [`fixtures/function-protocol.json`](../contract/v1/fixtures/function-protocol.json) 核对你的实现：
+- 用契约里的 [`fixtures/backend/function-protocol.json`](../contract/v1/fixtures/backend/function-protocol.json) 核对你的实现：
   `hostRequests` 有不认识的选项等请求用例，`invocationContexts` 有调用上下文，`hostFailures` 有失败码映射，
   `hostNotifications` 有通知用例。
-- 清单示例是 [`fixtures/backend-workspace.plugin.json`](../contract/v1/fixtures/backend-workspace.plugin.json)；
-  纯后端命令的示例是 [`fixtures/command-backend.plugin.json`](../contract/v1/fixtures/command-backend.plugin.json)；
-  `fixtures/invalid-manifests.json` 里的 backend 用例是会被拒绝的写法。
+- 清单示例是 [`fixtures/backend/backend-workspace.plugin.json`](../contract/v1/fixtures/backend/backend-workspace.plugin.json)；
+  纯后端命令的示例是 [`fixtures/backend/command-backend.plugin.json`](../contract/v1/fixtures/backend/command-backend.plugin.json)；
+  [`fixtures/manifest/invalid-manifests.json`](../contract/v1/fixtures/manifest/invalid-manifests.json) 里的 backend 用例是会被拒绝的写法。
