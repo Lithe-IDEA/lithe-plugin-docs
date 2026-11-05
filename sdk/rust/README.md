@@ -15,7 +15,7 @@ platform. It speaks the LSP base protocol on stdio and implements, from
   by the host in the platform's secret store (the Keychain on macOS), and
   from version 3 workspace contexts, files, documents, editors, preview,
   the browser, window messages, commands, and subscriptions.
-- **`litheKeymapImport` 1** (unreleased): independently negotiated shortcut
+- **`litheKeymapImport` 1** (from 0.2.0): independently negotiated shortcut
   import providers reading only explicitly selected source snapshots.
 
 The SDK owns the wire format, negotiation, cancellation, and error mapping.
@@ -26,9 +26,9 @@ Build providers and VCS providers are not part of this SDK yet; write build
 providers with the [Node.js](../node/README.md) or [Java](../java/README.md)
 SDK, and VCS providers with the Node.js SDK.
 
-## Shortcut import providers (unreleased)
+## Shortcut import providers
 
-Declare `keymap_import_provider(id, handler)` before listening. The host
+Available from SDK 0.2.0. Declare `keymap_import_provider(id, handler)` before listening. The host
 negotiates IDs independently of plugin functions; a handler receives a
 `KeymapImportRequest` and a call-scoped `Context`. Use
 `request.list_inputs(context.host())` and `request.read_chunk(context.host(),
@@ -88,7 +88,9 @@ the scenario in
 
 Releases are published on
 [this repository's Releases page](https://github.com/Lithe-IDEA/lithe-plugin-docs/releases)
-and tagged `sdk-rust-v<version>`. The SDK is not published to crates.io.
+and tagged `sdk-rust-v<version>`. Version 0.2.0 adds shortcut import providers, native terminals, and typed
+diagnostics through `litheLogging` 1, and removes the free-text `log` API.
+The SDK is not published to crates.io.
 Either way below fetches it at build time, never at runtime, and pins its
 exact contents:
 
@@ -97,7 +99,7 @@ exact contents:
 
   ```toml
   [dependencies]
-  lithe-plugin-sdk = { git = "https://github.com/Lithe-IDEA/lithe-plugin-docs", tag = "sdk-rust-v0.1.0" }
+  lithe-plugin-sdk = { git = "https://github.com/Lithe-IDEA/lithe-plugin-docs", tag = "sdk-rust-v0.2.0" }
   ```
 
 - **Vendored archive.** A release ships `lithe-plugin-sdk-rust-<version>.crate`
@@ -107,7 +109,9 @@ exact contents:
 
 ## Logging
 
-The new SDK requires `experimental.litheLogging` version 1 at initialization.
+From version 0.2.0, the SDK requires `experimental.litheLogging` version 1
+at initialization and refuses a host that does not offer it, so a backend
+built on 0.2.0 or later starts only in a Lithe release that offers it.
 See [plugin logging](../../guides/plugin-logging.md) for the typed diagnostics
 API, host-owned catalog, exact levels, operation correlation and `${logDir}`.
 Use `diagnostics.degraded/recovered` (Rust: `diagnostics().degraded/recovered`)
@@ -312,9 +316,9 @@ host; `tests/host_services.rs` checks the host services against the
 contract's fixture. The end-to-end check builds the sample, installs it as a
 package, and runs it through a real Core session.
 
-## Native terminal API (unreleased)
+## Native terminal API
 
-The SDK includes wrappers for plugin-owned native terminal create/show/close,
+From version 0.2.0, the SDK includes wrappers for plugin-owned native terminal create/show/close,
 reopen with bounded display history, disposal and exit subscriptions. These
 methods are discovered within protocol 3; they require a newer host and
 `terminal.create`, not a new protocol version. See

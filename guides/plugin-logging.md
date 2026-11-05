@@ -2,9 +2,9 @@
 
 新版本插件使用 `litheLogging` 1 与 `lithe/log` 发送受限的操作事实，由宿主的共享事件目录、脱敏、队列和文件写入器落盘。三个 SDK 不再提供自由文本 `log` 接口，也没有 stderr 回退。插件无需实现 v2 文件格式、文件轮转、脱敏器或后台写入线程。
 
-宿主必须在 initialize 中提供 `capabilities.experimental.litheLogging.versions: [1]`，SDK 回复 `capabilities.experimental.litheLogging.version: 1`。缺少协议时，新 SDK 拒绝初始化；不自动退回旧日志。初始化尚未协商时的失败只通过原有 RPC 错误与宿主进程生命周期记录，不能提前发送未协商的日志通知。
+宿主必须在 initialize 中提供 `capabilities.experimental.litheLogging.versions: [1]`，SDK 回复 `capabilities.experimental.litheLogging.version: 1`。缺少协议时，SDK 拒绝初始化；不自动退回旧日志。初始化尚未协商时的失败只通过原有 RPC 错误与宿主进程生命周期记录，不能提前发送未协商的日志通知。
 
-本文描述源码中的新 API。插件本轮将源码与真实哈希一起固定在可复现的构建输入中；正式发布 SDK 后也可以改为锁定真实 release tag 与 SHA-256。不要引用不存在的发布版本或开发机的绝对 path 依赖。
+本文的 API 从 Node.js SDK 0.3.0、Java SDK 0.3.0 和 Rust SDK 0.2.0 开始提供。插件在构建输入中锁定对应的 release tag 与 SHA-256，不要引用开发机的绝对 path 依赖。用这些版本构建的插件只能在提供 `litheLogging` 1 的 Lithe 版本上启动。
 
 ## 每种事实与级别
 
