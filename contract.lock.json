@@ -3,12 +3,12 @@
   "source": {
     "repository": "https://github.com/1lck/Lithe-IDEA",
     "directory": "shared/contracts/plugins/v1",
-    "revision": "5d38352a1757a70fd5fa297d7aa3e43bb2e33607"
+    "revision": "c5c68126bdf1d203f0c1aeb056a053482b1f6d2e"
   },
   "files": [
     {
       "path": "README.md",
-      "sha256": "e5e938c1aa106dc1853e45b0dc20b493f645bbe16373336015cac1b627a336f1"
+      "sha256": "901a4bf10b6ac207aa6c6e24dd6046dcc0d071aa40331d252aa7050208cf4991"
     },
     {
       "path": "fixtures/backend/backend-workspace.plugin.json",
@@ -171,8 +171,20 @@
       "sha256": "81038febbde31e0554451789106f8fc255e87038c8185602ce0c7e918f90ff78"
     },
     {
+      "path": "fixtures/editor/editor-actions-v2.json",
+      "sha256": "9f0741a5c31a1c911e7c76c9ebba0eaf5c3029cfc15db45eea2f49660461fb7b"
+    },
+    {
       "path": "fixtures/editor/editor-actions.plugin.json",
       "sha256": "ca86471b63a15e6f12102777c59c300a6da7690ac13e02835e43abf41f26eb0b"
+    },
+    {
+      "path": "fixtures/editor/editor-providers.json",
+      "sha256": "1adad0fdf4939d8d6c9d1378bdf06b5639b64ceff2cb4e4e8dfebde2db5c7bfa"
+    },
+    {
+      "path": "fixtures/editor/editor-providers.plugin.json",
+      "sha256": "1b562895a1523907a06fc10318df5e13b28c8f2df07a55ffc1d5e06e1ffc8a38"
     },
     {
       "path": "fixtures/keymap-import/keymap-import-provider.plugin.json",
@@ -216,7 +228,7 @@
     },
     {
       "path": "fixtures/manifest/invalid-manifests.json",
-      "sha256": "ea8d728d9e37a6ea6c3e3c0073692c87d1e55a2648d4bb8e74d5b7f583e5f979"
+      "sha256": "a5de588870e4599e2d0631f1cec3aefe81ad647b0a1930a1037d749e9848114b"
     },
     {
       "path": "fixtures/marketplace/index-cases.json",
@@ -320,7 +332,7 @@
     },
     {
       "path": "plugin-manifest.schema.json",
-      "sha256": "46739a6203dc7e250e28eb295e8693b57a668cda46be95fda5bd4c120da6eac3"
+      "sha256": "d06ca0aea3bed8d1a34c5b84167c01b1f89f8a639b607d2773fd61ddfb2f0d63"
     },
     {
       "path": "toolchains/README.md",

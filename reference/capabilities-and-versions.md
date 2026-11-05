@@ -96,7 +96,7 @@
 | --- | --- | --- | --- | --- |
 | `litheFunctions` | 1 | 插件函数：注册、撤回、调用、结果、进度、取消；不提供宿主服务，所有 `lithe/host/*` 请求返回 `plugin.host.unavailable` | 插件拥有的会话 | [Plugin functions](../contract/v1/README.md#plugin-functions) |
 | `litheFunctions` | 2 | 宿主服务：凭据 `credentials/get`、`set`、`delete` | 同上 | [Host services](../contract/v1/README.md#host-services-protocol-version-2) |
-| `litheFunctions` | 3 | 工作区上下文与能力发现、宿主通知、公共文档/文件/窗口方法、独立编辑器动作、插件自有原生终端 | 同上 | [Protocol 3](../contract/v1/README.md#workspace-contexts-and-capability-discovery-protocol-version-3) |
+| `litheFunctions` | 3 | 工作区上下文与能力发现、宿主通知、公共文档/文件/窗口方法、独立编辑器动作、编辑器语言功能 Provider、插件自有原生终端 | 同上 | [Protocol 3](../contract/v1/README.md#workspace-contexts-and-capability-discovery-protocol-version-3) |
 | `litheBuild` | 1 | `lithe/build/model` 与 `lithe/build/dependencies` | 构建提供者 | [Build providers](../contract/v1/README.md#build-providers) |
 | `litheBuild` | 2 | 类型化任务执行（`lithe/build/execute`） | 同上 | [Task execution](../contract/v1/README.md#provider-task-execution-buildproviders-2) |
 | `litheBuild` | 3 | 类型化测试执行和发现（`lithe/build/test`、`lithe/build/discoverTests`） | 同上 | [Test execution](../contract/v1/README.md#provider-test-execution-buildproviders-3) |
@@ -256,7 +256,7 @@ These protocols are negotiated when a process starts and never appear in the man
 | --- | --- | --- | --- | --- |
 | `litheFunctions` | 1 | Plugin functions: register, withdraw, invoke, results, progress, cancellation; no host services, every `lithe/host/*` request is `plugin.host.unavailable` | Plugin-owned sessions | [Plugin functions](../contract/v1/README.md#plugin-functions) |
 | `litheFunctions` | 2 | Host services: credentials `credentials/get`, `set`, `delete` | Same | [Host services](../contract/v1/README.md#host-services-protocol-version-2) |
-| `litheFunctions` | 3 | Workspace contexts and capability discovery, host notifications, public document/file/window methods, independent editor actions, plugin-owned native terminals | Same | [Protocol 3](../contract/v1/README.md#workspace-contexts-and-capability-discovery-protocol-version-3) |
+| `litheFunctions` | 3 | Workspace contexts and capability discovery, host notifications, public document/file/window methods, independent editor actions, editor language-feature providers, plugin-owned native terminals | Same | [Protocol 3](../contract/v1/README.md#workspace-contexts-and-capability-discovery-protocol-version-3) |
 | `litheBuild` | 1 | `lithe/build/model` and `lithe/build/dependencies` | Build providers | [Build providers](../contract/v1/README.md#build-providers) |
 | `litheBuild` | 2 | Typed task execution (`lithe/build/execute`) | Same | [Task execution](../contract/v1/README.md#provider-task-execution-buildproviders-2) |
 | `litheBuild` | 3 | Typed test execution and discovery (`lithe/build/test`, `lithe/build/discoverTests`) | Same | [Test execution](../contract/v1/README.md#provider-test-execution-buildproviders-3) |

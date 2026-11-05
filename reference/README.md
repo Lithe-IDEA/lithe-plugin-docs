@@ -23,7 +23,7 @@
 | [清单与打包](domains/manifest.md) | `plugin.json` 字段、插件 API 级别、权限与激活事件、包目录 | 不在编号内 | — |
 | [语言、语言服务器与运行/测试](domains/languages.md) | 语言、语法、语言服务器、进程启动、运行和测试命令 | API-25 | `languages`、`languageServers`、`serverProcess`、`executionProviders` |
 | [插件后端与插件函数](domains/backend.md) | 后端进程、函数协议、宿主方法、工作区上下文、文件、凭据、终端 | API-01、04–08、20–22、24、37、40、41 | `backend`、`serverProcess` 1 |
-| [编辑器、文档与预览](domains/editor.md) | 文档和选区、版本化编辑、打开与定位、HTML 预览、编辑器动作 | API-09、10、15、16、27 | `backend` 2 |
+| [编辑器、文档与预览](domains/editor.md) | 文档和选区、版本化编辑、打开与定位、HTML 预览、编辑器动作、编辑器语言功能 Provider | API-09、10、15、16、25、27 | `backend` 2 |
 | [界面](domains/ui.md) | 工具窗口、命令、包内网页、原生控件、后端命令、消息框 | API-02、03、13、14、17 | `ui` |
 | [插件设置](domains/settings.md) | 声明式设置、放置位置、作用域、生效方式、设置页按钮 | API-19 | `settings` |
 | [声明式构建系统](domains/build-systems.md) | 构建检测、模型、命令规划、项目准备角色 | API-29 | `buildSystems` |
@@ -70,7 +70,7 @@ This directory organizes the plugin contract by feature: what each numbered API 
 | [Manifest and packaging](domains/manifest.md) | `plugin.json` fields, plugin API levels, permissions and activation events, package layout | Not numbered | — |
 | [Languages, language servers, run and test](domains/languages.md) | Languages, grammars, language servers, process launch, run and test commands | API-25 | `languages`, `languageServers`, `serverProcess`, `executionProviders` |
 | [Plugin backend and plugin functions](domains/backend.md) | Backend process, function protocol, host methods, workspace contexts, files, credentials, terminals | API-01, 04–08, 20–22, 24, 37, 40, 41 | `backend`, `serverProcess` 1 |
-| [Editor, documents, and previews](domains/editor.md) | Documents and selections, versioned edits, open and reveal, HTML preview, editor actions | API-09, 10, 15, 16, 27 | `backend` 2 |
+| [Editor, documents, and previews](domains/editor.md) | Documents and selections, versioned edits, open and reveal, HTML preview, editor actions, editor language-feature providers | API-09, 10, 15, 16, 25, 27 | `backend` 2 |
 | [UI](domains/ui.md) | Tool windows, commands, package web content, native controls, backend commands, message boxes | API-02, 03, 13, 14, 17 | `ui` |
 | [Plugin settings](domains/settings.md) | Declarative settings, placement, scope, apply behavior, settings page actions | API-19 | `settings` |
 | [Declarative build systems](domains/build-systems.md) | Build detection, models, command planning, project preparation roles | API-29 | `buildSystems` |

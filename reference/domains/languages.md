@@ -11,7 +11,7 @@
 | 清单字段 | `languages`、`languageServers`、`executionProviders` |
 | 能力版本 | `languages` 1–2、`languageServers` 1–2、`serverProcess` 1–2、`executionProviders` 1，见[版本对照](../capabilities-and-versions.md#能力版本requires) |
 | 协议 | LSP；所有插件进程都可以协商 [`litheLogging` 1](../capabilities-and-versions.md#进程协议版本) |
-| API 编号 | [API-25](../api-catalog.md#现在能用的-api)：语言、语法、LSP |
+| API 编号 | [API-25](../api-catalog.md#现在能用的-api)：语言、语法、LSP。插件函数提供的编辑器语言功能见[编辑器](editor.md)的 `editor/registerProviders` |
 | 权限 | `languageServer.launch`；声明 `run`、`test` 时加 `process.run`、`process.test` |
 | 激活事件 | `onLanguage:<id>`、`onRun:<id>`、`onTest:<id>` |
 | Windows | 级别 3 清单按宿主能力表准入：`languages` 1、`languageServers` 1–2、`serverProcess` 1。不支持 `languages` 2 的语法，也不声明 `executionProviders` |
@@ -70,7 +70,7 @@ Teach Lithe a language: recognize its files, highlight them with a packaged Mona
 | Manifest fields | `languages`, `languageServers`, `executionProviders` |
 | Capability versions | `languages` 1–2, `languageServers` 1–2, `serverProcess` 1–2, `executionProviders` 1; see [versions](../capabilities-and-versions.md#capability-versions-requires) |
 | Protocols | LSP; every plugin process may negotiate [`litheLogging` 1](../capabilities-and-versions.md#process-protocol-versions) |
-| API IDs | [API-25](../api-catalog.md#apis-usable-now): languages, grammars, LSP |
+| API IDs | [API-25](../api-catalog.md#apis-usable-now): languages, grammars, LSP. Editor language features provided by plugin functions are covered by `editor/registerProviders` in [Editor](editor.md) |
 | Permissions | `languageServer.launch`; `process.run` and `process.test` when `run` or `test` is declared |
 | Activation events | `onLanguage:<id>`, `onRun:<id>`, `onTest:<id>` |
 | Windows | Level 3 manifests are admitted by the host table: `languages` 1, `languageServers` 1–2, `serverProcess` 1. No `languages` 2 grammars, and `executionProviders` is not advertised |

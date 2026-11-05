@@ -47,8 +47,8 @@ Lithe 的插件公共 API 按 [API 实施计划](https://github.com/1lck/Lithe-I
 | API-22 | 输出、日志、进度 | 部分完成 | [插件函数的进度和取消](../contract/v1/README.md#progress)；面向开发者的[结构化诊断日志 `litheLogging` 1](../contract/v1/README.md#structured-plugin-diagnostics-logging-protocol-1) | 独立的输出面板、面向用户的日志和进度 API | [插件后端](domains/backend.md) |
 | API-23 | 工具链与受管进程 | 部分完成 | 进程声明（`serverProcess`）、运行时解析、[共享可执行文件候选](../contract/v1/README.md#shared-executable-candidates-executableresolution-12)、工具定义、工具链提供者（macOS） | 后端可调用的通用工具链和进程服务；保存固定（pin）、`toolchainConsumers`、Windows 支持 | [工具链](domains/toolchains.md) |
 | API-24 | 终端 | 部分完成 | [插件自有原生终端](../contract/v1/README.md#plugin-owned-native-terminals-function-protocol-3) `terminal/create`、`show`、`close`、`reopen`、`dispose`、`onExit`（macOS、本机工作区） | 向终端发送文本、读取终端输出；Windows | [插件后端](domains/backend.md) |
-| API-25 | 语言、语法、LSP | 部分完成 | [语言](../contract/v1/README.md#languages)与[语言服务器](../contract/v1/README.md#language-servers)；[`languages` 2 的包内 Monarch 语法和编辑器配置](../contract/v1/README.md#grammars-and-editor-configuration-languages-2) | 运行期注册或替换高亮提供者、独立的语言语义提供者 | [语言](domains/languages.md) |
-| API-27 | 编辑器动作、主题、装饰 | 部分完成 | [独立编辑器动作 `editor/registerActions`](../contract/v1/README.md#independent-editor-actions-protocol-version-3)，绑定普通函数和文件范围，不依赖 LSP、构建或运行 | 主题、代码片段、其他装饰 | [编辑器](domains/editor.md) |
+| API-25 | 语言、语法、LSP | 部分完成 | [语言](../contract/v1/README.md#languages)与[语言服务器](../contract/v1/README.md#language-servers)；[`languages` 2 的包内 Monarch 语法和编辑器配置](../contract/v1/README.md#grammars-and-editor-configuration-languages-2)；[编辑器语言功能 Provider `editor/registerProviders`](../contract/v1/README.md#editor-language-feature-providers-protocol-version-3)，把 `definition`、`hover`、`completion`、`codeLens`、`foldingRange`、`semanticTokens`、`documentLink` 这 7 种类型绑定到普通插件函数，语言服务器优先、插件结果只补充（macOS） | 符号、格式化、重命名、Code Action、签名帮助、内联提示、运行期传入 JSON 动态注册高亮 | [语言](domains/languages.md)、[编辑器](domains/editor.md) |
+| API-27 | 编辑器动作、主题、装饰 | 部分完成 | [独立编辑器动作 `editor/registerActions`](../contract/v1/README.md#independent-editor-actions-protocol-version-3)，绑定普通函数和文件范围，不依赖 LSP、构建或运行；编辑器动作第 2 版增加行首多图标、至多 4 个 `alternatives`、点击结果的 `reveal` | 主题、代码片段、其他装饰 | [编辑器](domains/editor.md) |
 | API-29 | 构建、任务、测试、运行准备 | 部分完成 | [`buildSystems` 1–4](../contract/v1/README.md#api-level-3-build-systems)、[`buildProviders` 1–11](../contract/v1/README.md#build-providers)、`buildModelInputs` 1 | 开发指南还不完整 | [声明式构建](domains/build-systems.md)、[构建提供者](domains/build-providers.md) |
 | API-30 | 调试适配器 | 既有能力 | [`debugAdapters` 1、2](../contract/v1/README.md#api-level-4-debug-adapters) 与宿主的 DAP 会话 | — | [调试适配器](domains/debug-adapters.md) |
 | API-31 | VCS 提供者 | 既有能力 | [`vcsProviders` 1](../contract/v1/README.md#api-level-3-vcs-providers) | 不含内置 Git 的公共读取（见 API-42） | [VCS](domains/vcs.md) |
@@ -97,6 +97,7 @@ Lithe 的插件公共 API 按 [API 实施计划](https://github.com/1lck/Lithe-I
 | `browser/openExternal` | `browser.open` | 3 | API-16 |
 | `window/showInformation`、`window/showWarning`、`window/showError` | `window.messages` | 3 | API-17 |
 | `editor/registerActions` | `editor.actions`（同时需要 `documents.read`） | 3 | API-27 |
+| `editor/registerProviders` | `editor.providers`（同时需要 `documents.read`） | 3 | API-25 |
 | `terminal/create`、`show`、`close`、`reopen`、`dispose`、`onExit` | `terminal.create` | 3 | API-24 |
 
 宿主发给后端的通知（后端不回复）：
@@ -112,6 +113,7 @@ Lithe 的插件公共 API 按 [API 实施计划](https://github.com/1lck/Lithe-I
 | 项目 | 上限 |
 | --- | --- |
 | 单次文件读取、文档快照 | 128 KiB 源文本或字节 |
+| 发给编辑器动作收集函数的文档 | 宿主的 `limits.editorActionSourceBytes`（macOS 1 MiB；宿主未报告时 128 KiB） |
 | 一批编辑或选区 | 1,000 项 |
 | 目录分页 | 默认 200，最多 1,000 |
 | 搜索分页 | 默认 100，最多 200（搜索总结果 200） |
@@ -120,6 +122,8 @@ Lithe 的插件公共 API 按 [API 实施计划](https://github.com/1lck/Lithe-I
 | 未回答的宿主请求 | 每个会话 16 个 |
 | 通知队列 | 每个会话 128 条 |
 | 插件自有终端 | 每个插件最多保留 8 个句柄 |
+| 编辑器 Provider 注册 | 每个选择器 1–32 项，每个插件跨上下文最多 32 个注册 |
+| 编辑器 Provider 单次调用时限 | hover、completion 400 ms，definition 1500 ms，其余类型 2000 ms；迟到的答复直接丢弃，注册不能自定义时限 |
 
 失败时的错误码和处理方式见契约的 [Outcomes and error codes](../contract/v1/README.md#outcomes-and-error-codes) 与 [Protocol 3 宿主失败码表](../contract/v1/README.md#workspace-contexts-and-capability-discovery-protocol-version-3)。取消或超时**不保证回滚**：编辑可能已经生效，不要自动重放。
 
@@ -170,8 +174,8 @@ Status meanings:
 | API-22 | Output, log, progress | Partial | [Plugin function progress and cancellation](../contract/v1/README.md#progress); developer-facing [structured diagnostics `litheLogging` 1](../contract/v1/README.md#structured-plugin-diagnostics-logging-protocol-1) | A dedicated output panel, user-facing log and progress APIs | [Plugin backend](domains/backend.md) |
 | API-23 | Toolchains and managed processes | Partial | Process declarations (`serverProcess`), runtime resolution, [shared executable candidates](../contract/v1/README.md#shared-executable-candidates-executableresolution-12), tool definitions, toolchain providers (macOS) | A general toolchain and process service backends can call; saving pins, `toolchainConsumers`, Windows support | [Toolchains](domains/toolchains.md) |
 | API-24 | Terminals | Partial | [Plugin-owned native terminals](../contract/v1/README.md#plugin-owned-native-terminals-function-protocol-3) `terminal/create`, `show`, `close`, `reopen`, `dispose`, `onExit` (macOS, local workspaces) | Sending text to a terminal, reading its output; Windows | [Plugin backend](domains/backend.md) |
-| API-25 | Languages, grammars, LSP | Partial | [Languages](../contract/v1/README.md#languages) and [language servers](../contract/v1/README.md#language-servers); [packaged Monarch grammars and editor configuration in `languages` 2](../contract/v1/README.md#grammars-and-editor-configuration-languages-2) | Registering or replacing highlighting providers at runtime, independent language semantic providers | [Languages](domains/languages.md) |
-| API-27 | Editor actions, themes, decorations | Partial | [Independent editor actions `editor/registerActions`](../contract/v1/README.md#independent-editor-actions-protocol-version-3), binding ordinary functions to file ranges without LSP, build, or run | Themes, snippets, other decorations | [Editor](domains/editor.md) |
+| API-25 | Languages, grammars, LSP | Partial | [Languages](../contract/v1/README.md#languages) and [language servers](../contract/v1/README.md#language-servers); [packaged Monarch grammars and editor configuration in `languages` 2](../contract/v1/README.md#grammars-and-editor-configuration-languages-2); [editor language-feature providers `editor/registerProviders`](../contract/v1/README.md#editor-language-feature-providers-protocol-version-3), binding 7 types (`definition`, `hover`, `completion`, `codeLens`, `foldingRange`, `semanticTokens`, `documentLink`) to ordinary plugin functions, where the language server answers first and plugin results only add (macOS) | Symbols, formatting, rename, code actions, signature help, inlay hints, dynamic registration of highlighting from JSON passed at runtime | [Languages](domains/languages.md), [Editor](domains/editor.md) |
+| API-27 | Editor actions, themes, decorations | Partial | [Independent editor actions `editor/registerActions`](../contract/v1/README.md#independent-editor-actions-protocol-version-3), binding ordinary functions to file ranges without LSP, build, or run; editor actions version 2 adds several icons at a line start, up to 4 `alternatives`, and a `reveal` in the click result | Themes, snippets, other decorations | [Editor](domains/editor.md) |
 | API-29 | Build, tasks, tests, run preparation | Partial | [`buildSystems` 1–4](../contract/v1/README.md#api-level-3-build-systems), [`buildProviders` 1–11](../contract/v1/README.md#build-providers), `buildModelInputs` 1 | The developer guides are incomplete | [Build systems](domains/build-systems.md), [Build providers](domains/build-providers.md) |
 | API-30 | Debug adapters | Existing | [`debugAdapters` 1 and 2](../contract/v1/README.md#api-level-4-debug-adapters) and the host's DAP sessions | — | [Debug adapters](domains/debug-adapters.md) |
 | API-31 | VCS providers | Existing | [`vcsProviders` 1](../contract/v1/README.md#api-level-3-vcs-providers) | Public reads of built-in Git are not included (see API-42) | [VCS](domains/vcs.md) |
@@ -220,6 +224,7 @@ Requests a backend sends to the host, all prefixed `lithe/host/`. The “Protoco
 | `browser/openExternal` | `browser.open` | 3 | API-16 |
 | `window/showInformation`, `window/showWarning`, `window/showError` | `window.messages` | 3 | API-17 |
 | `editor/registerActions` | `editor.actions` (also needs `documents.read`) | 3 | API-27 |
+| `editor/registerProviders` | `editor.providers` (also needs `documents.read`) | 3 | API-25 |
 | `terminal/create`, `show`, `close`, `reopen`, `dispose`, `onExit` | `terminal.create` | 3 | API-24 |
 
 Notifications the host sends to a backend (the backend answers none):
@@ -235,6 +240,7 @@ Notifications the host sends to a backend (the backend answers none):
 | Item | Limit |
 | --- | --- |
 | One file read or document snapshot | 128 KiB of source text or bytes |
+| The document sent to an editor action collector | The host's `limits.editorActionSourceBytes` (1 MiB on macOS; 128 KiB when the host does not report it) |
 | One batch of edits or selections | 1,000 entries |
 | Directory pages | 200 by default, at most 1,000 |
 | Search pages | 100 by default, at most 200 (200 search results in total) |
@@ -243,5 +249,7 @@ Notifications the host sends to a backend (the backend answers none):
 | Unanswered host requests | 16 per session |
 | Notification queue | 128 entries per session |
 | Plugin-owned terminals | At most 8 retained handles per plugin |
+| Editor provider registrations | 1–32 selector entries per registration, at most 32 registrations per plugin across contexts |
+| Editor provider call budget | 400 ms for hover and completion, 1500 ms for definition, 2000 ms for the other types; a late answer is dropped, and a registration cannot set its own budget |
 
 For failure codes and how to handle them, see the contract's [Outcomes and error codes](../contract/v1/README.md#outcomes-and-error-codes) and the [protocol 3 host failure table](../contract/v1/README.md#workspace-contexts-and-capability-discovery-protocol-version-3). Cancellation or timeout **does not promise rollback**: an edit may already have taken effect, so do not replay it automatically.

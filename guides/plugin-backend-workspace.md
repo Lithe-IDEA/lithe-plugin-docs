@@ -203,7 +203,7 @@
 - 后台没有挂载编辑器的文档可以列出和读取，但编辑与选区可能返回 `busy`。
 - 消息有频率和排队上限（每插件 10 秒 5 条、最多 3 条待答），用户回答前请求一直挂起。
 
-协议 3 还包括插件自有的编辑器动作（`editor.actions`）和原生终端（`terminal.create`），分别见[编辑器、文档与预览](../reference/domains/editor.md)和[从插件打开 Lithe 原生终端](native-terminals.md)。
+协议 3 还包括插件自有的编辑器动作（`editor.actions`）、编辑器语言功能 Provider（`editor.providers`）和原生终端（`terminal.create`），分别见[编辑器、文档与预览](../reference/domains/editor.md)和[从插件打开 Lithe 原生终端](native-terminals.md)。
 
 ### 9. 宿主失败与错误码
 
@@ -458,7 +458,7 @@ The [contract](../contract/v1/README.md#public-document-file-and-window-methods-
 - Documents open in the background without a mounted editor can be listed and read, but edits and selections may return `busy`.
 - Messages have rate and queue limits (5 per 10 seconds per plugin, at most 3 awaiting an answer), and the request stays pending until the user answers.
 
-Protocol 3 also includes the plugin's own editor actions (`editor.actions`) and native terminals (`terminal.create`); see [Editor, documents, and previews](../reference/domains/editor.md) and [Open a native Lithe terminal from a plugin](native-terminals.md).
+Protocol 3 also includes the plugin's own editor actions (`editor.actions`), editor language-feature providers (`editor.providers`), and native terminals (`terminal.create`); see [Editor, documents, and previews](../reference/domains/editor.md) and [Open a native Lithe terminal from a plugin](native-terminals.md).
 
 ### 9. Host failures and error codes
 
