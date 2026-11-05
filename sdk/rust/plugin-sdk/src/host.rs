@@ -1,4 +1,4 @@
-//! Host services of plugin-function protocols 2 and 3: the `lithe/host/*`
+//! Host services of plugin-function protocols 2 to 4: the `lithe/host/*`
 //! requests a backend sends to Lithe, the subscriptions some of them create,
 //! and the [`Host`] handlers use. The backend owns the wire; this module owns
 //! what Core expects of a well-behaved client -- at most 16 unanswered host
@@ -6,13 +6,14 @@
 //! subscription events routed by ID.
 //!
 //! Contract: `contract/v1/README.md`, "Host services (protocol version 2)"
-//! and the version 3 sections after it.
+//! and the version 3 and 4 sections after it.
 
 use crate::backend::{lock, Cancellation, Phase, Shared, State};
 use crate::error::{sdk_codes, SdkError};
 use crate::protocol::{
-    generation, is_credential_key, methods, CONTEXT_VERSION, HOST_SERVICES_VERSION,
-    MAX_CREDENTIAL_SECRET_BYTES, MAX_EARLY_EVENTS, MAX_PENDING_HOST_REQUESTS,
+    generation, is_credential_key, is_function_id, is_parent_operation_id, methods,
+    CONTEXT_VERSION, HOST_SERVICES_VERSION, MAX_CREDENTIAL_SECRET_BYTES, MAX_EARLY_EVENTS,
+    MAX_PENDING_HOST_REQUESTS, RELAY_VERSION,
 };
 use serde_json::{json, Map, Value};
 use std::collections::{HashMap, VecDeque};
@@ -340,11 +341,12 @@ impl Shared {
     }
 }
 
-/// Host services (`lithe/host/*`) of plugin-function protocols 2 and 3:
+/// Host services (`lithe/host/*`) of plugin-function protocols 2 to 4:
 /// credentials from version 2; workspace contexts, files, documents, the
 /// editor, previews, the browser, messages, and capability discovery from
-/// version 3. Every method blocks until the host answers; failures the host
-/// reports carry its `error.data.code`, such as `plugin.host.contextExpired`.
+/// version 3; calls to other plugins' functions from version 4. Every method
+/// blocks until the host answers; failures the host reports carry its
+/// `error.data.code`, such as `plugin.host.contextExpired`.
 ///
 /// [`BackendHandle::host`](crate::BackendHandle::host) is usable once the
 /// session is ready. A handler's [`Context::host`](crate::Context::host)
@@ -356,11 +358,25 @@ impl Shared {
 pub struct Host {
     shared: Arc<Shared>,
     scope: Vec<Cancellation>,
+    /// The `operationID` of the relayed call this host serves, if any; the
+    /// default `parentOperationID` of its cross-plugin calls.
+    parent_operation: Option<String>,
 }
 
 impl Host {
     pub(crate) fn new(shared: Arc<Shared>, scope: Vec<Cancellation>) -> Self {
-        Self { shared, scope }
+        Self {
+            shared,
+            scope,
+            parent_operation: None,
+        }
+    }
+
+    /// The same host for a call serving the relayed `lithe/function/invoke`
+    /// whose `operationID` is `parent`.
+    pub(crate) fn with_parent_operation(mut self, parent: Option<String>) -> Self {
+        self.parent_operation = parent;
+        self
     }
 
     /// The negotiated plugin-function protocol version; `None` before
@@ -375,6 +391,7 @@ impl Host {
         let mut scope = self.scope.clone();
         scope.push(cancellation.clone());
         Self::new(Arc::clone(&self.shared), scope)
+            .with_parent_operation(self.parent_operation.clone())
     }
 
     /// Sends any `lithe/host/*` request, including methods a later host
@@ -500,6 +517,11 @@ impl Host {
         Window { host: self.clone() }
     }
 
+    /// Calls to other plugins' functions through Core, from protocol 4.
+    pub fn functions(&self) -> Functions {
+        Functions { host: self.clone() }
+    }
+
     fn send(&self, method: &str, params: Value, route: Option<Route>) -> Outcome {
         if !method.starts_with(methods::HOST_PREFIX) {
             return Err(SdkError::new(
@@ -516,6 +538,12 @@ impl Host {
                 "The host did not negotiate plugin-function protocol 2 or later, which offers host services.",
             ));
         }
+        if methods::is_relay(method) && self.version() < Some(RELAY_VERSION) {
+            // The answer Core would give, without the round trip.
+            return Err(SdkError::unavailable(
+                "The cross-plugin relay needs plugin-function protocol 4.",
+            ));
+        }
         if self.scope.iter().any(Cancellation::is_cancelled) {
             return Err(cancelled());
         }
@@ -529,6 +557,17 @@ impl Host {
         let params = with_context(context, params)?;
         match self.request(method, params)? {
             result @ (Value::Null | Value::Object(_)) => Ok(result),
+            _ => Err(SdkError::new(
+                "sdk.host.invalidResult",
+                format!("{method} answered with something other than an object."),
+            )),
+        }
+    }
+
+    /// A method that always answers an object.
+    fn request_object(&self, method: &str, params: Value) -> Outcome {
+        match self.request(method, params)? {
+            result @ Value::Object(_) => Ok(result),
             _ => Err(SdkError::new(
                 "sdk.host.invalidResult",
                 format!("{method} answered with something other than an object."),
@@ -1092,6 +1131,100 @@ impl Terminal {
     }
 }
 
+/// Calls to the functions other plugins export, relayed by Core (protocol 4).
+/// Needs a call the plugin declares as `pluginFunctions.calls` in its
+/// manifest; discover the methods with `Host::supports`. The relay accepts
+/// local workspaces only.
+pub struct Functions {
+    host: Host,
+}
+
+impl Functions {
+    /// `{ providers }`: the enabled plugins other than this one that export
+    /// `function_id`, sorted by plugin ID, each `{ pluginID, version }`. This
+    /// plugin must have declared the function.
+    pub fn providers(&self, function_id: &str) -> Result<Value, SdkError> {
+        if !is_function_id(function_id) {
+            return Err(invalid_call("functionID is a plugin function ID."));
+        }
+        self.host.request_object(
+            methods::FUNCTIONS_PROVIDERS,
+            json!({ "functionID": function_id }),
+        )
+    }
+
+    /// Calls one provider and answers `{ value }`, the provider's result.
+    /// `call` is an object with `pluginID` and `functionID`, and optionally
+    /// `params` (an object), `timeoutMilliseconds` (a positive integer; the
+    /// host defaults it and caps it at 600000), and `parentOperationID`; any
+    /// other key is not sent. `context` is a workspace context this backend
+    /// learned from the workspace service.
+    ///
+    /// Inside a handler, `parentOperationID` defaults to the `operationID`
+    /// of the call the handler serves, which tells Core the new call belongs
+    /// to it. A [`BackendHandle::host`](crate::BackendHandle::host) serves no
+    /// call, so it sends the field only when `call` sets it. Cancelling the
+    /// handler's call cancels the relayed call.
+    pub fn invoke(&self, context: &WorkspaceContext, call: Value) -> Result<Value, SdkError> {
+        let call = relay_params(call, self.host.parent_operation.as_deref())?;
+        let params = with_context(context, call)?;
+        self.host.request_object(methods::FUNCTIONS_INVOKE, params)
+    }
+}
+
+fn invalid_call(message: &str) -> SdkError {
+    SdkError::new("sdk.functions.invalidCall", message)
+}
+
+/// The params of `lithe/host/functions/invoke` for `call`, without its
+/// context: the fields the method defines and no other, so the host never
+/// answers `-32018`. `serving` is the `operationID` that `parentOperationID`
+/// defaults to.
+fn relay_params(call: Value, serving: Option<&str>) -> Result<Value, SdkError> {
+    let Value::Object(mut call) = call else {
+        return Err(invalid_call("A cross-plugin call is an object."));
+    };
+    let mut relayed = Map::new();
+    match call.remove("pluginID") {
+        Some(Value::String(plugin_id)) if !plugin_id.is_empty() => {
+            relayed.insert("pluginID".into(), Value::String(plugin_id));
+        }
+        _ => return Err(invalid_call("pluginID is a non-empty string.")),
+    }
+    match call.remove("functionID") {
+        Some(Value::String(function_id)) if is_function_id(&function_id) => {
+            relayed.insert("functionID".into(), Value::String(function_id));
+        }
+        _ => return Err(invalid_call("functionID is a plugin function ID.")),
+    }
+    match call.remove("params") {
+        Some(params @ Value::Object(_)) => {
+            relayed.insert("params".into(), params);
+        }
+        Some(_) => return Err(invalid_call("params is an object.")),
+        None => {}
+    }
+    match call.remove("timeoutMilliseconds") {
+        Some(timeout) if timeout.as_u64().is_some_and(|ms| ms > 0) => {
+            relayed.insert("timeoutMilliseconds".into(), timeout);
+        }
+        Some(_) => return Err(invalid_call("timeoutMilliseconds is a positive integer.")),
+        None => {}
+    }
+    match call.remove("parentOperationID") {
+        Some(Value::String(parent)) if is_parent_operation_id(&parent) => {
+            relayed.insert("parentOperationID".into(), Value::String(parent));
+        }
+        Some(_) => return Err(invalid_call("parentOperationID is a 1-128 byte string.")),
+        None => {
+            if let Some(parent) = serving {
+                relayed.insert("parentOperationID".into(), json!(parent));
+            }
+        }
+    }
+    Ok(Value::Object(relayed))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1121,5 +1254,76 @@ mod tests {
             assert_eq!(error.code(), "sdk.host.invalidContext", "{invalid}");
         }
         assert!(WorkspaceContext::new("", 1).is_err());
+    }
+
+    #[test]
+    fn a_relayed_call_keeps_only_the_fields_the_method_defines() {
+        let call = json!({
+            "pluginID": "dev.lithe.fixture.java", "functionID": "project.describe",
+            "params": { "caller": "data" }, "timeoutMilliseconds": 900000,
+            "parentOperationID": "17", "caller": { "pluginID": "forged" },
+            "context": { "contextID": "x" }, "extra": true
+        });
+        let expected = json!({
+            "pluginID": "dev.lithe.fixture.java", "functionID": "project.describe",
+            "params": { "caller": "data" }, "timeoutMilliseconds": 900000,
+            "parentOperationID": "17"
+        });
+        // Core passes a `caller` inside `params` unchanged; only a top-level one is refused.
+        assert_eq!(relay_params(call, Some("served")).unwrap(), expected);
+    }
+
+    #[test]
+    fn optional_fields_stay_out_and_the_parent_defaults_to_the_call_being_served() {
+        let call = json!({ "pluginID": "a.b", "functionID": "x.y" });
+        assert_eq!(relay_params(call.clone(), None).unwrap(), call);
+        let served = relay_params(call, Some("op-7")).unwrap();
+        assert_eq!(served["parentOperationID"], "op-7");
+        assert!(served.get("params").is_none());
+        assert!(served.get("timeoutMilliseconds").is_none());
+        let named = json!({ "pluginID": "a.b", "functionID": "x.y", "parentOperationID": "own" });
+        let relayed = relay_params(named, Some("op-7")).unwrap();
+        assert_eq!(relayed["parentOperationID"], "own");
+        // The host caps the timeout; the SDK sends what the plugin chose.
+        let mut slow = json!({ "pluginID": "a.b", "functionID": "x.y" });
+        slow["timeoutMilliseconds"] = json!(700000);
+        let relayed = relay_params(slow, None).unwrap();
+        assert_eq!(relayed["timeoutMilliseconds"], 700000);
+    }
+
+    #[test]
+    fn an_invalid_relayed_call_is_refused_before_anything_is_sent() {
+        let valid = json!({ "pluginID": "a.b", "functionID": "x.y" });
+        let with = |key: &str, value: Value| {
+            let mut call = valid.clone();
+            call[key] = value;
+            call
+        };
+        let without = |key: &str| {
+            let mut call = valid.clone();
+            call.as_object_mut().unwrap().remove(key);
+            call
+        };
+        for invalid in [
+            json!("x.y"),
+            json!(null),
+            without("pluginID"),
+            with("pluginID", json!("")),
+            with("pluginID", json!(7)),
+            without("functionID"),
+            with("functionID", json!("Not-Valid")),
+            with("params", json!([])),
+            with("params", json!(null)),
+            with("timeoutMilliseconds", json!(0)),
+            with("timeoutMilliseconds", json!(-1)),
+            with("timeoutMilliseconds", json!(1.5)),
+            with("timeoutMilliseconds", json!("5000")),
+            with("parentOperationID", json!("")),
+            with("parentOperationID", json!("p".repeat(129))),
+            with("parentOperationID", json!(12)),
+        ] {
+            let error = relay_params(invalid.clone(), Some("op-1")).unwrap_err();
+            assert_eq!(error.code(), "sdk.functions.invalidCall", "{invalid}");
+        }
     }
 }

@@ -11,11 +11,13 @@ same rules and error mapping:
 - **`litheBuild` 1**: typed `lithe/build/model` and `lithe/build/dependencies`
   requests, for a build system whose `model` or `dependencies` source is
   `provider`.
-- **`litheFunctions` 1–3**: plugin functions, which are plugin-private actions
+- **`litheFunctions` 1–4**: plugin functions, which are plugin-private actions
   that Lithe invokes for the same plugin. They support progress,
   cancellation, and registration at runtime. From version 2 a backend may
   call [host services](#host-services); version 3 adds workspace, document,
-  editor, and window services, command events, and workspace contexts.
+  editor, and window services, command events, and workspace contexts;
+  version 4 adds [calls to other plugins' functions](#calling-other-plugins-protocol-4),
+  which Core relays, and tells a function which plugin called it.
 - **`litheKeymapImport` 1** (from 0.3.0): independently negotiated shortcut
   import providers reading only explicitly selected source snapshots.
 
@@ -72,6 +74,11 @@ Releases are published on [this repository's Releases page](https://github.com/L
 tagged `sdk-java-v<version>`. Version 0.2.0 adds plugin-function protocols 2
 and 3. Version 0.3.0 adds shortcut import providers, native terminals, and typed
 diagnostics through `litheLogging` 1, and removes the free-text `log` API.
+Version 0.4.0 adds plugin-function protocol 4: `host().functions()` for calls
+to other plugins, `CallContext.caller()` for the plugin that called a function,
+and `HostError.pluginErrorCode()`. The `HostError` fallback table, which names
+a refusal by its number when the host sends no code, now also holds the host
+error codes -32022 to -32026 and the `plugin.function.*` codes of protocol 4.
 Version 0.1.0 was released from the Lithe
 repository before the SDK moved here; its
 [release](https://github.com/1lck/Lithe-IDEA/releases/tag/sdk-java-v0.1.0)
@@ -112,8 +119,8 @@ there is no stderr fallback or plugin-owned file writer.
 | `negotiated().buildVersion()` | Highest common build version (1–6), or zero; newer methods are refused before their handler runs. |
 | `function(id, handler)` | Declares a function offered in `initialize`. |
 | `registerFunction(id, handler)`, `unregisterFunction(id)` | Add or withdraw a function. Called before the `initialize` answer (for example from `onInitialize`), they change the initial list. Later calls send `lithe/function/register` or `lithe/function/unregister`, in order. Both return a `CompletableFuture`. Withdrawing a function revokes its running calls. |
-| `negotiated().functionsVersion()` | Highest common plugin-function version (1–3), or zero. |
-| `host()` | [Host services](#host-services) for work outside a call, such as a command handler. |
+| `negotiated().functionsVersion()` | Highest common plugin-function version (1–4), or zero. |
+| `host()` | [Host services](#host-services) for work outside a call, such as a command handler. Its calls to other plugins name no parent call. |
 | `onCommand(commandId, handler)` | Protocol 3: runs `handler.handle(commandId, workspaceContext)` when the user runs one of the plugin's commands. |
 | `onContextsChanged(handler)` | Protocol 3: `lithe/host/workspace/didChangeContexts` with its `{ revision }`. |
 | `onHostNotification(method, handler)` | A `lithe/host/*` notification a later host adds. The three this SDK routes itself are reserved. |
@@ -135,9 +142,10 @@ Handlers run on their own threads. Every handler receives a `CallContext`:
 | `run(command[, options])` | `Processes.run` bound to the call: cancelling or ending the call stops the process. |
 | `diagnostics()` | Typed diagnostics correlated with this call. |
 | `functionId()` | Functions only. |
-| `host()` | [Host services](#host-services) bound to the call: ending the call cancels the requests it left unanswered. |
+| `host()` | [Host services](#host-services) bound to the call: ending the call cancels the requests it left unanswered. From protocol 4 its calls to other plugins name this call as their parent. |
 | `workspaceContext()` | Protocol 3 functions: the `{ contextID, generation }` of the window that invoked the call, or null. |
-| `operationId()` | Opaque wire identity for functions and bounded build/test/run-preparation calls; null for other requests. |
+| `caller()`, `callerPluginId()` | Protocol 4 functions: the plugin that called this function through the relay, as an unmodifiable `{ pluginID }` map and as its ID. Null when the host started the call or the session negotiated protocol 3 or earlier. |
+| `operationId()` | Opaque wire identity for functions and bounded build/test/run-preparation calls; null for other requests. It falls back to the JSON-RPC request ID, so never use it as a `parentOperationID`. |
 | `progress(message, percentage[, output])` | Functions use 1024-byte messages. Build/test/run preparation use 4096-byte messages and optional output up to 64 KiB. Percentages are clamped to 0–100. Cancelled or settled calls cannot report. Model/dependency/discovery reports are ignored. |
 
 The typed handlers of build protocols 2–6 ship from SDK 0.2.0. See [native build workflows](../../guides/native-build-workflows.md)
@@ -196,6 +204,7 @@ backend.onCommand("db.refresh", (commandId, workspaceContext) -> {
 | `workspace().readDirectory`, `.stat`, `.readFile`, `.findFiles`, `.findText`, `.watch` | 3 | Files of a local context, addressed as `{ rootID, path }` from `getFolders`. |
 | `documents().list`, `.getSnapshot`; `editor().getActive`, `.getSelections`, `.applyEdits`, `.replaceSelections`, `.insertText`, `.open`, `.reveal`, `.registerActions` | 3 | Live documents and editors. Edits name the `expectedVersion` they were computed against. |
 | `preview().openHtml`, `browser().openExternal`, `window().showInformation`, `.showWarning`, `.showError` | 3 | Preview, browser, and messages. |
+| `functions().providers(functionId)`, `.invoke(context, call)` | 4 | [Calls to other plugins' functions](#calling-other-plugins-protocol-4), relayed by Core. |
 | `request(method, params)`, `subscribe(method, params, listener)` | 2 / 3 | Any `lithe/host/*` method, including ones a later host adds. |
 | `subscriptions().dispose(id)` | 3 | Ends a subscription; `Subscription.dispose()` does the same. |
 | `withCancellation(cancellation)` | 2 | The same services, cancelled together with `cancellation`. |
@@ -231,6 +240,86 @@ What the SDK does for you, and what it leaves to you:
 - **Commands are events.** `onCommand` runs when the user runs one of the
   plugin's commands; the host waits for no result. A stopped backend is
   started for it only when the manifest declares `onCommand:<commandID>`.
+
+## Calling other plugins (protocol 4)
+
+From plugin-function protocol 4 a backend may call a function that another
+plugin exports. The plugin must declare the call in its manifest, and Core
+relays it: the backend never talks to the other plugin. A plugin that declares
+no call gets `plugin.host.permissionDenied`. The exports, the declaration and
+the checks Core makes are in the
+[contract](../../contract/v1/README.md#cross-plugin-calls-protocol-version-4).
+
+```java
+backend.function("project.sync", (params, context) -> {
+    Host.Functions functions = context.host().functions();
+    Object providers = functions.providers("languageImport.settings").get().get("providers");
+    // ... choose a provider ...
+    Map<String, Object> call = new LinkedHashMap<>();
+    call.put("pluginID", "dev.example.go");
+    call.put("functionID", "languageImport.settings");
+    call.put("params", Collections.singletonMap("project", "app"));
+    call.put("timeoutMilliseconds", 5000L);
+    // Core decides who may be called for which workspace; use the one the user's call ran in.
+    Object settings = functions.invoke(context.workspaceContext(), call).get().get("value");
+    return Collections.singletonMap("settings", settings);
+});
+```
+
+| Member | Purpose |
+| --- | --- |
+| `functions().providers(functionId)` | Completes with `{ providers: [{ pluginID, version }] }`: the enabled plugins other than yours that export the function, sorted by plugin ID. You must have declared the function. |
+| `functions().invoke(context, call)` | Completes with `{ value }`, the provider's result (`value` may be null). `context` is a workspace context, `{ contextID, generation }` or a whole one from `listContexts`; the call runs for that workspace. `call` is a map with `pluginID` and `functionID`, and optionally `params` (a map, default `{}`), `timeoutMilliseconds` (a positive integer; Core defaults it to 60 000 and caps it at 600 000) and `parentOperationID`. |
+| `CallContext.caller()`, `.callerPluginId()` | On the providing side: the plugin that called this function, as `{ pluginID }` and as its ID. Core writes it from the calling session. Null when the host started the call, and on sessions that negotiated protocol 3 or earlier. |
+| `HostError.pluginErrorCode()` | For `plugin.function.failed`, the provider's own error code (from `details.pluginErrorCode`); null otherwise. |
+
+What the SDK does for you, and what it leaves to you:
+
+- **The relay needs protocol 4.** On a session that negotiated protocol 3 or
+  earlier, `providers`, `invoke`, and a `request` for either method fail at
+  once with `HostError` `plugin.host.unavailable` (-32601), the answer Core
+  would give, and nothing is sent. Check `negotiated().functionsVersion()` or
+  `supports(method)` first.
+- **The parent call is filled in for you.** Inside a function, `context.host()`
+  sets `parentOperationID` to the wire `operationID` of the function call it
+  belongs to, so Core knows which call the new one is a child of. The ID is
+  used only when it is a string of 1 to 128 bytes; otherwise the field is
+  omitted. The SDK never uses `operationId()` for this, because it falls back
+  to the JSON-RPC request ID. A `parentOperationID` you put in `call` wins.
+  `withCancellation` keeps the parent. `Backend.host()`, which belongs to no
+  call, names none. Without a parent Core treats the new call as a child of
+  every relayed call the backend is serving.
+- **Wrong arguments fail locally.** A malformed call completes the future
+  with `PluginSdkError` `sdk.functions.invalidCall` (a missing or wrong
+  workspace context is `sdk.host.invalidContext`) and sends nothing: a
+  `functionID` that is not a function ID, an empty `pluginID`, `params` that
+  is not a map, a `timeoutMilliseconds` that is not a positive integer, or a
+  `parentOperationID` that is not 1 to 128 bytes of text. A null optional
+  field counts as absent. Only the fields above are sent; any other key,
+  `caller` included, is dropped, because Core refuses a caller-chosen
+  `caller`. The SDK does not cap `timeoutMilliseconds`; Core does.
+- **Refusals are `HostError`.** Besides the host codes, protocol 4 adds
+  `plugin.function.notDeclared`, `.notExported`, `.providerDisabled`,
+  `.versionMismatch`, `.callCycle`, `.depthExceeded`, `.tooManyCalls`,
+  `.payloadTooLarge`, `.providerUnavailable`, `.failed` and `.invalidResult`.
+  `plugin.function.failed` carries the provider's own code in
+  `pluginErrorCode()`. A call to a context the host closed fails with
+  `plugin.host.contextExpired`; a remote workspace with
+  `plugin.host.authorityUnsupported`; a deadline with `plugin.host.timeout`.
+  Core never retries a call, and neither does the SDK.
+- **Calls end with their caller.** Ending or cancelling the function call that
+  made a relayed call, or cancelling the token given to `withCancellation`,
+  fails the future with `CancelledException` and sends `$/cancelRequest`, so
+  Core cancels the provider's operation and the calls it made.
+- **Limits are Core's.** A chain has at most 4 calls, and a plugin already on
+  it, the caller included, cannot be called (`callCycle`): a provider asked to
+  apply values must not call the asker back inside that call. A caller has at
+  most 8 relayed calls running; params and results are at most 256 KiB. Only
+  local workspaces are supported. A relayed call holds one of the 16
+  unanswered host-request slots until it ends, which may be 600 seconds, so a
+  backend that starts many long calls delays its other host requests.
+- **Decide by `caller()`, never by params.** A plugin ID in `params` is data
+  the caller wrote; `context.caller()` is the identity of the calling session.
 
 ## Rules that keep Lithe in charge
 

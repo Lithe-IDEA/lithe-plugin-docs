@@ -1,6 +1,6 @@
 {
   "name": "@lithe/plugin-sdk",
-  "version": "0.3.0",
+  "version": "0.4.0",
   "description": "Official SDK for Lithe plugin backends: plugin functions and build providers over the LSP base protocol.",
   "license": "Apache-2.0",
   "private": true,

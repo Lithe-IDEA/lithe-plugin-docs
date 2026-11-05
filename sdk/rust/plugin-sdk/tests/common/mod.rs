@@ -103,6 +103,20 @@ impl Host {
         );
     }
 
+    /// An invocation with extra top-level fields (`context`, `caller`, or a
+    /// different `operationID`) merged over the ones `invoke` sends.
+    pub fn invoke_with(&mut self, id: i64, function: &str, params: Value, extra: Value) {
+        let mut call = json!({
+            "functionID": function,
+            "operationID": format!("op-{id}"),
+            "params": params,
+        });
+        for (key, value) in extra.as_object().expect("extra fields are an object") {
+            call[key] = value.clone();
+        }
+        self.request(id, "lithe/function/invoke", call);
+    }
+
     /// Ends the input stream and returns the backend's exit code.
     pub fn close(mut self) -> i32 {
         self.input = None;

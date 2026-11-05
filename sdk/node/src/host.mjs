@@ -1,12 +1,12 @@
-// Host services of plugin-function protocols 2 and 3: the `lithe/host/*`
+// Host services of plugin-function protocols 2 to 4: the `lithe/host/*`
 // requests a backend sends to Lithe, the subscriptions some of them create,
 // and the `host` object handlers use. The backend owns the wire; this module
 // owns what Core expects of a well-behaved client -- at most 16 unanswered
-// host requests, cancellation through `$/cancelRequest` from version 3, and
-// subscription events routed by ID.
+// host requests, cancellation through `$/cancelRequest` from version 3,
+// subscription events routed by ID, and the relay methods only from version 4.
 //
 // Contract: contract/v1/README.md, "Host services (protocol version 2)" and
-// the version 3 sections after it.
+// the version 3 and 4 sections after it.
 
 import { HostError, PluginSdkError } from './errors.mjs';
 import {
@@ -15,8 +15,11 @@ import {
   HOST_SERVICES_VERSION,
   isContextReference,
   isCredentialKey,
+  isFunctionId,
+  isRelayMethod,
   LIMITS,
   METHODS,
+  RELAY_VERSION,
 } from './protocol.mjs';
 
 /** Events kept for a subscription whose creating request is still unanswered. */
@@ -66,6 +69,15 @@ export class HostChannel {
       return Promise.reject(new HostError(
         'plugin.host.unavailable',
         'The host did not negotiate plugin-function protocol 2 or later, which offers host services.',
+        { rpcCode: -32601, method },
+      ));
+    }
+    if (isRelayMethod(method) && this.version < RELAY_VERSION) {
+      // Unlike other methods added after version 3, these two are bound to a
+      // version: Core answers a version 3 backend -32601, so no frame is sent.
+      return Promise.reject(new HostError(
+        'plugin.host.unavailable',
+        'The relay needs plugin-function protocol 4.',
         { rpcCode: -32601, method },
       ));
     }
@@ -246,9 +258,12 @@ export class HostChannel {
 /**
  * The `host` object: typed host services over `channel`. A handler's
  * `context.host` passes the call's signal, so its unanswered host requests
- * are cancelled when the call ends.
+ * are cancelled when the call ends. It also passes the `operationID` of the
+ * `lithe/function/invoke` being served as `parentOperationId`, which
+ * `functions.invoke` sends as the new call's parent unless the caller names
+ * another. A host object without them (`backend.host`) has no default parent.
  */
-export function createHost(channel, callSignal) {
+export function createHost(channel, callSignal, parentOperationId) {
   const withSignal = (options = {}) => {
     if (!callSignal) return options;
     return { ...options, signal: options.signal ? AbortSignal.any([callSignal, options.signal]) : callSignal };
@@ -305,6 +320,14 @@ export function createHost(channel, callSignal) {
         subscribe(HOST_METHODS.workspaceWatch, { ...params, context: contextReference(context) }, onEvent, options),
       findFiles: scoped(HOST_METHODS.workspaceFindFiles),
       findText: scoped(HOST_METHODS.workspaceFindText),
+    }),
+    functions: Object.freeze({
+      providers: async (functionID, options) => {
+        checkRelayFunctionId(functionID);
+        return request(HOST_METHODS.functionsProviders, { functionID }, options);
+      },
+      invoke: async (context, call, options) =>
+        request(HOST_METHODS.functionsInvoke, relayInvokeParams(context, call, parentOperationId), options),
     }),
     documents: Object.freeze({
       list: scoped(HOST_METHODS.documentsList),
@@ -366,4 +389,59 @@ function checkCredentialKey(key) {
       'A credential key is 1-128 ASCII letters, digits, ".", "_", ":" or "-".',
     );
   }
+}
+
+function invalidRelayCall(message) {
+  return new PluginSdkError('sdk.functions.invalidCall', message);
+}
+
+function checkRelayFunctionId(functionID) {
+  if (!isFunctionId(functionID)) {
+    throw invalidRelayCall('A function ID is dot-separated lowerCamelCase segments of at most 128 bytes, such as "project.describe".');
+  }
+}
+
+function isParentOperationId(value) {
+  return typeof value === 'string' && value.length > 0 && Buffer.byteLength(value) <= LIMITS.maxParentOperationIdBytes;
+}
+
+/**
+ * The params of one `lithe/host/functions/invoke`, built from the whitelisted
+ * fields of `call` only, so a caller cannot add a field of its own (Core
+ * refuses `caller` and writes it itself). Checks what Core checks first; a
+ * mistake throws before any frame is written. `params` stays absent unless
+ * given. The parent is the call's own `parentOperationID`, else the operation
+ * being served (`defaultParent`), else absent.
+ */
+function relayInvokeParams(context, call, defaultParent) {
+  if (call === null || typeof call !== 'object' || Array.isArray(call)) {
+    throw invalidRelayCall('A relayed call is { pluginID, functionID, params?, timeoutMilliseconds?, parentOperationID? }.');
+  }
+  const { pluginID, functionID, params, timeoutMilliseconds, parentOperationID } = call;
+  if (typeof pluginID !== 'string' || pluginID.length === 0) {
+    throw invalidRelayCall('pluginID is the ID of the plugin that provides the function, a non-empty string.');
+  }
+  checkRelayFunctionId(functionID);
+  const wire = { pluginID, functionID, context: contextReference(context) };
+  if (params !== undefined) {
+    if (params === null || typeof params !== 'object' || Array.isArray(params)) {
+      throw invalidRelayCall('params are a JSON object.');
+    }
+    wire.params = params;
+  }
+  if (timeoutMilliseconds !== undefined) {
+    if (!Number.isSafeInteger(timeoutMilliseconds) || timeoutMilliseconds < 1) {
+      throw invalidRelayCall('timeoutMilliseconds is a positive integer.');
+    }
+    wire.timeoutMilliseconds = timeoutMilliseconds;
+  }
+  if (parentOperationID !== undefined) {
+    if (!isParentOperationId(parentOperationID)) {
+      throw invalidRelayCall('parentOperationID is a string of 1-128 bytes.');
+    }
+    wire.parentOperationID = parentOperationID;
+  } else if (defaultParent !== undefined) {
+    wire.parentOperationID = defaultParent;
+  }
+  return wire;
 }
