@@ -76,6 +76,7 @@
 | `debugAdapters` | 1 | [`debugAdapters[]`](../contract/v1/README.md#api-level-4-debug-adapters)；需要级别 4 | ✅ | ✅ | — | [调试适配器](domains/debug-adapters.md) |
 | `debugAdapters` | 2 | 调试目标的参数和环境变量 | ✅ | ✅ | — | [调试适配器](domains/debug-adapters.md) |
 | `projectGenerators` | 1 | [`projectGenerators[]`](../contract/v1/README.md#project-generators)：新建项目窗口里的条目 | ✅ | ✅ | — | [项目生成器](domains/project-generators.md) |
+| `projectGenerators` | 2 | [`tool` 字段](../contract/v1/README.md#tool-fields)：从插件声明的工具的已有安装里选一个，可存为新项目的工具固定；不能再用 `runtime` 字段 | ✅ | ✅ | — | [项目生成器](domains/project-generators.md) |
 | `backend` | 1 | [插件后端](../contract/v1/README.md#plugin-backend)：插件自己的长驻进程，从插件页面启动 | ✅ | ✅ | — | [插件后端](domains/backend.md) |
 | `backend` | 2 | [无页面启动和工作区上下文](../contract/v1/README.md#backend-2-workspace-contexts) | ✅ | ✅ | — | [插件后端](domains/backend.md) |
 | `packageTrust` | 1 | `vendor.bundledSignatureRequirement`：随宿主发布的发布者签名插件副本按来源信任 | ✅ | ✅ | — | [包信任](domains/package-trust.md) |
@@ -109,7 +110,7 @@
 | `litheBuild` | 11 | 注册表连接调试 | 同上 | [Connection debugging](../contract/v1/README.md#registry-connection-debugging-buildproviders-11) |
 | `litheVcs` | 1 | VCS 提供者的能力和请求 | VCS 提供者 | [VCS providers](../contract/v1/README.md#api-level-3-vcs-providers) |
 | `litheKeymapImport` | 1 | 后端从声明的提供者中选出要启用的子集；`lithe/keymap/import` | 声明了 `keymapImportProviders` 的插件会话 | [Shortcut import](../contract/v1/README.md#shortcut-import-providers-core-foundation) |
-| `litheToolchains` | 1 | `toolchains/query`；后端从声明的提供者中选出子集 | 工具链提供者（macOS；Windows 未接入） | [Toolchains protocol](../contract/v1/toolchains/proposal/protocol.md) |
+| `litheToolchains` | 1 | `toolchains/query`；后端从声明的提供者中选出子集 | 工具链提供者（macOS；Windows 未接入） | [Provider backend negotiation](../contract/v1/toolchains/README.md#provider-backend-negotiation) |
 | `litheLogging` | 1 | 结构化诊断通知 `lithe/log` | 每个插件拥有的进程 | [Structured diagnostics](../contract/v1/README.md#structured-plugin-diagnostics-logging-protocol-1) |
 
 - `litheBuild` 各版本新增的内容与同号的 `buildProviders` 能力版本一致。
@@ -235,6 +236,7 @@ Each row is one version of one capability. The Core column is what Core can vali
 | `debugAdapters` | 1 | [`debugAdapters[]`](../contract/v1/README.md#api-level-4-debug-adapters); needs level 4 | ✅ | ✅ | — | [Debug adapters](domains/debug-adapters.md) |
 | `debugAdapters` | 2 | Debug target arguments and environment | ✅ | ✅ | — | [Debug adapters](domains/debug-adapters.md) |
 | `projectGenerators` | 1 | [`projectGenerators[]`](../contract/v1/README.md#project-generators): entries of the New Project window | ✅ | ✅ | — | [Project generators](domains/project-generators.md) |
+| `projectGenerators` | 2 | [`tool` fields](../contract/v1/README.md#tool-fields): pick an existing installation of a plugin-declared tool, optionally saved as the new project's tool pin; `runtime` fields are no longer allowed | ✅ | ✅ | — | [Project generators](domains/project-generators.md) |
 | `backend` | 1 | [Plugin backend](../contract/v1/README.md#plugin-backend): the plugin's own long-lived process, started from its pages | ✅ | ✅ | — | [Plugin backend](domains/backend.md) |
 | `backend` | 2 | [Start without a page, and workspace contexts](../contract/v1/README.md#backend-2-workspace-contexts) | ✅ | ✅ | — | [Plugin backend](domains/backend.md) |
 | `packageTrust` | 1 | `vendor.bundledSignatureRequirement`: origin-scoped trust for a host-sealed bundled copy of a publisher-signed plugin | ✅ | ✅ | — | [Package trust](domains/package-trust.md) |
@@ -268,7 +270,7 @@ These protocols are negotiated when a process starts and never appear in the man
 | `litheBuild` | 11 | Registry connection debugging | Same | [Connection debugging](../contract/v1/README.md#registry-connection-debugging-buildproviders-11) |
 | `litheVcs` | 1 | VCS provider capabilities and requests | VCS providers | [VCS providers](../contract/v1/README.md#api-level-3-vcs-providers) |
 | `litheKeymapImport` | 1 | The backend selects a subset of its declared providers; `lithe/keymap/import` | Plugin sessions with declared `keymapImportProviders` | [Shortcut import](../contract/v1/README.md#shortcut-import-providers-core-foundation) |
-| `litheToolchains` | 1 | `toolchains/query`; the backend selects a subset of its declared providers | Toolchain providers (macOS; Windows not connected) | [Toolchains protocol](../contract/v1/toolchains/proposal/protocol.md) |
+| `litheToolchains` | 1 | `toolchains/query`; the backend selects a subset of its declared providers | Toolchain providers (macOS; Windows not connected) | [Provider backend negotiation](../contract/v1/toolchains/README.md#provider-backend-negotiation) |
 | `litheLogging` | 1 | Structured diagnostic notification `lithe/log` | Every plugin-owned process | [Structured diagnostics](../contract/v1/README.md#structured-plugin-diagnostics-logging-protocol-1) |
 
 - Each `litheBuild` version adds what the `buildProviders` capability version of the same number adds.

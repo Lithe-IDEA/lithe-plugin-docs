@@ -159,8 +159,7 @@ SDK 的源码都在本仓库的 `sdk/` 下，发布在[本仓库的 Releases](ht
 | [`plugin-manifest.schema.json`](contract/v1/plugin-manifest.schema.json) | `plugin.json` 的 JSON Schema |
 | [`plugin-index.schema.json`](contract/v1/plugin-index.schema.json) | `lithe-plugin-index.json` 的 JSON Schema |
 | [`native-ui.schema.json`](contract/v1/native-ui.schema.json) | `ui` 3 宿主渲染的原生内容的 JSON Schema |
-| [`toolchains/`](contract/v1/toolchains/README.md) | 插件提供的工具链：工具定义、版本管理器提供方、查询与回复校验、固定值（pin）和四层解析。Core 已实现；macOS 设置页以只读方式显示结果，macOS 构建和提供者运行另有独立的解析适配器，已有的 Java 和语言服务器仍用原来的方式；Windows 不支持 |
-| [`toolchains/proposal/`](contract/v1/toolchains/proposal/README.md) | 工具链的完整设计草案，包括还没实现的部分；对应示例在 `fixtures/toolchains/proposal/`（含 Java 工具定义和 mise 提供方），只用于评审，不能直接安装 |
+| [`toolchains/`](contract/v1/toolchains/README.md) | 插件提供的工具链：工具定义、版本管理器提供方、提供方后端协商（`litheToolchains`）、查询与回复校验（含稳定失败码）、固定值（pin）和四层解析。Core 已实现；macOS 设置页以只读方式显示结果，macOS 构建和提供者运行另有独立的解析适配器，已有的 Java 和语言服务器仍用原来的方式；Windows 不支持 |
 | [`fixtures/`](contract/v1/fixtures) | 标准用例，按功能分目录（`manifest`、`languages`、`backend`、`build-systems`、`build-providers`、`marketplace` 等），和 [reference 功能页](reference/README.md#功能页)一一对应：合法和非法的清单、命令和构建规划、插件函数协议、市场索引，以及 Lithe 对每个用例的预期结果 |
 
 fixture 放在 `fixtures/<功能>/` 下，文件按演示的能力命名，例如 `build-systems/build-command-stdout.plugin.json` 演示“解码命令的标准输出”。它们借 Cargo、Go、Gradle、Maven 等真实工具作为输入，但不是这些插件本身；要参考完整插件，看[示例插件](#示例插件)。每个目录的文件和用例数量见对应功能页的“示例与用例”。
@@ -367,8 +366,7 @@ The plugin contract defines the meaning, validation rules, and error codes of ev
 | [`plugin-manifest.schema.json`](contract/v1/plugin-manifest.schema.json) | JSON Schema for `plugin.json` |
 | [`plugin-index.schema.json`](contract/v1/plugin-index.schema.json) | JSON Schema for `lithe-plugin-index.json` |
 | [`native-ui.schema.json`](contract/v1/native-ui.schema.json) | JSON Schema for host-rendered native content (`ui` 3) |
-| [`toolchains/`](contract/v1/toolchains/README.md) | Plugin-owned toolchains: tool definitions, version manager providers, query and reply validation, pins, and four-layer resolution. Core implements it; the macOS settings pages show results read-only, macOS Build and Provider Run have a separate resolution adapter, and existing Java and language-server consumers keep their previous behavior; Windows does not support it |
-| [`toolchains/proposal/`](contract/v1/toolchains/proposal/README.md) | The complete toolchain design draft, including unimplemented parts; its examples live in `fixtures/toolchains/proposal/` (including a Java tool definition and a mise provider), are for review only, and cannot be installed |
+| [`toolchains/`](contract/v1/toolchains/README.md) | Plugin-owned toolchains: tool definitions, version manager providers, provider backend negotiation (`litheToolchains`), query and reply validation (with stable failure codes), pins, and four-layer resolution. Core implements it; the macOS settings pages show results read-only, macOS Build and Provider Run have a separate resolution adapter, and existing Java and language-server consumers keep their previous behavior; Windows does not support it |
 | [`fixtures/`](contract/v1/fixtures) | Conformance cases in one directory per feature (`manifest`, `languages`, `backend`, `build-systems`, `build-providers`, `marketplace`, and so on), matching the [reference feature pages](reference/README.md#feature-pages): valid and invalid manifests, command and build plans, plugin function protocol, marketplace indexes, and Lithe's expected result for each case |
 
 Fixtures live under `fixtures/<feature>/` and are named for the capability they demonstrate; for example `build-systems/build-command-stdout.plugin.json` demonstrates decoding a command's standard output. They use real tools such as Cargo, Go, Gradle, and Maven as inputs but are not those plugins; for complete plugins, see the [example plugins](#example-plugins). Each feature page's "Examples and cases" section lists its files and case counts.

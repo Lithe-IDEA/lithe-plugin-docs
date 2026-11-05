@@ -118,7 +118,8 @@ Core 另有 `toolchains.resolveConsumerPreferences` 和 `toolchains.editConsumer
 | [Pins and snapshot resolution](../../contract/v1/toolchains/README.md#pins-and-snapshot-resolution) | `local.json`、`resolve`、四层选择、`checkVersion`、`discoveryPlan` |
 | [Settings candidates](../../contract/v1/toolchains/README.md#settings-candidates) | `candidates` 和两次调用的探测流程 |
 | [Shared executable candidates](../../contract/v1/README.md#shared-executable-candidates-executableresolution-12) | `executableResolution` 1、2 的候选集 |
-| [提案](../../contract/v1/toolchains/proposal/README.md)：[manifest.md](../../contract/v1/toolchains/proposal/manifest.md)、[protocol.md](../../contract/v1/toolchains/proposal/protocol.md) | 更大范围的设计（消费者迁移、原生生命周期、保存、版本管理器插件），尚未实现；[错误码表](../../contract/v1/toolchains/proposal/protocol.md#stable-failure-mapping)已被 Core 使用 |
+| [Provider backend negotiation](../../contract/v1/toolchains/README.md#provider-backend-negotiation) | `litheToolchains` 协商（`initialize` 里的 `experimental.litheToolchains`）、`lsp.toolchainRequest`、超时 |
+| [Error replies](../../contract/v1/toolchains/README.md#error-replies) | 错误回复的格式和 11 个稳定失败码的数字码对照 |
 
 ### 示例与用例
 
@@ -126,13 +127,8 @@ Core 另有 `toolchains.resolveConsumerPreferences` 和 `toolchains.editConsumer
 | --- | --- |
 | [`toolchains/tool-definition.plugin.json`](../../contract/v1/fixtures/toolchains/tool-definition.plugin.json) | 生产形态的工具定义：`java`，8 个候选（项目/全局设置、项目/全局工具链请求、macOS/Linux 与 Windows 的 `JAVA_HOME`、`java` 命令、已安装的工具链），在 macOS 的 `JavaVirtualMachines` 目录里发现 `*.jdk` |
 | [`toolchains/toolchain-provider.plugin.json`](../../contract/v1/fixtures/toolchains/toolchain-provider.plugin.json) | 生产形态的提供者：`mise`，覆盖 `java`、`node`、`maven`、`pnpm`、`go`，监视 6 个文件（`.tool-versions` 用兼容读取器），后端是包内可执行文件 |
-| [`toolchains/proposal/java-tool-definition.json`](../../contract/v1/fixtures/toolchains/proposal/java-tool-definition.json)、[`mise-provider.json`](../../contract/v1/fixtures/toolchains/proposal/mise-provider.json) | 提案形态的定义（含一个消费者）和提供者 |
-| [`toolchains/proposal/local.json`](../../contract/v1/fixtures/toolchains/proposal/local.json) | 带 `pins` 的 `local.json` |
-| [`toolchains/proposal/manifest-rejections.json`](../../contract/v1/fixtures/toolchains/proposal/manifest-rejections.json) | 15 个清单拒绝用例：缺权限、导出替换 `PATH`、`PATH` 前缀离开主目录、无界通配、探针带脚本参数、社区插件占用短 ID、后定义覆盖已有所有者等 |
-| [`toolchains/proposal/query-cases.json`](../../contract/v1/fixtures/toolchains/proposal/query-cases.json) | 13 个查询用例（未满足的要求、工作区里的主目录、取消后迟到的应答、超时和取消的区别、监视文件变化触发全部重查等）和 11 个错误应答 |
-| [`toolchains/proposal/resolution-cases.json`](../../contract/v1/fixtures/toolchains/proposal/resolution-cases.json) | 13 个选择用例（按路径段继承固定、不可用的固定不回退、全局冲突回到登录 shell、按数字比较版本、相同最高版本要求选择等）和 3 个无效 `local.json` |
 
-Core 的验收测试在主仓库的 [`toolchain_definitions.rs`](https://github.com/1lck/Lithe-IDEA/blob/preview/rust/lithe-core/src/tests/toolchain_definitions.rs) 和同目录的 `toolchain_pins.rs`、`toolchain_queries.rs`、`toolchain_resolution.rs`。
+Core 的验收测试在主仓库的 [`toolchain_definitions.rs`](https://github.com/1lck/Lithe-IDEA/blob/preview/rust/lithe-core/src/tests/toolchain_definitions.rs) 和同目录的 `toolchain_pins.rs`、`toolchain_queries.rs`、`toolchain_resolution.rs`。这三个测试共用的固定值文档、查询往返和每个稳定失败码的错误回复内联在 [`toolchain_vectors.rs`](https://github.com/1lck/Lithe-IDEA/blob/preview/rust/lithe-core/src/tests/toolchain_vectors.rs) 里。
 
 ### 相关指南
 
@@ -257,7 +253,8 @@ A provider may use these codes in JSON-RPC errors, and `decodeReply` checks them
 | [Pins and snapshot resolution](../../contract/v1/toolchains/README.md#pins-and-snapshot-resolution) | `local.json`, `resolve`, the four layers, `checkVersion`, `discoveryPlan` |
 | [Settings candidates](../../contract/v1/toolchains/README.md#settings-candidates) | `candidates` and the two-call probe flow |
 | [Shared executable candidates](../../contract/v1/README.md#shared-executable-candidates-executableresolution-12) | The `executableResolution` 1 and 2 candidate sets |
-| [Proposal](../../contract/v1/toolchains/proposal/README.md): [manifest.md](../../contract/v1/toolchains/proposal/manifest.md), [protocol.md](../../contract/v1/toolchains/proposal/protocol.md) | The broader design (consumer migration, native lifecycle, persistence, manager plugins), not implemented; Core already uses its [failure code table](../../contract/v1/toolchains/proposal/protocol.md#stable-failure-mapping) |
+| [Provider backend negotiation](../../contract/v1/toolchains/README.md#provider-backend-negotiation) | `litheToolchains` negotiation (`experimental.litheToolchains` in `initialize`), `lsp.toolchainRequest`, timeouts |
+| [Error replies](../../contract/v1/toolchains/README.md#error-replies) | The error reply format and the numeric codes of the 11 stable failure codes |
 
 ### Examples and cases
 
@@ -265,13 +262,8 @@ A provider may use these codes in JSON-RPC errors, and `decodeReply` checks them
 | --- | --- |
 | [`toolchains/tool-definition.plugin.json`](../../contract/v1/fixtures/toolchains/tool-definition.plugin.json) | A production-shape tool definition: `java` with 8 candidates (project and global settings, project and global toolchain requests, `JAVA_HOME` on macOS/Linux and on Windows, the `java` command, installed toolchains), discovering `*.jdk` in the macOS `JavaVirtualMachines` directories |
 | [`toolchains/toolchain-provider.plugin.json`](../../contract/v1/fixtures/toolchains/toolchain-provider.plugin.json) | A production-shape provider: `mise` for `java`, `node`, `maven`, `pnpm` and `go`, watching 6 files (`.tool-versions` with the compatible reader), with a packaged executable backend |
-| [`toolchains/proposal/java-tool-definition.json`](../../contract/v1/fixtures/toolchains/proposal/java-tool-definition.json), [`mise-provider.json`](../../contract/v1/fixtures/toolchains/proposal/mise-provider.json) | Proposal-shape definition (with one consumer) and provider |
-| [`toolchains/proposal/local.json`](../../contract/v1/fixtures/toolchains/proposal/local.json) | A `local.json` with `pins` |
-| [`toolchains/proposal/manifest-rejections.json`](../../contract/v1/fixtures/toolchains/proposal/manifest-rejections.json) | 15 manifest refusals: a missing permission, an export replacing `PATH`, a `PATH` prefix leaving the home, an unbounded glob, a probe with a script argument, a community plugin claiming a short ID, a later definition replacing an owner, and more |
-| [`toolchains/proposal/query-cases.json`](../../contract/v1/fixtures/toolchains/proposal/query-cases.json) | 13 query cases (an unmet requirement, a home inside the workspace, a late reply after cancellation, timeout versus cancellation, a watched file change requerying every provider, and more) and 11 error replies |
-| [`toolchains/proposal/resolution-cases.json`](../../contract/v1/fixtures/toolchains/proposal/resolution-cases.json) | 13 selection cases (component-wise pin inheritance, an unusable pin without fallback, conflicting globals falling back to the login shell, numeric version comparison, equal highest versions needing a choice, and more) and 3 invalid `local.json` documents |
 
-Core's acceptance tests are [`toolchain_definitions.rs`](https://github.com/1lck/Lithe-IDEA/blob/preview/rust/lithe-core/src/tests/toolchain_definitions.rs) and its siblings `toolchain_pins.rs`, `toolchain_queries.rs` and `toolchain_resolution.rs` in the main repository.
+Core's acceptance tests are [`toolchain_definitions.rs`](https://github.com/1lck/Lithe-IDEA/blob/preview/rust/lithe-core/src/tests/toolchain_definitions.rs) and its siblings `toolchain_pins.rs`, `toolchain_queries.rs` and `toolchain_resolution.rs` in the main repository. The pin document, query exchange and one error reply per stable failure code that those three share are inline in [`toolchain_vectors.rs`](https://github.com/1lck/Lithe-IDEA/blob/preview/rust/lithe-core/src/tests/toolchain_vectors.rs).
 
 ### Related guides
 
